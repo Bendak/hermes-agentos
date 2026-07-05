@@ -1,7 +1,7 @@
 import os
 from contextlib import suppress
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -59,6 +59,38 @@ async def get_agent_health(profile_id: str) -> dict:
         "process_alive": alive,
         "pid": profile.get("pid"),
     }
+
+
+# ── Sessions endpoints ───────────────────────────────────────────
+
+from backend.sessions import list_sessions, get_session, search_sessions_fts  # noqa: E402
+
+
+@app.get("/api/sessions")
+async def sessions_list(
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None),
+    source: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+) -> dict:
+    return await list_sessions(limit=limit, offset=offset, search=search, source=source, model=model)
+
+
+@app.get("/api/sessions/search")
+async def sessions_search(
+    q: str = Query(min_length=1),
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[dict]:
+    return await search_sessions_fts(query=q, limit=limit)
+
+
+@app.get("/api/sessions/{session_id}")
+async def sessions_detail(session_id: str) -> dict:
+    detail = await get_session(session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return detail
 
 
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
