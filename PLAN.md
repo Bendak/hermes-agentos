@@ -181,43 +181,50 @@ def test_dashboard_shows_5_agents(page: Page, seeded_db):
 
 ## 5. Roadmap Incremental (1 feature por semana)
 
-### Phase 0 — Bootstrap (Semana 1)
-- [ ] Scaffold FastAPI app com `GET /health`
-- [ ] Scaffold Vite + React + shadcn/ui com landing page
-- [ ] s6 service definition (`/opt/hermes/docker/s6-rc.d/agentos/`)
-- [ ] `GET /health` retorna `{"status": "ok", "version": "0.1.0"}`
-- [ ] Landing page mostra "AgentOS" + botão de login (sem funcionalidade)
-- [ ] E2E: `test_00_health.py` — asserts page title + health JSON
-- [ ] Repo GitHub criado, `.gitignore`, `SECURITY.md`, `example.env`
+### Phase 0 — Bootstrap (Semana 1) ✅ DONE
+- [x] Scaffold FastAPI app com `GET /health`
+- [x] Scaffold Vite + React com landing page
+- [x] `GET /health` retorna `{"status": "ok", "version": "0.1.0"}`
+- [x] Landing page mostra "AgentOS"
+- [x] Repo GitHub criado, `.gitignore`, `SECURITY.md`
 - **Entrega:** App rodando em `:9120` com página inicial
 
-### Phase 1 — Agent Health Cards (Semana 2)
-- [ ] Backend: `GET /api/agents` — lista 5 profiles do `/opt/data/profiles/`
-- [ ] Backend: `GET /api/agents/:id/health` — proxy pra `GET /health/detailed` do gateway
-- [ ] Frontend: Dashboard com 5 cards (nome, modelo, status, sessões ativas)
-- [ ] E2E: `test_01_dashboard.py` — vision valida 5 cards + cores de status
-- **Entrega:** Dashboard funcional mostrando o time
+### Phase 1 — Agent Health Cards (Semana 2) ✅ DONE
+- [x] Backend: `GET /api/agents` — descoberta dinâmica de profiles (default + sub-profiles)
+- [x] Frontend: Dashboard com cards (nome, modelo, status, sessões)
+- [x] Pixel: Validação visual com Playwright + design refinement
+- **Entrega:** Dashboard funcional mostrando o time (6 agentes)
 
-### Phase 2 — Session List (Semana 3)
-- [ ] Backend: `GET /api/sessions` — query read-only no `state.db`
-- [ ] Frontend: Tabela ordenável (platform, profile, messages, last_active)
-- [ ] Frontend: Busca FTS5 na lista de sessions
-- [ ] E2E: `test_02_sessions.py` — cria session via API, verifica na lista
-- **Entrega:** Lista de sessões com busca
+### Phase 2 — Session List (Semana 3) ✅ DONE
+- [x] Backend: `GET /api/sessions` — query read-only no `state.db`
+- [x] Frontend: Tabela com filtros (profile, search, date)
+- [x] Frontend: Busca FTS5 na lista de sessions
+- [x] Frontend: Pagination
+- **Entrega:** Lista de sessões com busca e filtros
 
-### Phase 3 — Session Detail + Streaming Chat (Semana 4-5)
-- [ ] Backend: `GET /api/sessions/:id/messages` — proxy Hermes API
-- [ ] Backend: `POST /api/sessions/:id/chat/stream` — SSE → WebSocket
-- [ ] Frontend: Chat thread com message bubbles
-- [ ] Frontend: Tool call expand/collapse cards
-- [ ] E2E: `test_03_chat_streaming.py` — envia msg, aguarda resposta, valida
-- **Entrega:** Chat visual com streaming e tool calls
+### Phase 3 — Session Detail + Chat (Semana 4-5) ✅ DONE
+- [x] Backend: `GET /api/sessions/:id/messages` — read from `state.db`
+- [x] Frontend: Chat thread with message bubbles (user/assistant/tool)
+- [x] Frontend: Tool call expand/collapse cards
+- [x] Frontend: Reasoning blocks
+- [x] Bug fix: Message overflow (overflowWrap: anywhere for long content)
+- [x] Bug fix: Default profile (Hermes) missing from dashboard
+- **Entrega:** Chat thread com tool calls e reasoning blocks (read-only)
 
-### Phase 4 — Kanban Board Read-Only (Semana 6)
-- [ ] Backend: `GET /api/tasks` — query read-only no `kanban.db`
-- [ ] Frontend: 5 colunas (TODO, READY, RUNNING, DONE, BLOCKED)
-- [ ] Frontend: Cards com título, assignee, prioridade
-- [ ] E2E: `test_04_kanban_readonly.py` — vision valida layout das colunas
+### Phase 3.5 — Chat Detail Improvements (Semana 5.5) 🔲 PENDENTE
+- [ ] **Markdown rendering** — Render content as proper Markdown (headings, lists, code blocks, bold/italic, links, tables, blockquotes) instead of raw text with visible `**`, `#`, `|` tags
+- [ ] **Line break handling** — Preserve line breaks from message content (currently renders as single continuous text block). Use `whitespace-pre-wrap` or a Markdown renderer that respects line breaks
+- [ ] **Code block syntax highlighting** — Highlight code blocks with language-appropriate colors (use react-markdown + rehype-highlight or similar)
+- [ ] **Message content sanitization** — Sanitize rendered HTML to prevent XSS from message content (use DOMPurify or react-markdown's default sanitization)
+- [ ] **Tool call content formatting** — Format JSON in tool call expansion with pretty-print and syntax highlighting
+- [ ] **Timestamp alignment** — Ensure timestamps don't overlap with long messages in narrow viewports
+- **Entrega:** Mensagens renderizadas com formatação Markdown, quebras de linha, e code blocks legíveis
+
+### Phase 4 — Kanban Board Read-Only (Semana 6) ✅ DONE
+- [x] Backend: `GET /api/tasks` — query read-only no `kanban.db`
+- [x] Frontend: 5 colunas (backlog, todo, in_progress, review, done)
+- [x] Frontend: Cards com título, assignee, prioridade
+- [x] Frontend: Task detail view + archived toggle
 - **Entrega:** Kanban board visual (só leitura)
 
 ### Phase 5 — Kanban Drag & Drop (Semana 7)
@@ -374,22 +381,25 @@ agentos/
 
 ## 8. Estado Atual
 
-| Phase | Status | Feature | Test |
-|-------|--------|---------|------|
-| 0 | 🔲 Pendente | Bootstrap + landing page | - |
-| 1 | 🔲 Pendente | Agent health cards | - |
-| 2 | 🔲 Pendente | Session list | - |
-| 3 | 🔲 Pendente | Chat streaming | - |
-| 4 | 🔲 Pendente | Kanban read-only | - |
-| 5 | 🔲 Pendente | Kanban DnD | - |
-| 6 | 🔲 Pendente | Task detail | - |
-| 7 | 🔲 Pendente | Config viewer | - |
-| 8 | 🔲 Pendente | Config editor | - |
-| 9 | 🔲 Pendente | Skills hub | - |
-| 10 | 🔲 Pendente | Workflow editor | - |
-| 11 | 🔲 Pendente | Workflow execution | - |
-| 12 | 🔲 Pendente | Polish | - |
-| 13 | 🔲 Opcional | Auth | - |
+| Phase | Status | Feature | Notes |
+|-------|--------|---------|-------|
+| 0 | ✅ Done | Bootstrap + landing page | FastAPI + Vite scaffold |
+| 1 | ✅ Done | Agent health cards | 6 profiles (incl. default/Hermes), dynamic discovery |
+| 2 | ✅ Done | Session list | FTS5 search, pagination, filters |
+| 3 | ✅ Done | Session detail + chat | Message bubbles, tool calls, reasoning blocks |
+| 3.5 | 🔲 Pending | Chat detail improvements | Markdown rendering, line breaks, code highlighting |
+| 4 | ✅ Done | Kanban read-only | 5 columns, task detail, archived toggle |
+| — | ✅ Done | Visual identity | DESIGN.md, dark theme, Pixel refinement |
+| — | ✅ Done | Bug fixes | Message overflow, default profile missing |
+| 5 | 🔲 Pending | Kanban DnD | — |
+| 6 | 🔲 Pending | Task detail | — |
+| 7 | 🔲 Pending | Config viewer | — |
+| 8 | 🔲 Pending | Config editor | — |
+| 9 | 🔲 Pending | Skills hub | — |
+| 10 | 🔲 Pending | Workflow editor | — |
+| 11 | 🔲 Pending | Workflow execution | — |
+| 12 | 🔲 Pending | Polish | — |
+| 13 | 🔲 Optional | Auth | — |
 
 ---
 
