@@ -2,7 +2,12 @@
 *.db
 *.db-shm
 *.db-wal
-__pycache__/
+# Temp helper scripts (used for git push from inside container)
+commit_*.py
+push_helper.py
+fix.py
+
+# Dependencies
 node_modules/
 dist/
 .pytest_cache/
