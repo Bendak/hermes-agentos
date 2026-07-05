@@ -107,6 +107,31 @@ async def session_messages(
     return await get_session_messages(session_id, limit=limit, offset=offset)
 
 
+# ── Tasks endpoints ──────────────────────────────────────────────
+
+from backend.tasks import list_tasks, get_task  # noqa: E402
+
+
+@app.get("/api/tasks")
+async def tasks_list(
+    status: str | None = Query(default=None),
+    assignee: str | None = Query(default=None),
+    include_archived: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=500),
+) -> list[dict]:
+    return await list_tasks(
+        status=status, assignee=assignee, include_archived=include_archived, limit=limit
+    )
+
+
+@app.get("/api/tasks/{task_id}")
+async def tasks_detail(task_id: str) -> dict:
+    detail = await get_task(task_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return detail
+
+
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 index_html = os.path.join(dist_path, "index.html")
 
