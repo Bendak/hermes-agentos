@@ -87,6 +87,18 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Ambient background glow for mission-control feel */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 600px 300px at 10% -5%, rgba(0, 229, 185, 0.04), transparent 70%),
+    radial-gradient(ellipse 500px 400px at 90% -10%, rgba(245, 184, 0, 0.03), transparent 70%);
+}
+
 code, pre, kbd, .font-mono {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
