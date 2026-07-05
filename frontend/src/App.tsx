@@ -131,22 +131,36 @@ interface TaskDetail {
 /* ── NavBar ────────────────────────────────────────── */
 
 function NavBar() {
+  const navLink = (to: string, label: string) => {
+    const active = location.pathname === to || (to !== '/' && location.pathname.startsWith(to))
+    return (
+      <Link
+        to={to}
+        className={`relative px-1 py-1 text-sm font-medium transition ${
+          active ? 'text-accent' : 'text-text-secondary hover:text-text-primary'
+        }`}
+      >
+        {label}
+        {active && (
+          <span className="absolute bottom-[-13px] left-0 right-0 h-[2px] bg-accent rounded-full shadow-glow" />
+        )}
+      </Link>
+    )
+  }
+
   return (
-    <nav className="bg-bg-elevated border-b border-border px-6 py-3">
+    <nav className="bg-bg-elevated/80 backdrop-blur-md border-b border-border px-6 py-3 sticky top-0 z-50">
       <div className="mx-auto max-w-7xl flex items-center gap-6">
-        <Link to="/" className="text-text-primary font-bold text-lg">
-          AgentOS
+        <Link to="/" className="flex items-center gap-2 text-text-primary font-bold text-lg tracking-tight group">
+          <span className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-accent/10 border border-accent/20">
+            <span className="w-2 h-2 rounded-full bg-accent shadow-glow animate-pulse" />
+          </span>
+          <span>AgentOS</span>
         </Link>
-        <div className="flex items-center gap-4 text-sm">
-          <Link to="/" className="text-text-secondary hover:text-text-primary transition">
-            Dashboard
-          </Link>
-          <Link to="/sessions" className="text-text-secondary hover:text-text-primary transition">
-            Sessions
-          </Link>
-          <Link to="/tasks" className="text-text-secondary hover:text-text-primary transition">
-            Tasks
-          </Link>
+        <div className="flex items-center gap-5 ml-2">
+          {navLink('/', 'Dashboard')}
+          {navLink('/sessions', 'Sessions')}
+          {navLink('/tasks', 'Tasks')}
         </div>
       </div>
     </nav>
@@ -193,17 +207,36 @@ function DashboardPage() {
     },
   })
 
+  const activeCount = data?.filter((a) => a.process_alive).length ?? 0
+  const totalSessions = data?.reduce((sum, a) => sum + a.sessions, 0) ?? 0
+
   return (
     <div className="min-h-screen bg-bg-base text-text-secondary">
       <NavBar />
-      <header className="px-6 py-6">
+      <header className="px-6 pt-10 pb-6">
         <div className="mx-auto max-w-7xl">
-          <h1 className="text-h1 font-bold text-text-primary">AgentOS</h1>
-          <p className="mt-1 text-body-sm text-text-secondary">Control plane for Hermes Agent</p>
+          <div className="flex items-end justify-between">
+            <div>
+              <h1 className="text-display font-bold text-text-primary tracking-tight">AgentOS</h1>
+              <p className="mt-2 text-body text-text-secondary max-w-lg">
+                Control plane for Hermes Agent
+              </p>
+            </div>
+            <div className="flex items-center gap-6">
+              <div className="text-right">
+                <p className="text-caption text-text-tertiary uppercase tracking-widest mb-0.5">Active Agents</p>
+                <p className="text-h2 font-bold text-accent tabular-nums">{activeCount}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-caption text-text-tertiary uppercase tracking-widest mb-0.5">Sessions</p>
+                <p className="text-h2 font-bold text-text-primary tabular-nums">{totalSessions}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-6 py-8">
+      <main className="mx-auto max-w-7xl px-6 pb-12">
         {isLoading && (
           <div className="flex items-center justify-center py-20">
             <p className="text-text-secondary">Loading agents…</p>
@@ -239,23 +272,64 @@ function HealthPage() {
       .catch((e) => setError(e.message))
   }, [])
 
+  const statusColor = healthData?.status === 'ok' ? 'text-semantic-success' : 'text-semantic-error'
+  const statusBg = healthData?.status === 'ok' ? 'bg-semantic-success/10' : 'bg-semantic-error/10'
+  const statusBorder = healthData?.status === 'ok' ? 'border-semantic-success/30' : 'border-semantic-error/30'
+  const statusDot = healthData?.status === 'ok' ? 'bg-semantic-success' : 'bg-semantic-error'
+
   return (
     <div className="min-h-screen flex flex-col bg-bg-base text-text-secondary">
       <NavBar />
-      <div className="flex-1 flex flex-col items-center justify-center">
-        <h1 className="text-h1 font-bold text-text-primary mb-6">System Status</h1>
-        {error && <p className="text-red-400">Error: {error}</p>}
-        {healthData ? (
-          <pre className="bg-surface p-4 rounded-lg text-text-primary">
-            {JSON.stringify(healthData, null, 2)}
-          </pre>
-        ) : (
-          <p className="text-text-secondary">Loading…</p>
-        )}
-        <div className="mt-8">
-          <Link to="/" className="text-accent underline">
-            ← Back to dashboard
-          </Link>
+      <div className="flex-1 flex flex-col items-center justify-center px-6">
+        <div className="w-full max-w-md">
+          <div className={`rounded-xl border ${statusBorder} ${statusBg} p-6 mb-6 text-center`}>
+            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-bg-elevated border border-border mb-4">
+              <span className={`inline-block w-3 h-3 rounded-full ${statusDot} shadow-md`} />
+            </div>
+            <h1 className="text-h2 font-bold text-text-primary mb-1">System Status</h1>
+            <p className="text-body text-text-secondary">
+              {healthData ? (
+                <span className="inline-flex items-center gap-2">
+                  <span className={`inline-block w-2 h-2 rounded-full ${statusDot}`} />
+                  <span className={`font-medium ${statusColor}`}>{healthData.status.toUpperCase()}</span>
+                </span>
+              ) : (
+                'Checking…'
+              )}
+            </p>
+          </div>
+
+          {error && <p className="text-semantic-error text-sm text-center mb-4">Error: {error}</p>}
+
+          {healthData && (
+            <div className="rounded-xl border border-border bg-surface/30 p-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-caption text-text-tertiary uppercase tracking-wider">Status</span>
+                <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${statusColor}`}>
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${statusDot}`} />
+                  {healthData.status}
+                </span>
+              </div>
+              <div className="h-px bg-border" />
+              <div className="flex items-center justify-between">
+                <span className="text-caption text-text-tertiary uppercase tracking-wider">Version</span>
+                <span className="font-mono text-sm text-text-primary">{healthData.version}</span>
+              </div>
+            </div>
+          )}
+
+          {!healthData && !error && (
+            <p className="text-text-secondary text-center">Loading…</p>
+          )}
+
+          <div className="mt-8 text-center">
+            <Link
+              to="/"
+              className="inline-flex items-center gap-1 text-sm text-accent hover:text-accent-hover transition"
+            >
+              ← Back to dashboard
+            </Link>
+          </div>
         </div>
       </div>
     </div>
@@ -388,72 +462,77 @@ function SessionsPage() {
   return (
     <div className="min-h-screen bg-bg-base text-text-secondary">
       <NavBar />
-      <header className="px-6 pt-8 pb-4">
-        <div className="mx-auto max-w-7xl">
-          <h1 className="text-h2 font-bold text-text-primary">Sessions</h1>
-          <p className="text-body-sm text-text-secondary mt-1">Conversation history</p>
+      <header className="px-6 pt-8 pb-4 border-b border-border">
+        <div className="mx-auto max-w-7xl flex items-end justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-1">
+              <h1 className="text-h2 font-bold text-text-primary">Sessions</h1>
+              {data && (
+                <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-surface text-text-secondary border border-border">
+                  {data.total}
+                </span>
+              )}
+            </div>
+            <p className="text-body text-text-secondary">Conversation history</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder="Search by title..."
+              value={rawSearch}
+              onChange={(e) => {
+                setRawSearch(e.target.value)
+                const params = new URLSearchParams(searchParams)
+                params.delete('offset')
+                setSearchParams(params)
+              }}
+              className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent w-full sm:w-72"
+            />
+            <select
+              value={source}
+              onChange={(e) => {
+                const params = new URLSearchParams(searchParams)
+                if (e.target.value) params.set('source', e.target.value)
+                else params.delete('source')
+                params.delete('offset')
+                setSearchParams(params)
+              }}
+              className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              <option value="">All sources</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="discord">Discord</option>
+              <option value="telegram">Telegram</option>
+              <option value="api_server">API</option>
+              <option value="webhook">Webhook</option>
+              <option value="tui">TUI</option>
+              <option value="cli">CLI</option>
+              <option value="cron">Cron</option>
+              <option value="homeassistant">Home Assistant</option>
+              <option value="subagent">Subagent</option>
+            </select>
+
+            <select
+              value={model}
+              onChange={(e) => {
+                const params = new URLSearchParams(searchParams)
+                if (e.target.value) params.set('model', e.target.value)
+                else params.delete('model')
+                params.delete('offset')
+                setSearchParams(params)
+              }}
+              className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              <option value="">All models</option>
+              {modelList?.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-6 pb-12">
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-3 mb-6">
-          <input
-            type="text"
-            placeholder="Search by title..."
-            value={rawSearch}
-            onChange={(e) => {
-              setRawSearch(e.target.value)
-              // Reset offset on search change
-              const params = new URLSearchParams(searchParams)
-              params.delete('offset')
-              setSearchParams(params)
-            }}
-            className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent w-full sm:w-72"
-          />
-          <select
-            value={source}
-            onChange={(e) => {
-              const params = new URLSearchParams(searchParams)
-              if (e.target.value) params.set('source', e.target.value)
-              else params.delete('source')
-              params.delete('offset')
-              setSearchParams(params)
-            }}
-            className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
-          >
-            <option value="">All (source)</option>
-            <option value="whatsapp">WhatsApp</option>
-            <option value="discord">Discord</option>
-            <option value="telegram">Telegram</option>
-            <option value="api_server">API</option>
-            <option value="webhook">Webhook</option>
-            <option value="tui">TUI</option>
-            <option value="cli">CLI</option>
-            <option value="cron">Cron</option>
-            <option value="homeassistant">Home Assistant</option>
-            <option value="subagent">Subagent</option>
-          </select>
-
-          <select
-            value={model}
-            onChange={(e) => {
-              const params = new URLSearchParams(searchParams)
-              if (e.target.value) params.set('model', e.target.value)
-              else params.delete('model')
-              params.delete('offset')
-              setSearchParams(params)
-            }}
-            className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
-          >
-            <option value="">All (model)</option>
-            {modelList?.map((m) => (
-              <option key={m} value={m}>{m}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* Table */}
+      <main className="mx-auto max-w-7xl px-6 py-8">
         {isLoading && <p className="text-text-secondary">Loading sessions…</p>}
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 mb-4">
@@ -462,16 +541,16 @@ function SessionsPage() {
         )}
         {data && (
           <>
-            <div className="overflow-x-auto rounded-lg border border-border">
+            <div className="overflow-x-auto rounded-xl border border-border">
               <table className="w-full text-sm">
                 <thead className="bg-bg-elevated text-text-secondary text-left">
                   <tr>
-                    <th className="px-4 py-3 font-medium">Title</th>
-                    <th className="px-4 py-3 font-medium">Source</th>
-                    <th className="px-4 py-3 font-medium">Model</th>
-                    <th className="px-4 py-3 font-medium text-right">Messages</th>
-                    <th className="px-4 py-3 font-medium">Started</th>
-                    <th className="px-4 py-3 font-medium">Duration</th>
+                    <th className="px-4 py-3 font-medium text-text-tertiary">Title</th>
+                    <th className="px-4 py-3 font-medium text-text-tertiary">Source</th>
+                    <th className="px-4 py-3 font-medium text-text-tertiary">Model</th>
+                    <th className="px-4 py-3 font-medium text-text-tertiary text-right">Messages</th>
+                    <th className="px-4 py-3 font-medium text-text-tertiary">Started</th>
+                    <th className="px-4 py-3 font-medium text-text-tertiary">Duration</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -481,7 +560,7 @@ function SessionsPage() {
                       onClick={() => navigate(`/sessions/${encodeURIComponent(s.id)}`)}
                       className="cursor-pointer hover:bg-surface/40 transition"
                     >
-                      <td className="px-4 py-3 text-text-primary truncate max-w-xs">
+                      <td className="px-4 py-3 text-text-primary truncate max-w-xs font-medium">
                         {s.title || 'Untitled'}
                       </td>
                       <td className="px-4 py-3">
@@ -490,9 +569,14 @@ function SessionsPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3 font-mono text-mono-sm text-text-secondary">{s.model}</td>
-                      <td className="px-4 py-3 text-right tabular-nums">{s.message_count}</td>
-                      <td className="px-4 py-3 tabular-nums">{formatStartedAt(s.started_at)}</td>
-                      <td className="px-4 py-3 tabular-nums">{formatDuration(s.duration_seconds)}</td>
+                      <td className="px-4 py-3 text-right tabular-nums text-text-secondary">{s.message_count}</td>
+                      <td className="px-4 py-3 tabular-nums text-text-secondary">{formatStartedAt(s.started_at)}</td>
+                      <td className="px-4 py-3 tabular-nums">
+                        <span className={`inline-flex items-center gap-1.5 ${s.duration_seconds === null ? 'text-semantic-warning' : 'text-text-secondary'}`}>
+                          {s.duration_seconds === null && <span className="inline-block w-1.5 h-1.5 rounded-full bg-semantic-warning animate-pulse" />}
+                          {formatDuration(s.duration_seconds)}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                   {data.sessions.length === 0 && (
@@ -592,8 +676,11 @@ function ToolMessage({ msg }: { msg: MessageItem }) {
 
 function UserMessage({ msg }: { msg: MessageItem }) {
   return (
-    <div className="flex flex-col items-end my-2 max-w-[80%] self-end">
-      <div className="bg-accent-subtle rounded-2xl rounded-br-sm px-4 py-2 text-sm text-accent">
+    <div className="flex flex-col items-end my-2 max-w-[80%] self-end min-w-0">
+      <div
+        className="bg-accent-subtle rounded-2xl rounded-br-sm px-4 py-2 text-sm text-accent"
+        style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+      >
         {msg.content || ''}
       </div>
       <span className="text-caption text-text-tertiary mt-1">{formatMessageTime(msg.timestamp)}</span>
@@ -603,9 +690,12 @@ function UserMessage({ msg }: { msg: MessageItem }) {
 
 function AssistantMessage({ msg }: { msg: MessageItem }) {
   return (
-    <div className="flex flex-col items-start my-2 max-w-[80%]">
+    <div className="flex flex-col items-start my-2 max-w-[80%] min-w-0">
       {msg.reasoning_content && <ReasoningBlock content={msg.reasoning_content} />}
-      <div className="bg-surface/60 rounded-2xl rounded-bl-sm px-4 py-2 text-sm text-text-primary">
+      <div
+        className="bg-surface/60 rounded-2xl rounded-bl-sm px-4 py-2 text-sm text-text-primary"
+        style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
+      >
         {msg.content || ''}
       </div>
       <span className="text-caption text-text-tertiary mt-1">{formatMessageTime(msg.timestamp)}</span>
