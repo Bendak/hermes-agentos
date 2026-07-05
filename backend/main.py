@@ -1,8 +1,9 @@
 import os
 from contextlib import suppress
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.agents import get_profiles, get_profile_detail, check_process_alive
@@ -107,6 +108,25 @@ async def session_messages(
 
 
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
-with suppress(RuntimeError):
-    if os.path.isdir(dist_path):
-        app.mount("/", StaticFiles(directory=dist_path, html=True), name="static")
+index_html = os.path.join(dist_path, "index.html")
+
+
+@app.get("/{full_path:path}")
+async def spa_fallback(full_path: str):
+    """Serve static assets or index.html for SPA routes.
+
+    Handles browser refreshes on React Router paths (/sessions, /health, etc.)
+    which would otherwise 404 since the backend has no such routes.
+    """
+    # API routes get proper 404 JSON
+    if full_path.startswith("api/"):
+        raise HTTPException(status_code=404, detail="Not found")
+    # Health endpoint is handled by the explicit route above
+    # Try to serve a real file from dist/
+    candidate = os.path.join(dist_path, full_path)
+    if full_path and os.path.isfile(candidate):
+        return FileResponse(candidate)
+    # Fallback to index.html for SPA routing
+    if os.path.isfile(index_html):
+        return FileResponse(index_html)
+    raise HTTPException(status_code=404, detail="Frontend not built")
