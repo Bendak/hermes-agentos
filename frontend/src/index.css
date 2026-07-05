@@ -1,16 +1,120 @@
+/* ── Fonts ─────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ── Dark Theme (Default) ──────────────────────────── */
 :root {
-  --bg: #0b0c10;
-  --surface: #1f2833;
-  --text: #c5c6c7;
-  --accent: #45a29e;
+  /* Background Layers */
+  --bg-base: #0B1120;
+  --bg-elevated: #0F172A;
+  --bg-overlay: #131D33;
+
+  /* Surface Layers */
+  --surface: #1A2744;
+  --surface-hover: #233456;
+  --surface-active: #2C3F68;
+
+  /* Borders */
+  --border: #253656;
+  --border-strong: #3A5175;
+
+  /* Text */
+  --text-primary: #F0F4FA;
+  --text-secondary: #94A3B8;
+  --text-tertiary: #64748B;
+  --text-inverse: #0B1120;
+
+  /* Accents */
+  --accent-primary: #00E5B9;
+  --accent-primary-hover: #00FFC8;
+  --accent-primary-subtle: rgba(0, 229, 185, 0.10);
+  --accent-secondary: #F5B800;
+  --accent-secondary-hover: #FFCC33;
+  --accent-secondary-subtle: rgba(245, 184, 0, 0.10);
+  --accent-tertiary: #7C8CFF;
+
+  /* Semantic */
+  --semantic-success: #22C55E;
+  --semantic-success-subtle: rgba(34, 197, 94, 0.10);
+  --semantic-warning: #F59E0B;
+  --semantic-warning-subtle: rgba(245, 158, 11, 0.10);
+  --semantic-error: #EF4444;
+  --semantic-error-subtle: rgba(239, 68, 68, 0.10);
+  --semantic-info: #38BDF8;
+  --semantic-info-subtle: rgba(56, 189, 248, 0.10);
 }
 
+/* ── Light Theme (Optional Toggle) ───────────────── */
+html.light {
+  --bg-base: #F8FAFC;
+  --bg-elevated: #FFFFFF;
+  --bg-overlay: #FFFFFF;
+  --surface: #F1F5F9;
+  --surface-hover: #E2E8F0;
+  --surface-active: #CBD5E1;
+  --border: #E2E8F0;
+  --border-strong: #94A3B8;
+  --text-primary: #0F172A;
+  --text-secondary: #475569;
+  --text-tertiary: #94A3B8;
+  --text-inverse: #FFFFFF;
+  --accent-primary: #059669;
+  --accent-primary-hover: #047857;
+  --accent-primary-subtle: rgba(5, 150, 105, 0.10);
+  --accent-secondary: #D97706;
+  --accent-secondary-hover: #B45309;
+  --accent-secondary-subtle: rgba(217, 119, 6, 0.10);
+  --accent-tertiary: #4F46E5;
+  --semantic-success: #22C55E;
+  --semantic-success-subtle: rgba(34, 197, 94, 0.10);
+  --semantic-warning: #F59E0B;
+  --semantic-warning-subtle: rgba(245, 158, 11, 0.10);
+  --semantic-error: #EF4444;
+  --semantic-error-subtle: rgba(239, 68, 68, 0.10);
+  --semantic-info: #38BDF8;
+  --semantic-info-subtle: rgba(56, 189, 248, 0.10);
+}
+
+/* ── Base Styles ──────────────────────────────────── */
 body {
-  background-color: var(--bg);
-  color: var(--text);
-  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--bg-base);
+  color: var(--text-primary);
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code, pre, kbd, .font-mono {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+/* Selection */
+::selection {
+  background-color: var(--accent-primary-subtle);
+  color: var(--accent-primary);
+}
+
+/* Scrollbars (WebKit) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-base);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* Focus Ring (global) */
+*:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: 2px;
 }

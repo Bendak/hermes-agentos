@@ -132,19 +132,19 @@ interface TaskDetail {
 
 function NavBar() {
   return (
-    <nav className="border-b border-[var(--surface)] px-6 py-3">
+    <nav className="bg-bg-elevated border-b border-border px-6 py-3">
       <div className="mx-auto max-w-7xl flex items-center gap-6">
-        <Link to="/" className="text-white font-bold text-lg">
+        <Link to="/" className="text-text-primary font-bold text-lg">
           AgentOS
         </Link>
         <div className="flex items-center gap-4 text-sm">
-          <Link to="/" className="text-[var(--text)] hover:text-white transition">
+          <Link to="/" className="text-text-secondary hover:text-text-primary transition">
             Dashboard
           </Link>
-          <Link to="/sessions" className="text-[var(--text)] hover:text-white transition">
+          <Link to="/sessions" className="text-text-secondary hover:text-text-primary transition">
             Sessions
           </Link>
-          <Link to="/tasks" className="text-[var(--text)] hover:text-white transition">
+          <Link to="/tasks" className="text-text-secondary hover:text-text-primary transition">
             Tasks
           </Link>
         </div>
@@ -158,25 +158,24 @@ function NavBar() {
 function AgentCard({ agent }: { agent: AgentProfile }) {
   const isRunning = agent.process_alive && agent.gateway_state === 'running'
   return (
-    <div className="rounded-xl border border-[var(--surface)] bg-[var(--surface)]/40 p-5 transition hover:bg-[var(--surface)]/70 hover:shadow-lg">
+    <div className="rounded-xl border border-border bg-surface/40 p-5 transition hover:bg-surface-hover/70 hover:shadow-md">
       <div className="flex items-center justify-between mb-3">
-        <h3 className="text-lg font-semibold text-white">{agent.name}</h3>
+        <h3 className="text-h4 font-semibold text-text-primary">{agent.name}</h3>
         <span
-          className="inline-block h-2 w-2 rounded-full"
-          style={{ backgroundColor: isRunning ? '#22c55e' : '#6b7280' }}
+          className={`inline-block h-2 w-2 rounded-full ${isRunning ? 'bg-semantic-success' : 'bg-text-tertiary'}`}
           title={isRunning ? 'Running' : 'Stopped'}
         />
       </div>
-      <p className="text-sm text-[var(--text)] opacity-80 mb-4">{agent.role}</p>
+      <p className="text-body-sm text-text-secondary mb-4">{agent.role}</p>
       <div className="flex items-center gap-2 mb-3">
-        <span className="inline-flex items-center rounded-md bg-[var(--bg)] px-2 py-1 text-xs font-mono text-[var(--accent)] border border-[var(--surface)]">
+        <span className="inline-flex items-center rounded-md bg-bg-base px-2 py-1 text-mono-sm text-accent border border-border">
           {agent.model}
         </span>
-        <span className="inline-flex items-center rounded-md bg-[var(--bg)] px-2 py-1 text-xs font-mono text-[var(--text)] opacity-70 border border-[var(--surface)]">
+        <span className="inline-flex items-center rounded-md bg-bg-base px-2 py-1 text-mono-sm text-text-secondary border border-border">
           {agent.provider}
         </span>
       </div>
-      <div className="flex items-center justify-between text-xs text-[var(--text)] opacity-60">
+      <div className="flex items-center justify-between text-caption text-text-tertiary">
         <span className="font-mono">PID: {agent.pid ?? '-'}</span>
         <span>Sessions: {agent.sessions}</span>
       </div>
@@ -195,19 +194,19 @@ function DashboardPage() {
   })
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+    <div className="min-h-screen bg-bg-base text-text-secondary">
       <NavBar />
       <header className="px-6 py-6">
         <div className="mx-auto max-w-7xl">
-          <h1 className="text-3xl font-bold text-white">AgentOS</h1>
-          <p className="mt-1 text-sm opacity-70">Control plane for Hermes Agent</p>
+          <h1 className="text-h1 font-bold text-text-primary">AgentOS</h1>
+          <p className="mt-1 text-body-sm text-text-secondary">Control plane for Hermes Agent</p>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
         {isLoading && (
           <div className="flex items-center justify-center py-20">
-            <p className="opacity-70">Loading agents…</p>
+            <p className="text-text-secondary">Loading agents…</p>
           </div>
         )}
         {error && (
@@ -241,20 +240,20 @@ function HealthPage() {
   }, [])
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--text)]">
+    <div className="min-h-screen flex flex-col bg-bg-base text-text-secondary">
       <NavBar />
       <div className="flex-1 flex flex-col items-center justify-center">
-        <h1 className="text-3xl font-bold mb-6">System Status</h1>
+        <h1 className="text-h1 font-bold text-text-primary mb-6">System Status</h1>
         {error && <p className="text-red-400">Error: {error}</p>}
         {healthData ? (
-          <pre className="bg-[var(--surface)] p-4 rounded-lg">
+          <pre className="bg-surface p-4 rounded-lg text-text-primary">
             {JSON.stringify(healthData, null, 2)}
           </pre>
         ) : (
-          <p>Loading…</p>
+          <p className="text-text-secondary">Loading…</p>
         )}
         <div className="mt-8">
-          <Link to="/" className="text-[var(--accent)] underline">
+          <Link to="/" className="text-accent underline">
             ← Back to dashboard
           </Link>
         </div>
@@ -296,18 +295,18 @@ function formatDuration(seconds: number | null): string {
 
 function sourceBadge(source: string) {
   const map: Record<string, string> = {
-    whatsapp: 'bg-green-600 text-white',
-    discord: 'bg-indigo-600 text-white',
-    telegram: 'bg-cyan-600 text-white',
+    whatsapp: 'bg-green-600 text-text-primary',
+    discord: 'bg-indigo-600 text-text-primary',
+    telegram: 'bg-cyan-600 text-text-primary',
     api_server: 'bg-amber-500 text-black',
-    webhook: 'bg-rose-600 text-white',
-    tui: 'bg-slate-600 text-white',
-    cli: 'bg-slate-600 text-white',
-    cron: 'bg-slate-600 text-white',
-    homeassistant: 'bg-slate-600 text-white',
-    subagent: 'bg-slate-600 text-white',
+    webhook: 'bg-rose-600 text-text-primary',
+    tui: 'bg-slate-600 text-text-primary',
+    cli: 'bg-slate-600 text-text-primary',
+    cron: 'bg-slate-600 text-text-primary',
+    homeassistant: 'bg-slate-600 text-text-primary',
+    subagent: 'bg-slate-600 text-text-primary',
   }
-  return map[source.toLowerCase()] || 'bg-slate-600 text-white'
+  return map[source.toLowerCase()] || 'bg-slate-600 text-text-primary'
 }
 
 function sourceLabel(source: string): string {
@@ -387,12 +386,12 @@ function SessionsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+    <div className="min-h-screen bg-bg-base text-text-secondary">
       <NavBar />
       <header className="px-6 pt-8 pb-4">
         <div className="mx-auto max-w-7xl">
-          <h1 className="text-2xl font-bold text-white">Sessions</h1>
-          <p className="text-sm opacity-70 mt-1">Conversation history</p>
+          <h1 className="text-h2 font-bold text-text-primary">Sessions</h1>
+          <p className="text-body-sm text-text-secondary mt-1">Conversation history</p>
         </div>
       </header>
 
@@ -410,7 +409,7 @@ function SessionsPage() {
               params.delete('offset')
               setSearchParams(params)
             }}
-            className="rounded-md bg-[var(--surface)] border border-[var(--surface)] px-3 py-2 text-sm text-white placeholder-white/40 focus:outline-none focus:ring-1 focus:ring-[var(--accent)] w-full sm:w-72"
+            className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent w-full sm:w-72"
           />
           <select
             value={source}
@@ -421,7 +420,7 @@ function SessionsPage() {
               params.delete('offset')
               setSearchParams(params)
             }}
-            className="rounded-md bg-[var(--surface)] border border-[var(--surface)] px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+            className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
           >
             <option value="">All (source)</option>
             <option value="whatsapp">WhatsApp</option>
@@ -445,7 +444,7 @@ function SessionsPage() {
               params.delete('offset')
               setSearchParams(params)
             }}
-            className="rounded-md bg-[var(--surface)] border border-[var(--surface)] px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
+            className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
           >
             <option value="">All (model)</option>
             {modelList?.map((m) => (
@@ -455,7 +454,7 @@ function SessionsPage() {
         </div>
 
         {/* Table */}
-        {isLoading && <p className="opacity-70">Loading sessions…</p>}
+        {isLoading && <p className="text-text-secondary">Loading sessions…</p>}
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 mb-4">
             Error: {(error as Error).message}
@@ -463,9 +462,9 @@ function SessionsPage() {
         )}
         {data && (
           <>
-            <div className="overflow-x-auto rounded-lg border border-[var(--surface)]">
+            <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full text-sm">
-                <thead className="bg-[var(--surface)]/60 text-left">
+                <thead className="bg-bg-elevated text-text-secondary text-left">
                   <tr>
                     <th className="px-4 py-3 font-medium">Title</th>
                     <th className="px-4 py-3 font-medium">Source</th>
@@ -475,14 +474,14 @@ function SessionsPage() {
                     <th className="px-4 py-3 font-medium">Duration</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-[var(--surface)]">
+                <tbody className="divide-y divide-border">
                   {data.sessions.map((s) => (
                     <tr
                       key={s.id}
                       onClick={() => navigate(`/sessions/${encodeURIComponent(s.id)}`)}
-                      className="cursor-pointer hover:bg-[var(--surface)]/40 transition"
+                      className="cursor-pointer hover:bg-surface/40 transition"
                     >
-                      <td className="px-4 py-3 text-white truncate max-w-xs">
+                      <td className="px-4 py-3 text-text-primary truncate max-w-xs">
                         {s.title || 'Untitled'}
                       </td>
                       <td className="px-4 py-3">
@@ -490,7 +489,7 @@ function SessionsPage() {
                           {sourceLabel(s.source)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs opacity-80">{s.model}</td>
+                      <td className="px-4 py-3 font-mono text-mono-sm text-text-secondary">{s.model}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{s.message_count}</td>
                       <td className="px-4 py-3 tabular-nums">{formatStartedAt(s.started_at)}</td>
                       <td className="px-4 py-3 tabular-nums">{formatDuration(s.duration_seconds)}</td>
@@ -498,7 +497,7 @@ function SessionsPage() {
                   ))}
                   {data.sessions.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center opacity-60">
+                      <td colSpan={6} className="px-4 py-8 text-center text-text-tertiary">
                         No sessions found.
                       </td>
                     </tr>
@@ -512,17 +511,17 @@ function SessionsPage() {
               <button
                 onClick={() => handlePage(offset - limit)}
                 disabled={offset === 0}
-                className="px-3 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--surface)] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--surface)]/80 transition"
+                className="px-3 py-1.5 rounded-md bg-surface border border-border text-text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-hover/80 transition"
               >
                 Previous
               </button>
-              <span className="opacity-70">
+              <span className="text-text-secondary">
                 Page {currentPage} of {totalPages || 1}
               </span>
               <button
                 onClick={() => handlePage(offset + limit)}
                 disabled={!data || offset + limit >= data.total}
-                className="px-3 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--surface)] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--surface)]/80 transition"
+                className="px-3 py-1.5 rounded-md bg-surface border border-border text-text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-hover/80 transition"
               >
                 Next
               </button>
@@ -553,12 +552,12 @@ function ReasoningBlock({ content }: { content: string }) {
     <div className="mb-1">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="text-xs italic opacity-50 hover:opacity-80 transition"
+        className="text-caption text-text-tertiary italic hover:text-text-secondary transition"
       >
         {expanded ? 'Hide thinking…' : 'Thinking…'}
       </button>
       {expanded && (
-        <div className="mt-1 text-xs italic opacity-60 whitespace-pre-wrap">
+        <div className="mt-1 text-caption text-text-tertiary italic whitespace-pre-wrap">
           {content}
         </div>
       )}
@@ -569,21 +568,21 @@ function ReasoningBlock({ content }: { content: string }) {
 function ToolMessage({ msg }: { msg: MessageItem }) {
   const [expanded, setExpanded] = useState(false)
   return (
-    <div className="w-full my-2 border border-[var(--surface)] rounded-lg bg-transparent">
+    <div className="w-full my-2 border border-border rounded-lg bg-bg-elevated font-mono">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-2 text-xs font-mono text-[var(--text)] hover:bg-[var(--surface)]/40 transition"
+        className="w-full flex items-center justify-between px-3 py-2 text-mono-sm text-text-secondary hover:bg-surface-hover/40 transition"
       >
         <span className="flex items-center gap-2">
-          <span className="inline-block rounded bg-[var(--surface)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+          <span className="inline-block rounded bg-surface px-1.5 py-0.5 text-overline uppercase">
             Tool
           </span>
-          <span className="opacity-80">{msg.tool_name || 'unknown'}</span>
+          <span className="text-mono-sm text-text-secondary">{msg.tool_name || 'unknown'}</span>
         </span>
-        <span className="opacity-50">{expanded ? '▼' : '▶'}</span>
+        <span className="text-text-tertiary">{expanded ? '▼' : '▶'}</span>
       </button>
       {expanded && (
-        <pre className="px-3 py-2 text-xs font-mono text-[var(--text)] overflow-auto max-h-96 whitespace-pre-wrap border-t border-[var(--surface)]">
+        <pre className="px-3 py-2 text-mono-sm text-text-secondary overflow-auto max-h-96 whitespace-pre-wrap border-t border-border">
           {msg.content || ''}
         </pre>
       )}
@@ -594,10 +593,10 @@ function ToolMessage({ msg }: { msg: MessageItem }) {
 function UserMessage({ msg }: { msg: MessageItem }) {
   return (
     <div className="flex flex-col items-end my-2 max-w-[80%] self-end">
-      <div className="bg-[var(--accent)]/20 rounded-2xl rounded-br-sm px-4 py-2 text-sm text-white">
+      <div className="bg-accent-subtle rounded-2xl rounded-br-sm px-4 py-2 text-sm text-accent">
         {msg.content || ''}
       </div>
-      <span className="text-[10px] opacity-40 mt-1">{formatMessageTime(msg.timestamp)}</span>
+      <span className="text-caption text-text-tertiary mt-1">{formatMessageTime(msg.timestamp)}</span>
     </div>
   )
 }
@@ -606,10 +605,10 @@ function AssistantMessage({ msg }: { msg: MessageItem }) {
   return (
     <div className="flex flex-col items-start my-2 max-w-[80%]">
       {msg.reasoning_content && <ReasoningBlock content={msg.reasoning_content} />}
-      <div className="bg-[var(--surface)]/60 rounded-2xl rounded-bl-sm px-4 py-2 text-sm text-white">
+      <div className="bg-surface/60 rounded-2xl rounded-bl-sm px-4 py-2 text-sm text-text-primary">
         {msg.content || ''}
       </div>
-      <span className="text-[10px] opacity-40 mt-1">{formatMessageTime(msg.timestamp)}</span>
+      <span className="text-caption text-text-tertiary mt-1">{formatMessageTime(msg.timestamp)}</span>
     </div>
   )
 }
@@ -648,9 +647,9 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
     hasScrolledRef.current = false
   }
 
-  if (isLoading) return <p className="opacity-70 py-6">Loading messages…</p>
+  if (isLoading) return <p className="text-text-secondary py-6">Loading messages…</p>
   if (error) return <p className="text-red-400 text-sm py-4">Error: {(error as Error).message}</p>
-  if (!data || data.messages.length === 0) return <p className="opacity-60 py-6">No messages in this session</p>
+  if (!data || data.messages.length === 0) return <p className="text-text-tertiary py-6">No messages in this session</p>
 
   return (
     <div className="flex flex-col">
@@ -658,7 +657,7 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
         <div className="flex justify-center py-3">
           <button
             onClick={handleLoadMore}
-            className="px-4 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--surface)] text-sm text-white hover:bg-[var(--surface)]/80 transition"
+            className="px-4 py-1.5 rounded-md bg-surface border border-border text-sm text-text-primary hover:bg-surface-hover/80 transition"
           >
             Load more
           </button>
@@ -695,17 +694,17 @@ function SessionDetailPage() {
   })
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+    <div className="min-h-screen bg-bg-base text-text-secondary">
       <NavBar />
       <main className="mx-auto max-w-4xl px-6 py-8">
         <button
           onClick={() => navigate('/sessions')}
-          className="mb-4 text-sm text-[var(--accent)] hover:underline"
+          className="mb-4 text-body-sm text-accent hover:underline"
         >
           ← Back to sessions
         </button>
 
-        {isLoading && <p className="opacity-70">Loading session…</p>}
+        {isLoading && <p className="text-text-secondary">Loading session…</p>}
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             Error: {(error as Error).message}
@@ -714,57 +713,57 @@ function SessionDetailPage() {
 
         {data && (
           <>
-            <h1 className="text-2xl font-bold text-white mb-1">
+            <h1 className="text-h2 font-bold text-text-primary mb-1">
               {data.title || 'Untitled'}
             </h1>
             <div className="flex items-center gap-2 mb-6">
               <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${sourceBadge(data.source)}`}>
                 {sourceLabel(data.source)}
               </span>
-              <span className="font-mono text-xs opacity-70">{data.model}</span>
+              <span className="font-mono text-mono-sm text-text-secondary">{data.model}</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">ID</p>
-                <p className="font-mono text-sm text-white break-all">{data.id}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">ID</p>
+                <p className="font-mono text-sm text-text-primary break-all">{data.id}</p>
               </div>
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Chat Type</p>
-                <p className="text-sm text-white">{data.chat_type || '-'}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">Chat Type</p>
+                <p className="text-sm text-text-primary">{data.chat_type || '-'}</p>
               </div>
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Started</p>
-                <p className="text-sm text-white">{data.started_at ? new Date(data.started_at).toLocaleString() : '-'}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">Started</p>
+                <p className="text-sm text-text-primary">{data.started_at ? new Date(data.started_at).toLocaleString() : '-'}</p>
               </div>
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Ended</p>
-                <p className="text-sm text-white">{data.ended_at ? new Date(data.ended_at).toLocaleString() : 'Running'}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">Ended</p>
+                <p className="text-sm text-text-primary">{data.ended_at ? new Date(data.ended_at).toLocaleString() : 'Running'}</p>
               </div>
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Duration</p>
-                <p className="text-sm text-white">{formatDuration(data.duration_seconds)}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">Duration</p>
+                <p className="text-sm text-text-primary">{formatDuration(data.duration_seconds)}</p>
               </div>
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Messages / Tool Calls</p>
-                <p className="text-sm text-white">{data.message_count} / {data.tool_call_count}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">Messages / Tool Calls</p>
+                <p className="text-sm text-text-primary">{data.message_count} / {data.tool_call_count}</p>
               </div>
               {data.archived && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
-                  <p className="text-xs text-amber-400 mb-1">Archived</p>
-                  <p className="text-sm text-white">This session is archived.</p>
+                  <p className="text-caption text-warning mb-1">Archived</p>
+                  <p className="text-sm text-text-primary">This session is archived.</p>
                 </div>
               )}
               {data.snippet && (
-                <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4 sm:col-span-2">
-                  <p className="text-xs opacity-60 mb-1">Snippet</p>
-                  <p className="text-sm text-white whitespace-pre-wrap">{data.snippet}</p>
+                <div className="rounded-lg border border-border bg-surface/30 p-4 sm:col-span-2">
+                  <p className="text-caption text-text-tertiary mb-1">Snippet</p>
+                  <p className="text-sm text-text-primary whitespace-pre-wrap">{data.snippet}</p>
                 </div>
               )}
             </div>
 
-            <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-              <p className="text-lg font-semibold text-white mb-3">Messages</p>
+            <div className="rounded-lg border border-border bg-surface/30 p-4">
+              <p className="text-h4 font-semibold text-text-primary mb-3">Messages</p>
               <MessagesSection sessionId={data.id} />
             </div>
           </>
@@ -791,21 +790,21 @@ function columnForStatus(status: string): string {
 
 function assigneeBadgeClass(assignee: string | null): string {
   const map: Record<string, string> = {
-    nexus: 'bg-purple-600 text-white',
-    atlas: 'bg-blue-600 text-white',
-    coder: 'bg-emerald-600 text-white',
-    pixel: 'bg-pink-600 text-white',
-    nova: 'bg-orange-600 text-white',
+    nexus: 'bg-purple-600 text-text-primary',
+    atlas: 'bg-blue-600 text-text-primary',
+    coder: 'bg-emerald-600 text-text-primary',
+    pixel: 'bg-pink-600 text-text-primary',
+    nova: 'bg-orange-600 text-text-primary',
   }
-  return map[assignee?.toLowerCase() || ''] || 'bg-slate-600 text-white'
+  return map[assignee?.toLowerCase() || ''] || 'bg-slate-600 text-text-primary'
 }
 
 function priorityDotClass(priority: number | null): string {
   const map: Record<number, string> = {
-    0: 'bg-red-500',
-    1: 'bg-amber-500',
-    2: 'bg-blue-500',
-    3: 'bg-slate-500',
+    0: 'bg-semantic-error',
+    1: 'bg-semantic-warning',
+    2: 'bg-semantic-info',
+    3: 'bg-text-tertiary',
   }
   return map[priority ?? 3] || 'bg-slate-500'
 }
@@ -825,9 +824,9 @@ function TaskCard({ task }: { task: TaskItem }) {
   return (
     <div
       onClick={() => navigate(`/tasks/${encodeURIComponent(task.id)}`)}
-      className={`mb-3 cursor-pointer rounded-lg border border-[var(--surface)] bg-[var(--surface)]/40 p-3 transition hover:bg-[var(--surface)]/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-slate-500'}`}
+      className={`mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-slate-500'}`}
     >
-      <h4 className="text-sm font-medium text-white line-clamp-2 leading-snug mb-2">
+      <h4 className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug mb-2">
         {task.title || 'Untitled'}
       </h4>
       <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -836,20 +835,20 @@ function TaskCard({ task }: { task: TaskItem }) {
             {task.assignee}
           </span>
         )}
-        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text)] opacity-70">
+        <span className="inline-flex items-center gap-1 text-caption text-text-secondary">
           <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityDotClass(task.priority)}`} />
           {priorityLabel(task.priority)}
         </span>
         {task.run_count > 0 && (
-          <span className="text-[10px] text-[var(--text)] opacity-60">
+          <span className="text-caption text-text-tertiary">
             {task.run_count} run{task.run_count === 1 ? '' : 's'}
           </span>
         )}
       </div>
       <div className="flex items-center justify-between">
-        <span className="text-[10px] text-[var(--text)] opacity-50">{task.created_date}</span>
+        <span className="text-caption text-text-tertiary">{task.created_date}</span>
         {task.comment_count > 0 && (
-          <span className="text-[10px] text-[var(--text)] opacity-50">
+          <span className="text-caption text-text-tertiary">
             {task.comment_count} comment{task.comment_count === 1 ? '' : 's'}
           </span>
         )}
@@ -863,7 +862,7 @@ function KanbanColumn({ label, status, tasks }: { label: string; status: string;
   return (
     <div className="flex flex-col min-w-[16rem] max-w-[20rem] flex-1">
       <div className={`flex items-center justify-between mb-3 pb-2 border-b ${meta.header}`}>
-        <h3 className="text-sm font-semibold text-white">{label}</h3>
+        <h3 className="text-body-sm font-semibold text-text-primary">{label}</h3>
         <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${meta.badge}`}>
           {tasks.length}
         </span>
@@ -873,7 +872,7 @@ function KanbanColumn({ label, status, tasks }: { label: string; status: string;
           <TaskCard key={task.id} task={task} />
         ))}
         {tasks.length === 0 && (
-          <p className="text-xs text-[var(--text)] opacity-40 text-center py-6">No tasks</p>
+          <p className="text-caption text-text-tertiary text-center py-6">No tasks</p>
         )}
       </div>
     </div>
@@ -902,17 +901,17 @@ function KanbanBoardPage() {
   }))
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+    <div className="min-h-screen bg-bg-base text-text-secondary">
       <NavBar />
       <header className="px-6 pt-8 pb-4">
         <div className="mx-auto max-w-7xl flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white">Kanban Board</h1>
-            <p className="text-sm opacity-70 mt-1">Task pipeline</p>
+            <h1 className="text-h2 font-bold text-text-primary">Kanban Board</h1>
+            <p className="text-body-sm text-text-secondary mt-1">Task pipeline</p>
           </div>
           <button
             onClick={() => setShowArchived((v) => !v)}
-            className="rounded-md bg-[var(--surface)] border border-[var(--surface)] px-3 py-1.5 text-sm text-white hover:bg-[var(--surface)]/80 transition"
+            className="rounded-md bg-surface border border-border px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover/80 transition"
           >
             {showArchived ? 'Hide archived' : 'Show archived'}
           </button>
@@ -920,7 +919,7 @@ function KanbanBoardPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 pb-12">
-        {isLoading && <p className="opacity-70">Loading tasks…</p>}
+        {isLoading && <p className="text-text-secondary">Loading tasks…</p>}
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 mb-4">
             Error: {(error as Error).message}
@@ -943,7 +942,7 @@ function KanbanBoardPage() {
             {showArchived && (
               <div className="mt-8">
                 <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-500/30">
-                  <h3 className="text-sm font-semibold text-slate-400">Archived</h3>
+                  <h3 className="text-body-sm font-semibold text-text-tertiary">Archived</h3>
                   <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-slate-500/20 text-slate-400">
                     {archivedTasks.length}
                   </span>
@@ -954,7 +953,7 @@ function KanbanBoardPage() {
                   ))}
                 </div>
                 {archivedTasks.length === 0 && (
-                  <p className="text-xs text-[var(--text)] opacity-40 text-center py-6">No archived tasks</p>
+                  <p className="text-caption text-text-tertiary text-center py-6">No archived tasks</p>
                 )}
               </div>
             )}
@@ -991,17 +990,17 @@ function TaskDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+    <div className="min-h-screen bg-bg-base text-text-secondary">
       <NavBar />
       <main className="mx-auto max-w-4xl px-6 py-8">
         <button
           onClick={() => navigate('/tasks')}
-          className="mb-4 text-sm text-[var(--accent)] hover:underline"
+          className="mb-4 text-body-sm text-accent hover:underline"
         >
           ← Back to tasks
         </button>
 
-        {isLoading && <p className="opacity-70">Loading task…</p>}
+        {isLoading && <p className="text-text-secondary">Loading task…</p>}
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             Error: {(error as Error).message}
@@ -1010,17 +1009,17 @@ function TaskDetailPage() {
 
         {data && (
           <>
-            <h1 className="text-2xl font-bold text-white mb-2">{data.title || 'Untitled'}</h1>
+            <h1 className="text-h2 font-bold text-text-primary mb-2">{data.title || 'Untitled'}</h1>
             <div className="flex flex-wrap items-center gap-2 mb-6">
               {data.assignee && (
                 <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${assigneeBadgeClass(data.assignee)}`}>
                   {data.assignee}
                 </span>
               )}
-              <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-[var(--surface)] text-[var(--text)] border border-[var(--surface)]">
+              <span className="inline-flex items-center rounded px-2 py-0.5 text-caption font-medium bg-surface text-text-secondary border border-border">
                 {data.status}
               </span>
-              <span className="inline-flex items-center gap-1 text-xs text-[var(--text)] opacity-70">
+              <span className="inline-flex items-center gap-1 text-caption text-text-secondary">
                 <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityDotClass(data.priority)}`} />
                 {priorityLabel(data.priority)}
               </span>
@@ -1028,62 +1027,62 @@ function TaskDetailPage() {
 
             {/* Metadata grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">ID</p>
-                <p className="font-mono text-sm text-white break-all">{data.id}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">ID</p>
+                <p className="font-mono text-sm text-text-primary break-all">{data.id}</p>
               </div>
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Created by</p>
-                <p className="text-sm text-white">{data.created_by || '-'}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">Created by</p>
+                <p className="text-sm text-text-primary">{data.created_by || '-'}</p>
               </div>
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Created at</p>
-                <p className="text-sm text-white">{formatIso(data.created_at)}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">Created at</p>
+                <p className="text-sm text-text-primary">{formatIso(data.created_at)}</p>
               </div>
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Started at</p>
-                <p className="text-sm text-white">{formatIso(data.started_at)}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">Started at</p>
+                <p className="text-sm text-text-primary">{formatIso(data.started_at)}</p>
               </div>
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Completed at</p>
-                <p className="text-sm text-white">{formatIso(data.completed_at)}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">Completed at</p>
+                <p className="text-sm text-text-primary">{formatIso(data.completed_at)}</p>
               </div>
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Workspace</p>
-                <p className="text-sm text-white font-mono">{data.workspace_kind || '-'} {data.workspace_path ? `(${data.workspace_path})` : ''}</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4">
+                <p className="text-caption text-text-tertiary mb-1">Workspace</p>
+                <p className="text-sm text-text-primary font-mono">{data.workspace_kind || '-'} {data.workspace_path ? `(${data.workspace_path})` : ''}</p>
               </div>
               {data.session_id && (
-                <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                  <p className="text-xs opacity-60 mb-1">Session</p>
-                  <p className="text-sm text-white font-mono break-all">{data.session_id}</p>
+                <div className="rounded-lg border border-border bg-surface/30 p-4">
+                  <p className="text-caption text-text-tertiary mb-1">Session</p>
+                  <p className="text-sm text-text-primary font-mono break-all">{data.session_id}</p>
                 </div>
               )}
               {data.project_id && (
-                <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                  <p className="text-xs opacity-60 mb-1">Project</p>
-                  <p className="text-sm text-white">{data.project_id}</p>
+                <div className="rounded-lg border border-border bg-surface/30 p-4">
+                  <p className="text-caption text-text-tertiary mb-1">Project</p>
+                  <p className="text-sm text-text-primary">{data.project_id}</p>
                 </div>
               )}
             </div>
 
             {/* Body */}
             {data.body && (
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4 mb-8">
-                <p className="text-xs opacity-60 mb-2">Body</p>
-                <pre className="text-sm text-white whitespace-pre-wrap font-sans">{data.body}</pre>
+              <div className="rounded-lg border border-border bg-surface/30 p-4 mb-8">
+                <p className="text-caption text-text-tertiary mb-2">Body</p>
+                <pre className="text-sm text-text-primary whitespace-pre-wrap font-sans">{data.body}</pre>
               </div>
             )}
 
             {/* Links */}
             {(data.parent_id || data.children.length > 0) && (
-              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4 mb-8">
-                <p className="text-xs opacity-60 mb-2">Links</p>
+              <div className="rounded-lg border border-border bg-surface/30 p-4 mb-8">
+                <p className="text-caption text-text-tertiary mb-2">Links</p>
                 {data.parent_id && (
                   <div className="mb-1 text-sm">
-                    <span className="opacity-60">Parent:</span>{' '}
+                    <span className="text-text-tertiary">Parent:</span>{' '}
                     <button
                       onClick={() => navigate(`/tasks/${encodeURIComponent(data.parent_id!)}`)}
-                      className="text-[var(--accent)] hover:underline font-mono"
+                      className="text-accent hover:underline font-mono"
                     >
                       {data.parent_id}
                     </button>
@@ -1091,13 +1090,13 @@ function TaskDetailPage() {
                 )}
                 {data.children.length > 0 && (
                   <div className="text-sm">
-                    <span className="opacity-60">Children:</span>
+                    <span className="text-text-tertiary">Children:</span>
                     <div className="mt-1 flex flex-wrap gap-2">
                       {data.children.map((childId) => (
                         <button
                           key={childId}
                           onClick={() => navigate(`/tasks/${encodeURIComponent(childId)}`)}
-                          className="text-[var(--accent)] hover:underline font-mono text-xs bg-[var(--bg)] px-2 py-1 rounded border border-[var(--surface)]"
+                          className="text-accent hover:underline font-mono text-xs bg-bg-base px-2 py-1 rounded border border-border"
                         >
                           {childId}
                         </button>
@@ -1109,13 +1108,13 @@ function TaskDetailPage() {
             )}
 
             {/* Runs */}
-            <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4 mb-8">
-              <p className="text-lg font-semibold text-white mb-3">Runs ({data.runs.length})</p>
-              {data.runs.length === 0 && <p className="text-sm opacity-60">No runs recorded.</p>}
+            <div className="rounded-lg border border-border bg-surface/30 p-4 mb-8">
+              <p className="text-h4 font-semibold text-text-primary mb-3">Runs ({data.runs.length})</p>
+              {data.runs.length === 0 && <p className="text-body-sm text-text-tertiary">No runs recorded.</p>}
               {data.runs.length > 0 && (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead className="bg-[var(--surface)]/60 text-left">
+                    <thead className="bg-bg-elevated text-text-secondary text-left">
                       <tr>
                         <th className="px-3 py-2 font-medium">Step</th>
                         <th className="px-3 py-2 font-medium">Status</th>
@@ -1125,19 +1124,19 @@ function TaskDetailPage() {
                         <th className="px-3 py-2 font-medium">Outcome</th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-[var(--surface)]">
+                    <tbody className="divide-y divide-border">
                       {data.runs.map((run) => (
-                        <tr key={run.id} className="hover:bg-[var(--surface)]/40 transition">
-                          <td className="px-3 py-2 text-white font-mono text-xs">{run.step_key || '-'}</td>
-                          <td className="px-3 py-2">
+                        <tr key={run.id} className="hover:bg-surface/40 transition">
+                          <td className="px-3 py-2 text-text-primary font-mono text-mono-sm">{run.step_key || '-'}</td>
+                          <td className="px-3 py-2 text-text-secondary">
                             <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${run.status === 'done' ? 'bg-green-500/20 text-green-400' : run.status === 'running' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>
                               {run.status}
                             </span>
                           </td>
-                          <td className="px-3 py-2">{run.profile || '-'}</td>
+                          <td className="px-3 py-2 text-text-secondary">{run.profile || '-'}</td>
                           <td className="px-3 py-2 tabular-nums">{formatIso(run.started_at)}</td>
                           <td className="px-3 py-2 tabular-nums">{formatIso(run.ended_at)}</td>
-                          <td className="px-3 py-2 max-w-xs truncate">{run.outcome || '-'}</td>
+                          <td className="px-3 py-2 max-w-xs truncate text-text-secondary">{run.outcome || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1147,9 +1146,9 @@ function TaskDetailPage() {
               {data.runs.some((r) => r.summary) && (
                 <div className="mt-4 space-y-3">
                   {data.runs.filter((r) => r.summary).map((run) => (
-                    <div key={`summary-${run.id}`} className="rounded border border-[var(--surface)] bg-[var(--bg)]/40 p-3">
-                      <p className="text-xs font-mono text-[var(--accent)] mb-1">Run {run.id} — {run.step_key || '?'}</p>
-                      <p className="text-sm text-white whitespace-pre-wrap">{run.summary}</p>
+                    <div key={`summary-${run.id}`} className="rounded border border-border bg-bg-base/40 p-3">
+                      <p className="text-mono-sm font-mono text-accent mb-1">Run {run.id} — {run.step_key || '?'}</p>
+                      <p className="text-sm text-text-primary whitespace-pre-wrap">{run.summary}</p>
                     </div>
                   ))}
                 </div>
@@ -1157,18 +1156,18 @@ function TaskDetailPage() {
             </div>
 
             {/* Comments */}
-            <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-              <p className="text-lg font-semibold text-white mb-3">Comments ({data.comments.length})</p>
-              {data.comments.length === 0 && <p className="text-sm opacity-60">No comments.</p>}
+            <div className="rounded-lg border border-border bg-surface/30 p-4">
+              <p className="text-h4 font-semibold text-text-primary mb-3">Comments ({data.comments.length})</p>
+              {data.comments.length === 0 && <p className="text-body-sm text-text-tertiary">No comments.</p>}
               {data.comments.length > 0 && (
                 <div className="space-y-3">
                   {data.comments.map((comment) => (
-                    <div key={comment.id} className="rounded border border-[var(--surface)] bg-[var(--bg)]/40 p-3">
+                    <div key={comment.id} className="rounded border border-border bg-bg-base/40 p-3">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-xs font-medium text-white">{comment.author}</span>
-                        <span className="text-[10px] text-[var(--text)] opacity-50">{formatIso(comment.created_at)}</span>
+                        <span className="text-caption font-medium text-text-primary">{comment.author}</span>
+                        <span className="text-caption text-text-tertiary">{formatIso(comment.created_at)}</span>
                       </div>
-                      <p className="text-sm text-white whitespace-pre-wrap">{comment.body}</p>
+                      <p className="text-sm text-text-primary whitespace-pre-wrap">{comment.body}</p>
                     </div>
                   ))}
                 </div>
