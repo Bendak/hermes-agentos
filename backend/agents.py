@@ -6,7 +6,22 @@ from backend.config import settings
 from backend.sessions import count_sessions_by_profile
 
 PROFILES_DIR = os.path.join(settings.AGENTOS_DATA_DIR, "profiles")
-PROFILE_IDS = ["coder", "pixel", "atlas", "nova", "nexus"]
+
+
+def _discover_profile_ids() -> List[str]:
+    """Scan the profiles directory and return sorted profile IDs.
+
+    Works with any number of profiles (2, 5, 10...) — not hardcoded.
+    Falls back to empty list if directory doesn't exist.
+    """
+    if not os.path.isdir(PROFILES_DIR):
+        return []
+    result = []
+    for entry in sorted(os.listdir(PROFILES_DIR)):
+        full_path = os.path.join(PROFILES_DIR, entry)
+        if os.path.isdir(full_path) and not entry.startswith(".") and not entry.startswith("_"):
+            result.append(entry)
+    return result
 
 
 def _parse_yaml_simple(path: str) -> Dict[str, Any]:
@@ -103,9 +118,10 @@ def check_process_alive(pid: Optional[int]) -> bool:
 
 
 def get_profiles() -> List[Dict[str, Any]]:
-    """Discover all profiles and return a list of summary dicts."""
+    """Discover all profiles dynamically and return a list of summary dicts."""
+    profile_ids = _discover_profile_ids()
     profiles = []
-    for profile_id in PROFILE_IDS:
+    for profile_id in profile_ids:
         profile_dir = os.path.join(PROFILES_DIR, profile_id)
         config_path = os.path.join(profile_dir, "config.yaml")
         soul_path = os.path.join(profile_dir, "SOUL.md")

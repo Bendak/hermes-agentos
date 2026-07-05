@@ -58,10 +58,10 @@ function NavBar() {
         </Link>
         <div className="flex items-center gap-4 text-sm">
           <Link to="/" className="text-[var(--text)] hover:text-white transition">
-            Painel
+            Dashboard
           </Link>
           <Link to="/sessions" className="text-[var(--text)] hover:text-white transition">
-            Sessões
+            Sessions
           </Link>
         </div>
       </div>
@@ -80,7 +80,7 @@ function AgentCard({ agent }: { agent: AgentProfile }) {
         <span
           className="inline-block h-2 w-2 rounded-full"
           style={{ backgroundColor: isRunning ? '#22c55e' : '#6b7280' }}
-          title={isRunning ? 'Em execução' : 'Parado'}
+          title={isRunning ? 'Running' : 'Stopped'}
         />
       </div>
       <p className="text-sm text-[var(--text)] opacity-80 mb-4">{agent.role}</p>
@@ -94,7 +94,7 @@ function AgentCard({ agent }: { agent: AgentProfile }) {
       </div>
       <div className="flex items-center justify-between text-xs text-[var(--text)] opacity-60">
         <span className="font-mono">PID: {agent.pid ?? '-'}</span>
-        <span>Sessões: {agent.sessions}</span>
+        <span>Sessions: {agent.sessions}</span>
       </div>
     </div>
   )
@@ -105,7 +105,7 @@ function DashboardPage() {
     queryKey: ['agents'],
     queryFn: async () => {
       const res = await fetch('/api/agents')
-      if (!res.ok) throw new Error('Falha ao carregar agentes')
+      if (!res.ok) throw new Error('Failed to load agents')
       return res.json()
     },
   })
@@ -123,12 +123,12 @@ function DashboardPage() {
       <main className="mx-auto max-w-7xl px-6 py-8">
         {isLoading && (
           <div className="flex items-center justify-center py-20">
-            <p className="opacity-70">Carregando agentes…</p>
+            <p className="opacity-70">Loading agents…</p>
           </div>
         )}
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            Erro: {(error as Error).message}
+            Error: {(error as Error).message}
           </div>
         )}
         {data && (
@@ -160,18 +160,18 @@ function HealthPage() {
     <div className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--text)]">
       <NavBar />
       <div className="flex-1 flex flex-col items-center justify-center">
-        <h1 className="text-3xl font-bold mb-6">Estado do Sistema</h1>
-        {error && <p className="text-red-400">Erro: {error}</p>}
+        <h1 className="text-3xl font-bold mb-6">System Status</h1>
+        {error && <p className="text-red-400">Error: {error}</p>}
         {healthData ? (
           <pre className="bg-[var(--surface)] p-4 rounded-lg">
             {JSON.stringify(healthData, null, 2)}
           </pre>
         ) : (
-          <p>Carregando…</p>
+          <p>Loading…</p>
         )}
         <div className="mt-8">
           <Link to="/" className="text-[var(--accent)] underline">
-            ← Voltar ao painel
+            ← Back to dashboard
           </Link>
         </div>
       </div>
@@ -202,7 +202,7 @@ function formatStartedAt(iso: string | null): string {
 }
 
 function formatDuration(seconds: number | null): string {
-  if (seconds === null || seconds === undefined) return 'Em execução'
+  if (seconds === null || seconds === undefined) return 'Running'
   const s = Math.max(0, Math.round(seconds))
   const m = Math.floor(s / 60)
   const rem = s % 60
@@ -274,7 +274,7 @@ function SessionsPage() {
       if (source) params.set('source', source)
       if (model) params.set('model', model)
       const res = await fetch(`/api/sessions?${params}`)
-      if (!res.ok) throw new Error('Falha ao carregar sessões')
+      if (!res.ok) throw new Error('Failed to load sessions')
       return res.json()
     },
   })
@@ -307,8 +307,8 @@ function SessionsPage() {
       <NavBar />
       <header className="px-6 pt-8 pb-4">
         <div className="mx-auto max-w-7xl">
-          <h1 className="text-2xl font-bold text-white">Sessões</h1>
-          <p className="text-sm opacity-70 mt-1">Histórico de conversas</p>
+          <h1 className="text-2xl font-bold text-white">Sessions</h1>
+          <p className="text-sm opacity-70 mt-1">Conversation history</p>
         </div>
       </header>
 
@@ -317,7 +317,7 @@ function SessionsPage() {
         <div className="flex flex-wrap items-center gap-3 mb-6">
           <input
             type="text"
-            placeholder="Buscar por título..."
+            placeholder="Search by title..."
             value={rawSearch}
             onChange={(e) => {
               setRawSearch(e.target.value)
@@ -339,7 +339,7 @@ function SessionsPage() {
             }}
             className="rounded-md bg-[var(--surface)] border border-[var(--surface)] px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
           >
-            <option value="">Todos (origem)</option>
+            <option value="">All (source)</option>
             <option value="whatsapp">WhatsApp</option>
             <option value="discord">Discord</option>
             <option value="telegram">Telegram</option>
@@ -363,7 +363,7 @@ function SessionsPage() {
             }}
             className="rounded-md bg-[var(--surface)] border border-[var(--surface)] px-3 py-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-[var(--accent)]"
           >
-            <option value="">Todos (modelo)</option>
+            <option value="">All (model)</option>
             {modelList?.map((m) => (
               <option key={m} value={m}>{m}</option>
             ))}
@@ -371,10 +371,10 @@ function SessionsPage() {
         </div>
 
         {/* Table */}
-        {isLoading && <p className="opacity-70">Carregando sessões…</p>}
+        {isLoading && <p className="opacity-70">Loading sessions…</p>}
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 mb-4">
-            Erro: {(error as Error).message}
+            Error: {(error as Error).message}
           </div>
         )}
         {data && (
@@ -383,12 +383,12 @@ function SessionsPage() {
               <table className="w-full text-sm">
                 <thead className="bg-[var(--surface)]/60 text-left">
                   <tr>
-                    <th className="px-4 py-3 font-medium">Título</th>
-                    <th className="px-4 py-3 font-medium">Origem</th>
-                    <th className="px-4 py-3 font-medium">Modelo</th>
-                    <th className="px-4 py-3 font-medium text-right">Mensagens</th>
-                    <th className="px-4 py-3 font-medium">Início</th>
-                    <th className="px-4 py-3 font-medium">Duração</th>
+                    <th className="px-4 py-3 font-medium">Title</th>
+                    <th className="px-4 py-3 font-medium">Source</th>
+                    <th className="px-4 py-3 font-medium">Model</th>
+                    <th className="px-4 py-3 font-medium text-right">Messages</th>
+                    <th className="px-4 py-3 font-medium">Started</th>
+                    <th className="px-4 py-3 font-medium">Duration</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[var(--surface)]">
@@ -399,7 +399,7 @@ function SessionsPage() {
                       className="cursor-pointer hover:bg-[var(--surface)]/40 transition"
                     >
                       <td className="px-4 py-3 text-white truncate max-w-xs">
-                        {s.title || 'Sem título'}
+                        {s.title || 'Untitled'}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${sourceBadge(s.source)}`}>
@@ -415,7 +415,7 @@ function SessionsPage() {
                   {data.sessions.length === 0 && (
                     <tr>
                       <td colSpan={6} className="px-4 py-8 text-center opacity-60">
-                        Nenhuma sessão encontrada.
+                        No sessions found.
                       </td>
                     </tr>
                   )}
@@ -430,17 +430,17 @@ function SessionsPage() {
                 disabled={offset === 0}
                 className="px-3 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--surface)] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--surface)]/80 transition"
               >
-                Anterior
+                Previous
               </button>
               <span className="opacity-70">
-                Página {currentPage} de {totalPages || 1}
+                Page {currentPage} of {totalPages || 1}
               </span>
               <button
                 onClick={() => handlePage(offset + limit)}
                 disabled={!data || offset + limit >= data.total}
                 className="px-3 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--surface)] text-white disabled:opacity-40 disabled:cursor-not-allowed hover:bg-[var(--surface)]/80 transition"
               >
-                Próximo
+                Next
               </button>
             </div>
           </>
@@ -461,8 +461,8 @@ function SessionDetailPage() {
     queryFn: async () => {
       const res = await fetch(`/api/sessions/${encodeURIComponent(id!)}`)
       if (!res.ok) {
-        if (res.status === 404) throw new Error('Sessão não encontrada')
-        throw new Error('Falha ao carregar sessão')
+        if (res.status === 404) throw new Error('Session not found')
+        throw new Error('Failed to load session')
       }
       return res.json()
     },
@@ -476,20 +476,20 @@ function SessionDetailPage() {
           onClick={() => navigate('/sessions')}
           className="mb-4 text-sm text-[var(--accent)] hover:underline"
         >
-          ← Voltar às sessões
+          ← Back to sessions
         </button>
 
-        {isLoading && <p className="opacity-70">Carregando sessão…</p>}
+        {isLoading && <p className="opacity-70">Loading session…</p>}
         {error && (
           <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
-            Erro: {(error as Error).message}
+            Error: {(error as Error).message}
           </div>
         )}
 
         {data && (
           <>
             <h1 className="text-2xl font-bold text-white mb-1">
-              {data.title || 'Sem título'}
+              {data.title || 'Untitled'}
             </h1>
             <div className="flex items-center gap-2 mb-6">
               <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${sourceBadge(data.source)}`}>
@@ -508,25 +508,25 @@ function SessionDetailPage() {
                 <p className="text-sm text-white">{data.chat_type || '-'}</p>
               </div>
               <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Início</p>
-                <p className="text-sm text-white">{data.started_at ? new Date(data.started_at).toLocaleString('pt-BR') : '-'}</p>
+                <p className="text-xs opacity-60 mb-1">Started</p>
+                <p className="text-sm text-white">{data.started_at ? new Date(data.started_at).toLocaleString() : '-'}</p>
               </div>
               <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Término</p>
-                <p className="text-sm text-white">{data.ended_at ? new Date(data.ended_at).toLocaleString('pt-BR') : 'Em execução'}</p>
+                <p className="text-xs opacity-60 mb-1">Ended</p>
+                <p className="text-sm text-white">{data.ended_at ? new Date(data.ended_at).toLocaleString() : 'Running'}</p>
               </div>
               <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Duração</p>
+                <p className="text-xs opacity-60 mb-1">Duration</p>
                 <p className="text-sm text-white">{formatDuration(data.duration_seconds)}</p>
               </div>
               <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
-                <p className="text-xs opacity-60 mb-1">Mensagens / Tool Calls</p>
+                <p className="text-xs opacity-60 mb-1">Messages / Tool Calls</p>
                 <p className="text-sm text-white">{data.message_count} / {data.tool_call_count}</p>
               </div>
               {data.archived && (
                 <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
-                  <p className="text-xs text-amber-400 mb-1">Arquivada</p>
-                  <p className="text-sm text-white">Esta sessão está arquivada.</p>
+                  <p className="text-xs text-amber-400 mb-1">Archived</p>
+                  <p className="text-sm text-white">This session is archived.</p>
                 </div>
               )}
               {data.snippet && (
@@ -538,8 +538,8 @@ function SessionDetailPage() {
             </div>
 
             <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-6 text-center">
-              <p className="text-lg font-semibold text-white mb-1">Mensagens</p>
-              <p className="text-sm opacity-60">Em breve — Phase 3</p>
+              <p className="text-lg font-semibold text-white mb-1">Messages</p>
+              <p className="text-sm opacity-60">Coming soon — Phase 3</p>
             </div>
           </>
         )}
