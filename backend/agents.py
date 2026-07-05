@@ -9,19 +9,27 @@ PROFILES_DIR = os.path.join(settings.AGENTOS_DATA_DIR, "profiles")
 
 
 def _discover_profile_ids() -> List[str]:
-    """Scan the profiles directory and return sorted profile IDs.
+    """Scan for all profile IDs, including the default profile.
 
-    Works with any number of profiles (2, 5, 10...) — not hardcoded.
-    Falls back to empty list if directory doesn't exist.
+    The default profile lives directly in AGENTOS_DATA_DIR (config.yaml,
+    SOUL.md, gateway_state.json at the root). Sub-profiles live in the
+    profiles/ subdirectory. We return both, sorted alphabetically.
     """
-    if not os.path.isdir(PROFILES_DIR):
-        return []
-    result = []
-    for entry in sorted(os.listdir(PROFILES_DIR)):
-        full_path = os.path.join(PROFILES_DIR, entry)
-        if os.path.isdir(full_path) and not entry.startswith(".") and not entry.startswith("_"):
-            result.append(entry)
-    return result
+    result: List[str] = []
+
+    # Check for default profile at the data root
+    root_config = os.path.join(settings.AGENTOS_DATA_DIR, "config.yaml")
+    if os.path.exists(root_config):
+        result.append("default")
+
+    # Scan sub-profiles directory
+    if os.path.isdir(PROFILES_DIR):
+        for entry in sorted(os.listdir(PROFILES_DIR)):
+            full_path = os.path.join(PROFILES_DIR, entry)
+            if os.path.isdir(full_path) and not entry.startswith(".") and not entry.startswith("_"):
+                result.append(entry)
+
+    return sorted(result)
 
 
 def _parse_yaml_simple(path: str) -> Dict[str, Any]:
@@ -122,12 +130,16 @@ def get_profiles() -> List[Dict[str, Any]]:
     profile_ids = _discover_profile_ids()
     profiles = []
     for profile_id in profile_ids:
-        profile_dir = os.path.join(PROFILES_DIR, profile_id)
+        # Default profile lives at the data root, sub-profiles in profiles/
+        if profile_id == "default":
+            profile_dir = settings.AGENTOS_DATA_DIR
+        else:
+            profile_dir = os.path.join(PROFILES_DIR, profile_id)
         config_path = os.path.join(profile_dir, "config.yaml")
         soul_path = os.path.join(profile_dir, "SOUL.md")
         gateway_path = os.path.join(profile_dir, "gateway_state.json")
 
-        name = profile_id.capitalize()
+        name = "Hermes" if profile_id == "default" else profile_id.capitalize()
         model = "unknown"
         provider = "unknown"
 
