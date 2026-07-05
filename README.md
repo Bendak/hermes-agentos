@@ -4,9 +4,18 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 
 ## Features
 
-- **Agent Dashboard** — Live status cards for all your Hermes profiles (model, provider, gateway state, session count)
+- **Agent Dashboard** — Live status cards for all your Hermes profiles (model, provider, gateway state, session count). Auto-discovers the default profile and all sub-profiles.
 - **Session History** — Browse, search, and filter all conversation sessions with FTS5 full-text search
+- **Session Detail** — Read-only chat thread viewer with reasoning blocks, tool call expansion, and message timeline
+- **Kanban Board** — Read-only task board with 5 columns (backlog, todo, in_progress, review, done), task detail view, and archived toggle
+- **Visual Identity** — Dark mission-control aesthetic with teal/gold accents, Inter + JetBrains Mono typography, ambient glow effects, sticky blur navbar
 - **Cross-Platform** — Works in Docker containers, Linux/macOS pip installs, and Windows
+
+## Screenshots
+
+> Dashboard with 6 agent cards (Hermes + 5 sub-profiles)
+> Session detail with chat bubbles, tool call expansion, and reasoning blocks
+> Kanban board with 5 columns and task detail
 
 ## Quick Start (Dev Mode)
 
@@ -25,6 +34,13 @@ npm run dev
 
 Backend runs on http://localhost:9120, frontend dev server on http://localhost:5173.
 
+For production, build the frontend and serve via FastAPI:
+
+```bash
+cd frontend && npm run build
+# Built assets go to frontend/dist/ — FastAPI serves them at /
+```
+
 ## Configuration
 
 AgentOS auto-detects your Hermes data directory:
@@ -41,6 +57,15 @@ Override with environment variables:
 AGENTOS_DATA_DIR=/custom/path    # Explicit override
 HERMES_DATA_DIR=/hermes/path     # Hermes native variable (also detected)
 ```
+
+### Profile Discovery
+
+AgentOS discovers profiles from two locations:
+
+1. **Default profile** — `config.yaml`, `SOUL.md`, `gateway_state.json` at the data root (e.g. `/opt/data/`)
+2. **Sub-profiles** — Each subdirectory under `profiles/` (e.g. `/opt/data/profiles/coder/`)
+
+All profiles are shown on the dashboard with live gateway state, model info, and session counts.
 
 ## Architecture
 
@@ -61,21 +86,55 @@ HERMES_DATA_DIR=/hermes/path     # Hermes native variable (also detected)
 │   Hermes Agent  │
 │  localhost:8642 │
 │  state.db       │
+│  kanban.db      │
 │  profiles/      │
+│  config.yaml    │
 └─────────────────┘
 ```
 
-AgentOS reads Hermes state directly from `state.db` (SQLite) and profile configs from `profiles/*/config.yaml`. No write access needed — AgentOS is read-only by design.
+AgentOS reads Hermes state directly from:
+- `state.db` (SQLite) — session history, messages, FTS5 search
+- `kanban.db` (SQLite) — task board, task runs, comments
+- `config.yaml` + `profiles/*/config.yaml` — agent model, provider info
+- `gateway_state.json` — live gateway PID and state
+- `SOUL.md` — agent role description
+
+No write access needed — AgentOS is read-only by design.
+
+## API Endpoints
+
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Health check |
+| `GET /api/agents` | List all profiles with live status |
+| `GET /api/sessions` | Paginated session list with filters (search, profile, date) |
+| `GET /api/sessions/{id}` | Session metadata |
+| `GET /api/sessions/{id}/messages` | Chat messages with pagination |
+| `GET /api/tasks` | Kanban board tasks |
+| `GET /api/tasks/{id}` | Task detail with runs and comments |
+
+## Tech Stack
+
+- **Backend** — FastAPI (Python 3.13+), SQLite, uvicorn
+- **Frontend** — React 18, Vite 5, Tailwind CSS, TanStack Query, React Router
+- **Fonts** — Inter (UI), JetBrains Mono (code/data)
+- **Design** — Dark theme (`#0B1120` base), teal accent (`#00E5B9`), gold secondary (`#F5B800`)
 
 ## Roadmap
 
 - [x] Phase 0 — Bootstrap (FastAPI + Vite scaffold)
-- [x] Phase 1 — Agent Dashboard (live health cards)
-- [x] Phase 2 — Session History (list, search, FTS5)
-- [ ] Phase 3 — Session Detail + Chat Streaming
-- [ ] Phase 4+ — Kanban board, config UI, skills browser, cron management
+- [x] Phase 1 — Agent Dashboard (live health cards, dynamic profile discovery)
+- [x] Phase 2 — Session History (list, search, FTS5, pagination, filters)
+- [x] Phase 3 — Session Detail (chat thread, reasoning blocks, tool calls)
+- [x] Phase 4 — Kanban Board (read-only, 5 columns, task detail, archived toggle)
+- [x] Visual Identity — DESIGN.md spec, dark mission-control theme, Pixel design refinement
+- [x] Bug Fix — Message overflow (overflowWrap: anywhere for long content)
+- [x] Bug Fix — Default profile (Hermes) missing from dashboard
+- [ ] Phase 5 — Kanban Drag & Drop (read-write)
+- [ ] Phase 6 — Task Detail improvements
+- [ ] Phase 7+ — Config UI, Skills Hub, Cron management, Workflow builder
 
-See [PLAN.md](PLAN.md) for the full roadmap.
+See [PLAN.md](PLAN.md) for the full roadmap and [DESIGN.md](DESIGN.md) for the visual identity spec.
 
 ## License
 
