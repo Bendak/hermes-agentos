@@ -67,6 +67,67 @@ interface MessagesResponse {
   offset: number
 }
 
+interface TaskItem {
+  id: string
+  title: string | null
+  body: string | null
+  assignee: string | null
+  status: string
+  priority: number | null
+  created_by: string | null
+  created_at: string | null
+  started_at: string | null
+  completed_at: string | null
+  workspace_kind: string | null
+  workspace_path: string | null
+  session_id: string | null
+  project_id: string | null
+  has_children: boolean
+  parent_id: string | null
+  run_count: number
+  comment_count: number
+  created_date: string
+}
+
+interface TaskRun {
+  id: number
+  profile: string | null
+  step_key: string | null
+  status: string
+  started_at: string | null
+  ended_at: string | null
+  outcome: string | null
+  summary: string | null
+}
+
+interface TaskComment {
+  id: number
+  author: string
+  body: string
+  created_at: string | null
+}
+
+interface TaskDetail {
+  id: string
+  title: string | null
+  body: string | null
+  assignee: string | null
+  status: string
+  priority: number | null
+  created_by: string | null
+  created_at: string | null
+  started_at: string | null
+  completed_at: string | null
+  workspace_kind: string | null
+  workspace_path: string | null
+  session_id: string | null
+  project_id: string | null
+  runs: TaskRun[]
+  comments: TaskComment[]
+  children: string[]
+  parent_id: string | null
+}
+
 /* ── NavBar ────────────────────────────────────────── */
 
 function NavBar() {
@@ -82,6 +143,9 @@ function NavBar() {
           </Link>
           <Link to="/sessions" className="text-[var(--text)] hover:text-white transition">
             Sessions
+          </Link>
+          <Link to="/tasks" className="text-[var(--text)] hover:text-white transition">
+            Tasks
           </Link>
         </div>
       </div>
@@ -710,6 +774,413 @@ function SessionDetailPage() {
   )
 }
 
+/* ── Kanban Board ──────────────────────────────────── */
+
+const COLUMN_META = [
+  { status: 'todo', label: 'Backlog', accent: 'border-l-slate-500', header: 'border-slate-500/50', badge: 'bg-slate-500/20 text-slate-400' },
+  { status: 'ready', label: 'Ready', accent: 'border-l-blue-500', header: 'border-blue-500/50', badge: 'bg-blue-500/20 text-blue-400' },
+  { status: 'running', label: 'Running', accent: 'border-l-amber-500', header: 'border-amber-500/50', badge: 'bg-amber-500/20 text-amber-400' },
+  { status: 'done', label: 'Done', accent: 'border-l-green-500', header: 'border-green-500/50', badge: 'bg-green-500/20 text-green-400' },
+  { status: 'blocked', label: 'Blocked', accent: 'border-l-red-500', header: 'border-red-500/50', badge: 'bg-red-500/20 text-red-400' },
+]
+
+function columnForStatus(status: string): string {
+  const known = ['todo', 'ready', 'running', 'done', 'blocked']
+  return known.includes(status) ? status : 'todo'
+}
+
+function assigneeBadgeClass(assignee: string | null): string {
+  const map: Record<string, string> = {
+    nexus: 'bg-purple-600 text-white',
+    atlas: 'bg-blue-600 text-white',
+    coder: 'bg-emerald-600 text-white',
+    pixel: 'bg-pink-600 text-white',
+    nova: 'bg-orange-600 text-white',
+  }
+  return map[assignee?.toLowerCase() || ''] || 'bg-slate-600 text-white'
+}
+
+function priorityDotClass(priority: number | null): string {
+  const map: Record<number, string> = {
+    0: 'bg-red-500',
+    1: 'bg-amber-500',
+    2: 'bg-blue-500',
+    3: 'bg-slate-500',
+  }
+  return map[priority ?? 3] || 'bg-slate-500'
+}
+
+function priorityLabel(priority: number | null): string {
+  const map: Record<number, string> = {
+    0: 'P0',
+    1: 'P1',
+    2: 'P2',
+    3: 'P3',
+  }
+  return map[priority ?? 3] || 'P?'
+}
+
+function TaskCard({ task }: { task: TaskItem }) {
+  const navigate = useNavigate()
+  return (
+    <div
+      onClick={() => navigate(`/tasks/${encodeURIComponent(task.id)}`)}
+      className={`mb-3 cursor-pointer rounded-lg border border-[var(--surface)] bg-[var(--surface)]/40 p-3 transition hover:bg-[var(--surface)]/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-slate-500'}`}
+    >
+      <h4 className="text-sm font-medium text-white line-clamp-2 leading-snug mb-2">
+        {task.title || 'Untitled'}
+      </h4>
+      <div className="flex flex-wrap items-center gap-2 mb-2">
+        {task.assignee && (
+          <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${assigneeBadgeClass(task.assignee)}`}>
+            {task.assignee}
+          </span>
+        )}
+        <span className="inline-flex items-center gap-1 text-[10px] text-[var(--text)] opacity-70">
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityDotClass(task.priority)}`} />
+          {priorityLabel(task.priority)}
+        </span>
+        {task.run_count > 0 && (
+          <span className="text-[10px] text-[var(--text)] opacity-60">
+            {task.run_count} run{task.run_count === 1 ? '' : 's'}
+          </span>
+        )}
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] text-[var(--text)] opacity-50">{task.created_date}</span>
+        {task.comment_count > 0 && (
+          <span className="text-[10px] text-[var(--text)] opacity-50">
+            {task.comment_count} comment{task.comment_count === 1 ? '' : 's'}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function KanbanColumn({ label, status, tasks }: { label: string; status: string; tasks: TaskItem[] }) {
+  const meta = COLUMN_META.find((c) => c.status === status) || COLUMN_META[0]
+  return (
+    <div className="flex flex-col min-w-[16rem] max-w-[20rem] flex-1">
+      <div className={`flex items-center justify-between mb-3 pb-2 border-b ${meta.header}`}>
+        <h3 className="text-sm font-semibold text-white">{label}</h3>
+        <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${meta.badge}`}>
+          {tasks.length}
+        </span>
+      </div>
+      <div className="flex-1 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1">
+        {tasks.map((task) => (
+          <TaskCard key={task.id} task={task} />
+        ))}
+        {tasks.length === 0 && (
+          <p className="text-xs text-[var(--text)] opacity-40 text-center py-6">No tasks</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function KanbanBoardPage() {
+  const [showArchived, setShowArchived] = useState(false)
+
+  const { data, isLoading, error } = useQuery<TaskItem[]>({
+    queryKey: ['tasks', 'all'],
+    queryFn: async () => {
+      const res = await fetch('/api/tasks?include_archived=true&limit=500')
+      if (!res.ok) throw new Error('Failed to load tasks')
+      return res.json()
+    },
+    refetchInterval: 10000,
+  })
+
+  const activeTasks = data?.filter((t) => t.status !== 'archived') || []
+  const archivedTasks = data?.filter((t) => t.status === 'archived') || []
+
+  const columns = COLUMN_META.map((col) => ({
+    ...col,
+    tasks: activeTasks.filter((t) => columnForStatus(t.status) === col.status),
+  }))
+
+  return (
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+      <NavBar />
+      <header className="px-6 pt-8 pb-4">
+        <div className="mx-auto max-w-7xl flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">Kanban Board</h1>
+            <p className="text-sm opacity-70 mt-1">Task pipeline</p>
+          </div>
+          <button
+            onClick={() => setShowArchived((v) => !v)}
+            className="rounded-md bg-[var(--surface)] border border-[var(--surface)] px-3 py-1.5 text-sm text-white hover:bg-[var(--surface)]/80 transition"
+          >
+            {showArchived ? 'Hide archived' : 'Show archived'}
+          </button>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-6 pb-12">
+        {isLoading && <p className="opacity-70">Loading tasks…</p>}
+        {error && (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 mb-4">
+            Error: {(error as Error).message}
+          </div>
+        )}
+
+        {data && (
+          <>
+            <div className="flex gap-4 overflow-x-auto pb-4">
+              {columns.map((col) => (
+                <KanbanColumn
+                  key={col.status}
+                  label={col.label}
+                  status={col.status}
+                  tasks={col.tasks}
+                />
+              ))}
+            </div>
+
+            {showArchived && (
+              <div className="mt-8">
+                <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-500/30">
+                  <h3 className="text-sm font-semibold text-slate-400">Archived</h3>
+                  <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-slate-500/20 text-slate-400">
+                    {archivedTasks.length}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                  {archivedTasks.map((task) => (
+                    <TaskCard key={task.id} task={task} />
+                  ))}
+                </div>
+                {archivedTasks.length === 0 && (
+                  <p className="text-xs text-[var(--text)] opacity-40 text-center py-6">No archived tasks</p>
+                )}
+              </div>
+            )}
+          </>
+        )}
+      </main>
+    </div>
+  )
+}
+
+/* ── Task Detail Page ──────────────────────────────── */
+
+function TaskDetailPage() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+
+  const { data, isLoading, error } = useQuery<TaskDetail>({
+    queryKey: ['task', id],
+    queryFn: async () => {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(id!)}`)
+      if (!res.ok) {
+        if (res.status === 404) throw new Error('Task not found')
+        throw new Error('Failed to load task')
+      }
+      return res.json()
+    },
+    refetchInterval: 10000,
+  })
+
+  function formatIso(iso: string | null): string {
+    if (!iso) return '-'
+    const d = new Date(iso)
+    return isNaN(d.getTime()) ? '-' : d.toLocaleString()
+  }
+
+  return (
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
+      <NavBar />
+      <main className="mx-auto max-w-4xl px-6 py-8">
+        <button
+          onClick={() => navigate('/tasks')}
+          className="mb-4 text-sm text-[var(--accent)] hover:underline"
+        >
+          ← Back to tasks
+        </button>
+
+        {isLoading && <p className="opacity-70">Loading task…</p>}
+        {error && (
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+            Error: {(error as Error).message}
+          </div>
+        )}
+
+        {data && (
+          <>
+            <h1 className="text-2xl font-bold text-white mb-2">{data.title || 'Untitled'}</h1>
+            <div className="flex flex-wrap items-center gap-2 mb-6">
+              {data.assignee && (
+                <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${assigneeBadgeClass(data.assignee)}`}>
+                  {data.assignee}
+                </span>
+              )}
+              <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-[var(--surface)] text-[var(--text)] border border-[var(--surface)]">
+                {data.status}
+              </span>
+              <span className="inline-flex items-center gap-1 text-xs text-[var(--text)] opacity-70">
+                <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityDotClass(data.priority)}`} />
+                {priorityLabel(data.priority)}
+              </span>
+            </div>
+
+            {/* Metadata grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
+                <p className="text-xs opacity-60 mb-1">ID</p>
+                <p className="font-mono text-sm text-white break-all">{data.id}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
+                <p className="text-xs opacity-60 mb-1">Created by</p>
+                <p className="text-sm text-white">{data.created_by || '-'}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
+                <p className="text-xs opacity-60 mb-1">Created at</p>
+                <p className="text-sm text-white">{formatIso(data.created_at)}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
+                <p className="text-xs opacity-60 mb-1">Started at</p>
+                <p className="text-sm text-white">{formatIso(data.started_at)}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
+                <p className="text-xs opacity-60 mb-1">Completed at</p>
+                <p className="text-sm text-white">{formatIso(data.completed_at)}</p>
+              </div>
+              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
+                <p className="text-xs opacity-60 mb-1">Workspace</p>
+                <p className="text-sm text-white font-mono">{data.workspace_kind || '-'} {data.workspace_path ? `(${data.workspace_path})` : ''}</p>
+              </div>
+              {data.session_id && (
+                <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
+                  <p className="text-xs opacity-60 mb-1">Session</p>
+                  <p className="text-sm text-white font-mono break-all">{data.session_id}</p>
+                </div>
+              )}
+              {data.project_id && (
+                <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
+                  <p className="text-xs opacity-60 mb-1">Project</p>
+                  <p className="text-sm text-white">{data.project_id}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Body */}
+            {data.body && (
+              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4 mb-8">
+                <p className="text-xs opacity-60 mb-2">Body</p>
+                <pre className="text-sm text-white whitespace-pre-wrap font-sans">{data.body}</pre>
+              </div>
+            )}
+
+            {/* Links */}
+            {(data.parent_id || data.children.length > 0) && (
+              <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4 mb-8">
+                <p className="text-xs opacity-60 mb-2">Links</p>
+                {data.parent_id && (
+                  <div className="mb-1 text-sm">
+                    <span className="opacity-60">Parent:</span>{' '}
+                    <button
+                      onClick={() => navigate(`/tasks/${encodeURIComponent(data.parent_id!)}`)}
+                      className="text-[var(--accent)] hover:underline font-mono"
+                    >
+                      {data.parent_id}
+                    </button>
+                  </div>
+                )}
+                {data.children.length > 0 && (
+                  <div className="text-sm">
+                    <span className="opacity-60">Children:</span>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {data.children.map((childId) => (
+                        <button
+                          key={childId}
+                          onClick={() => navigate(`/tasks/${encodeURIComponent(childId)}`)}
+                          className="text-[var(--accent)] hover:underline font-mono text-xs bg-[var(--bg)] px-2 py-1 rounded border border-[var(--surface)]"
+                        >
+                          {childId}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Runs */}
+            <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4 mb-8">
+              <p className="text-lg font-semibold text-white mb-3">Runs ({data.runs.length})</p>
+              {data.runs.length === 0 && <p className="text-sm opacity-60">No runs recorded.</p>}
+              {data.runs.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-[var(--surface)]/60 text-left">
+                      <tr>
+                        <th className="px-3 py-2 font-medium">Step</th>
+                        <th className="px-3 py-2 font-medium">Status</th>
+                        <th className="px-3 py-2 font-medium">Profile</th>
+                        <th className="px-3 py-2 font-medium">Started</th>
+                        <th className="px-3 py-2 font-medium">Ended</th>
+                        <th className="px-3 py-2 font-medium">Outcome</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-[var(--surface)]">
+                      {data.runs.map((run) => (
+                        <tr key={run.id} className="hover:bg-[var(--surface)]/40 transition">
+                          <td className="px-3 py-2 text-white font-mono text-xs">{run.step_key || '-'}</td>
+                          <td className="px-3 py-2">
+                            <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${run.status === 'done' ? 'bg-green-500/20 text-green-400' : run.status === 'running' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>
+                              {run.status}
+                            </span>
+                          </td>
+                          <td className="px-3 py-2">{run.profile || '-'}</td>
+                          <td className="px-3 py-2 tabular-nums">{formatIso(run.started_at)}</td>
+                          <td className="px-3 py-2 tabular-nums">{formatIso(run.ended_at)}</td>
+                          <td className="px-3 py-2 max-w-xs truncate">{run.outcome || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {data.runs.some((r) => r.summary) && (
+                <div className="mt-4 space-y-3">
+                  {data.runs.filter((r) => r.summary).map((run) => (
+                    <div key={`summary-${run.id}`} className="rounded border border-[var(--surface)] bg-[var(--bg)]/40 p-3">
+                      <p className="text-xs font-mono text-[var(--accent)] mb-1">Run {run.id} — {run.step_key || '?'}</p>
+                      <p className="text-sm text-white whitespace-pre-wrap">{run.summary}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Comments */}
+            <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
+              <p className="text-lg font-semibold text-white mb-3">Comments ({data.comments.length})</p>
+              {data.comments.length === 0 && <p className="text-sm opacity-60">No comments.</p>}
+              {data.comments.length > 0 && (
+                <div className="space-y-3">
+                  {data.comments.map((comment) => (
+                    <div key={comment.id} className="rounded border border-[var(--surface)] bg-[var(--bg)]/40 p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium text-white">{comment.author}</span>
+                        <span className="text-[10px] text-[var(--text)] opacity-50">{formatIso(comment.created_at)}</span>
+                      </div>
+                      <p className="text-sm text-white whitespace-pre-wrap">{comment.body}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </main>
+    </div>
+  )
+}
+
 /* ── App ───────────────────────────────────────────── */
 
 export default function App() {
@@ -720,6 +1191,8 @@ export default function App() {
         <Route path="/health" element={<HealthPage />} />
         <Route path="/sessions" element={<SessionsPage />} />
         <Route path="/sessions/:id" element={<SessionDetailPage />} />
+        <Route path="/tasks" element={<KanbanBoardPage />} />
+        <Route path="/tasks/:id" element={<TaskDetailPage />} />
       </Routes>
     </QueryClientProvider>
   )
