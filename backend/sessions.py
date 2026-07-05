@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timezone
 from typing import Dict, Optional
@@ -230,6 +231,90 @@ async def get_session(session_id: str) -> Optional[dict]:
         "cwd": cwd,
         "chat_id": chat_id,
     }
+
+
+async def get_session_message_count(session_id: str) -> int:
+    """Return total message count for a session (excluding session_meta)."""
+    if not os.path.exists(STATE_DB):
+        return 0
+
+    async with aiosqlite.connect(STATE_DB) as db:
+        async with db.execute(
+            """
+            SELECT COUNT(*) FROM messages
+            WHERE session_id = ? AND role IN ('user', 'assistant', 'tool')
+            """,
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+
+async def get_session_messages(session_id: str, limit: int = 100, offset: int = 0) -> dict:
+    """Return paginated messages for a session.
+
+    Returns: {"messages": [...], "total": N, "limit": 100, "offset": 0}
+    """
+    if not os.path.exists(STATE_DB):
+        return {"messages": [], "total": 0, "limit": limit, "offset": offset}
+
+    total = await get_session_message_count(session_id)
+    messages: list[dict] = []
+
+    async with aiosqlite.connect(STATE_DB) as db:
+        async with db.execute(
+            """
+            SELECT
+                id, session_id, role, content, tool_name,
+                timestamp, tool_calls, finish_reason, token_count,
+                reasoning_content, compacted
+            FROM messages
+            WHERE session_id = ? AND role IN ('user', 'assistant', 'tool')
+            ORDER BY id ASC
+            LIMIT ? OFFSET ?
+            """,
+            (session_id, limit, offset),
+        ) as cursor:
+            rows = await cursor.fetchall()
+            for row in rows:
+                (
+                    mid,
+                    sid,
+                    role,
+                    content,
+                    tool_name,
+                    ts,
+                    tool_calls_raw,
+                    finish_reason,
+                    token_count,
+                    reasoning_content,
+                    compacted,
+                ) = row
+                tool_calls = None
+                if tool_calls_raw:
+                    import json
+                    try:
+                        tool_calls = json.loads(tool_calls_raw)
+                    except Exception:
+                        tool_calls = None
+                if compacted:
+                    content = "[compacted]"
+                messages.append(
+                    {
+                        "id": mid,
+                        "session_id": sid,
+                        "role": role,
+                        "content": content or "",
+                        "tool_name": tool_name,
+                        "timestamp": _ts_to_iso(ts),
+                        "tool_calls": tool_calls,
+                        "finish_reason": finish_reason,
+                        "token_count": token_count,
+                        "reasoning_content": reasoning_content,
+                    }
+                )
+
+    return {"messages": messages, "total": total, "limit": limit, "offset": offset}
 
 
 async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:

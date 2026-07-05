@@ -63,7 +63,7 @@ async def get_agent_health(profile_id: str) -> dict:
 
 # ── Sessions endpoints ───────────────────────────────────────────
 
-from backend.sessions import list_sessions, get_session, search_sessions_fts  # noqa: E402
+from backend.sessions import list_sessions, get_session, search_sessions_fts, get_session_messages  # noqa: E402
 
 
 @app.get("/api/sessions")
@@ -91,6 +91,19 @@ async def sessions_detail(session_id: str) -> dict:
     if detail is None:
         raise HTTPException(status_code=404, detail="Session not found")
     return detail
+
+
+@app.get("/api/sessions/{session_id}/messages")
+async def session_messages(
+    session_id: str,
+    limit: int = Query(default=100, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> dict:
+    # Verify session exists
+    detail = await get_session(session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return await get_session_messages(session_id, limit=limit, offset=offset)
 
 
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

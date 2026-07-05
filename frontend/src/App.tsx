@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
@@ -42,6 +42,26 @@ interface SessionItem {
 
 interface SessionListResponse {
   sessions: SessionItem[]
+  total: number
+  limit: number
+  offset: number
+}
+
+interface MessageItem {
+  id: number
+  session_id: string
+  role: 'user' | 'assistant' | 'tool'
+  content: string
+  tool_name: string | null
+  timestamp: string | null
+  tool_calls: unknown
+  finish_reason: string | null
+  token_count: number | null
+  reasoning_content: string | null
+}
+
+interface MessagesResponse {
+  messages: MessageItem[]
   total: number
   limit: number
   offset: number
@@ -450,6 +470,148 @@ function SessionsPage() {
   )
 }
 
+/* ── Message Components ────────────────────────────── */
+
+function formatMessageTime(iso: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  const day = String(d.getDate()).padStart(2, '0')
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const hour = String(d.getHours()).padStart(2, '0')
+  const minute = String(d.getMinutes()).padStart(2, '0')
+  return `${day}/${month} ${hour}:${minute}`
+}
+
+function ReasoningBlock({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="mb-1">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="text-xs italic opacity-50 hover:opacity-80 transition"
+      >
+        {expanded ? 'Hide thinking…' : 'Thinking…'}
+      </button>
+      {expanded && (
+        <div className="mt-1 text-xs italic opacity-60 whitespace-pre-wrap">
+          {content}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolMessage({ msg }: { msg: MessageItem }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="w-full my-2 border border-[var(--surface)] rounded-lg bg-transparent">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-3 py-2 text-xs font-mono text-[var(--text)] hover:bg-[var(--surface)]/40 transition"
+      >
+        <span className="flex items-center gap-2">
+          <span className="inline-block rounded bg-[var(--surface)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+            Tool
+          </span>
+          <span className="opacity-80">{msg.tool_name || 'unknown'}</span>
+        </span>
+        <span className="opacity-50">{expanded ? '▼' : '▶'}</span>
+      </button>
+      {expanded && (
+        <pre className="px-3 py-2 text-xs font-mono text-[var(--text)] overflow-auto max-h-96 whitespace-pre-wrap border-t border-[var(--surface)]">
+          {msg.content || ''}
+        </pre>
+      )}
+    </div>
+  )
+}
+
+function UserMessage({ msg }: { msg: MessageItem }) {
+  return (
+    <div className="flex flex-col items-end my-2 max-w-[80%] self-end">
+      <div className="bg-[var(--accent)]/20 rounded-2xl rounded-br-sm px-4 py-2 text-sm text-white">
+        {msg.content || ''}
+      </div>
+      <span className="text-[10px] opacity-40 mt-1">{formatMessageTime(msg.timestamp)}</span>
+    </div>
+  )
+}
+
+function AssistantMessage({ msg }: { msg: MessageItem }) {
+  return (
+    <div className="flex flex-col items-start my-2 max-w-[80%]">
+      {msg.reasoning_content && <ReasoningBlock content={msg.reasoning_content} />}
+      <div className="bg-[var(--surface)]/60 rounded-2xl rounded-bl-sm px-4 py-2 text-sm text-white">
+        {msg.content || ''}
+      </div>
+      <span className="text-[10px] opacity-40 mt-1">{formatMessageTime(msg.timestamp)}</span>
+    </div>
+  )
+}
+
+function MessagesSection({ sessionId }: { sessionId: string }) {
+  const [offset, setOffset] = useState(0)
+  const limit = 100
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const hasScrolledRef = useRef(false)
+
+  const { data, isLoading, error } = useQuery<MessagesResponse>({
+    queryKey: ['messages', sessionId, offset, limit],
+    queryFn: async () => {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?${params}`)
+      if (!res.ok) throw new Error('Failed to load messages')
+      return res.json()
+    },
+  })
+
+  useEffect(() => {
+    if (data && !hasScrolledRef.current) {
+      hasScrolledRef.current = true
+      setTimeout(() => {
+        bottomRef.current?.scrollIntoView({ behavior: 'auto' })
+      }, 50)
+    }
+  }, [data])
+
+  const canLoadMore = data ? offset + data.messages.length < data.total : false
+
+  const handleLoadMore = () => {
+    if (!data) return
+    const newOffset = offset + limit
+    setOffset(newOffset)
+    hasScrolledRef.current = false
+  }
+
+  if (isLoading) return <p className="opacity-70 py-6">Loading messages…</p>
+  if (error) return <p className="text-red-400 text-sm py-4">Error: {(error as Error).message}</p>
+  if (!data || data.messages.length === 0) return <p className="opacity-60 py-6">No messages in this session</p>
+
+  return (
+    <div className="flex flex-col">
+      {canLoadMore && (
+        <div className="flex justify-center py-3">
+          <button
+            onClick={handleLoadMore}
+            className="px-4 py-1.5 rounded-md bg-[var(--surface)] border border-[var(--surface)] text-sm text-white hover:bg-[var(--surface)]/80 transition"
+          >
+            Load more
+          </button>
+        </div>
+      )}
+      <div className="flex flex-col px-2">
+        {[...data.messages].reverse().map((msg) => {
+          if (msg.role === 'user') return <UserMessage key={msg.id} msg={msg} />
+          if (msg.role === 'assistant') return <AssistantMessage key={msg.id} msg={msg} />
+          return <ToolMessage key={msg.id} msg={msg} />
+        })}
+      </div>
+      <div ref={bottomRef} />
+    </div>
+  )
+}
+
 /* ── Session Detail Page ───────────────────────────── */
 
 function SessionDetailPage() {
@@ -537,9 +699,9 @@ function SessionDetailPage() {
               )}
             </div>
 
-            <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-6 text-center">
-              <p className="text-lg font-semibold text-white mb-1">Messages</p>
-              <p className="text-sm opacity-60">Coming soon — Phase 3</p>
+            <div className="rounded-lg border border-[var(--surface)] bg-[var(--surface)]/30 p-4">
+              <p className="text-lg font-semibold text-white mb-3">Messages</p>
+              <MessagesSection sessionId={data.id} />
             </div>
           </>
         )}
