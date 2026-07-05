@@ -1,0 +1,11 @@
+.env
+*.db
+*.db-shm
+*.db-wal
+__pycache__/
+node_modules/
+dist/
+.pytest_cache/
+/tmp/playwright-screenshots/
+*.pyc
+.venv/
