@@ -226,11 +226,14 @@ def test_dashboard_shows_5_agents(page: Page, seeded_db):
 - [x] Frontend: Task detail view + archived toggle
 - **Entrega:** Kanban board visual (só leitura)
 
-### Phase 5 — Kanban Drag & Drop (Semana 7)
-- [ ] Backend: `PATCH /api/tasks/:id` — valida status transitions, escreve no `kanban.db`
-- [ ] Frontend: @dnd-kit/core pra mover cards entre colunas
-- [ ] E2E: `test_05_kanban_dnd.py` — arrasta card, valida DB update
-- **Entrega:** Kanban funcional com drag-and-drop
+### Phase 5 — Kanban Drag & Drop (Semana 7) ✅ DONE
+- [x] Backend: `PATCH /api/tasks/{id}` — valida status, escreve no `kanban.db`, auto-set started_at/completed_at
+- [x] Frontend: @dnd-kit/core + @dnd-kit/sortable — drag cards entre 5 colunas com closestCorners
+- [x] Frontend: Optimistic update via useMutation com rollback on error
+- [x] Frontend: DragOverlay com rotação + sombra, column drop highlight (ring-accent)
+- [x] Frontend: PointerSensor distance:5 (click vs drag sem conflito)
+- [x] Frontend: MarkdownRenderer nos cards (task.title) e task detail (task.body) com prose-kanban-card CSS
+- **Entrega:** Kanban funcional com drag-and-drop + markdown rendering
 
 ### Phase 6 — Task Detail Panel (Semana 8)
 - [ ] Backend: `GET /api/tasks/:id` — task + comments + runs + artifacts
@@ -390,7 +393,7 @@ agentos/
 | 4 | ✅ Done | Kanban read-only | 5 columns, task detail, archived toggle |
 | — | ✅ Done | Visual identity | DESIGN.md, dark theme, Pixel refinement |
 | — | ✅ Done | Bug fixes | Message overflow, default profile missing |
-| 5 | 🔲 Pending | Kanban DnD | — |
+| 5 | ✅ Done | Kanban DnD + Markdown | @dnd-kit, PATCH endpoint, optimistic update, MarkdownRenderer in cards |
 | 6 | 🔲 Pending | Task detail | — |
 | 7 | 🔲 Pending | Config viewer | — |
 | 8 | 🔲 Pending | Config editor | — |
