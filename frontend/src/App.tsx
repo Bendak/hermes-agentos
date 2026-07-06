@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import rehypeHighlight from 'rehype-highlight'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -673,6 +676,72 @@ function SessionsPage() {
   )
 }
 
+/* ── Markdown Renderer ─────────────────────────────── */
+
+function MarkdownRenderer({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[rehypeHighlight]}
+      components={{
+        p: ({ children }) => <p className="text-sm leading-relaxed mb-2">{children}</p>,
+        h1: ({ children }) => <h1 className="text-text-primary font-semibold text-lg mb-2 mt-3">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-text-primary font-semibold text-base mb-2 mt-3">{children}</h2>,
+        h3: ({ children }) => <h3 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h3>,
+        h4: ({ children }) => <h4 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h4>,
+        h5: ({ children }) => <h5 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h5>,
+        h6: ({ children }) => <h6 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h6>,
+        ul: ({ children }) => <ul className="list-disc pl-5 mb-2 text-sm">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 text-sm">{children}</ol>,
+        li: ({ children }) => <li className="mb-0.5">{children}</li>,
+        a: ({ children, href }) => (
+          <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
+            {children}
+          </a>
+        ),
+        blockquote: ({ children }) => (
+          <blockquote className="border-l-2 border-accent/30 pl-4 italic text-text-secondary mb-2">
+            {children}
+          </blockquote>
+        ),
+        code: ({ children, className }) => {
+          const isBlock = className?.includes('language-')
+          if (isBlock) {
+            return (
+              <pre className="bg-bg-elevated rounded-md p-3 overflow-auto max-h-96 mb-2 text-mono-sm">
+                <code className={className}>{children}</code>
+              </pre>
+            )
+          }
+          return (
+            <code className="bg-surface rounded px-1 py-0.5 text-mono-sm text-accent">
+              {children}
+            </code>
+          )
+        },
+        table: ({ children }) => (
+          <div className="overflow-auto mb-2">
+            <table className="w-full text-sm border-collapse border border-border">{children}</table>
+          </div>
+        ),
+        thead: ({ children }) => <thead className="bg-bg-elevated">{children}</thead>,
+        th: ({ children }) => (
+          <th className="border border-border px-2 py-1 text-left text-text-primary font-semibold">{children}</th>
+        ),
+        td: ({ children }) => (
+          <td className="border border-border px-2 py-1 text-text-secondary">{children}</td>
+        ),
+        hr: () => <hr className="border-border my-3" />,
+        strong: ({ children }) => <strong className="font-semibold text-text-primary">{children}</strong>,
+        em: ({ children }) => <em className="italic">{children}</em>,
+        del: ({ children }) => <del className="line-through text-text-tertiary">{children}</del>,
+      }}
+    >
+      {content}
+    </ReactMarkdown>
+  )
+}
+
 /* ── Message Components ────────────────────────────── */
 
 function formatMessageTime(iso: string | null): string {
@@ -700,7 +769,7 @@ function ReasoningBlock({ content }: { content: string }) {
       </button>
       {expanded && (
         <div className="mt-1 text-caption text-text-tertiary italic whitespace-pre-wrap">
-          {content}
+          <MarkdownRenderer content={content} />
         </div>
       )}
     </div>
@@ -734,9 +803,9 @@ function ToolMessage({ msg }: { msg: MessageItem }) {
         </span>
       </button>
       {expanded && (
-        <pre className="px-3 py-2 text-mono-sm text-text-secondary overflow-auto max-h-96 whitespace-pre-wrap border-t border-border">
-          {msg.content || ''}
-        </pre>
+        <div className="px-3 py-2 border-t border-border overflow-auto max-h-96" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+          <MarkdownRenderer content={msg.content || ''} />
+        </div>
       )}
     </div>
   )
@@ -749,7 +818,7 @@ function UserMessage({ msg }: { msg: MessageItem }) {
         className="bg-accent-subtle rounded-2xl rounded-br-sm px-4 py-2 text-sm text-accent"
         style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
       >
-        {msg.content || ''}
+        <MarkdownRenderer content={msg.content || ''} />
       </div>
       <span className="text-caption text-text-tertiary mt-1">{formatMessageTime(msg.timestamp)}</span>
     </div>
@@ -764,7 +833,7 @@ function AssistantMessage({ msg }: { msg: MessageItem }) {
         className="bg-surface/60 rounded-2xl rounded-bl-sm px-4 py-2 text-sm text-text-primary"
         style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
       >
-        {msg.content || ''}
+        <MarkdownRenderer content={msg.content || ''} />
       </div>
       <span className="text-caption text-text-tertiary mt-1">{formatMessageTime(msg.timestamp)}</span>
     </div>
