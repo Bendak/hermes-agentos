@@ -1319,6 +1319,7 @@ function KanbanBoardPage() {
 function TaskDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const [activeTab, setActiveTab] = useState<'overview' | 'runs' | 'comments' | 'children'>('overview')
 
   const { data, isLoading, error } = useQuery<TaskDetail>({
     queryKey: ['task', id],
@@ -1359,7 +1360,9 @@ function TaskDetailPage() {
 
         {data && (
           <>
-            <h1 className="text-h2 font-bold text-text-primary mb-2">{data.title || 'Untitled'}</h1>
+            <div className="text-h2 font-bold text-text-primary mb-2 prose-kanban-card">
+              <MarkdownRenderer content={data.title || 'Untitled'} />
+            </div>
             <div className="flex flex-wrap items-center gap-2 mb-6">
               {data.assignee && (
                 <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${assigneeBadgeClass(data.assignee)}`}>
@@ -1376,7 +1379,7 @@ function TaskDetailPage() {
             </div>
 
             {/* Metadata grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
               <div className="rounded-lg border border-border bg-surface/30 p-4">
                 <p className="text-caption text-text-tertiary mb-1">ID</p>
                 <p className="font-mono text-sm text-text-primary break-all">{data.id}</p>
@@ -1415,116 +1418,171 @@ function TaskDetailPage() {
               )}
             </div>
 
-            {/* Body */}
-            {data.body && (
-              <div className="rounded-lg border border-border bg-surface/30 p-4 mb-8">
-                <p className="text-caption text-text-tertiary mb-2">Body</p>
-                <div className="text-sm text-text-primary">
-                  <MarkdownRenderer content={data.body} />
-                </div>
-              </div>
-            )}
+            {/* Tab bar */}
+            <div className="flex gap-1 border-b border-border mb-6" data-testid="task-detail-tabs">
+              {[
+                { key: 'overview' as const, label: 'Overview' },
+                { key: 'runs' as const, label: `Runs (${data.runs.length})` },
+                { key: 'comments' as const, label: `Comments (${data.comments.length})` },
+                { key: 'children' as const, label: `Children (${data.children.length})` },
+              ].map((tab) => (
+                <button
+                  key={tab.key}
+                  data-testid={`tab-${tab.key}`}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`px-4 py-2 text-sm font-medium transition duration-200 ${
+                    activeTab === tab.key
+                      ? 'bg-surface text-text-primary border-b-2 border-accent'
+                      : 'text-text-secondary hover:text-text-primary hover:bg-surface/50'
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
 
-            {/* Links */}
-            {(data.parent_id || data.children.length > 0) && (
-              <div className="rounded-lg border border-border bg-surface/30 p-4 mb-8">
-                <p className="text-caption text-text-tertiary mb-2">Links</p>
-                {data.parent_id && (
-                  <div className="mb-1 text-sm">
-                    <span className="text-text-tertiary">Parent:</span>{' '}
-                    <button
-                      onClick={() => navigate(`/tasks/${encodeURIComponent(data.parent_id!)}`)}
-                      className="text-accent hover:underline font-mono"
-                    >
-                      {data.parent_id}
-                    </button>
+            {/* Overview tab */}
+            {activeTab === 'overview' && (
+              <div data-testid="tab-panel-overview">
+                {data.body && (
+                  <div className="rounded-lg border border-border bg-surface/30 p-4 mb-6">
+                    <p className="text-caption text-text-tertiary mb-2">Body</p>
+                    <div className="text-sm text-text-primary">
+                      <MarkdownRenderer content={data.body} />
+                    </div>
                   </div>
                 )}
-                {data.children.length > 0 && (
-                  <div className="text-sm">
-                    <span className="text-text-tertiary">Children:</span>
-                    <div className="mt-1 flex flex-wrap gap-2">
-                      {data.children.map((childId) => (
+                {(data.parent_id || data.children.length > 0) && (
+                  <div className="rounded-lg border border-border bg-surface/30 p-4 mb-6">
+                    <p className="text-caption text-text-tertiary mb-2">Links</p>
+                    {data.parent_id && (
+                      <div className="mb-1 text-sm">
+                        <span className="text-text-tertiary">Parent:</span>{' '}
                         <button
-                          key={childId}
-                          onClick={() => navigate(`/tasks/${encodeURIComponent(childId)}`)}
-                          className="text-accent hover:underline font-mono text-xs bg-bg-base px-2 py-1 rounded border border-border"
+                          onClick={() => navigate(`/tasks/${encodeURIComponent(data.parent_id!)}`)}
+                          className="text-accent hover:underline font-mono"
                         >
-                          {childId}
+                          {data.parent_id}
                         </button>
-                      ))}
+                      </div>
+                    )}
+                    {data.children.length > 0 && (
+                      <div className="text-sm">
+                        <span className="text-text-tertiary">Children:</span>
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          {data.children.map((childId) => (
+                            <button
+                              key={childId}
+                              onClick={() => navigate(`/tasks/${encodeURIComponent(childId)}`)}
+                              className="text-accent hover:underline font-mono text-xs bg-bg-base px-2 py-1 rounded border border-border"
+                            >
+                              {childId}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {!data.body && !data.parent_id && data.children.length === 0 && (
+                  <p className="text-body-sm text-text-tertiary">No additional details.</p>
+                )}
+              </div>
+            )}
+
+            {/* Runs tab */}
+            {activeTab === 'runs' && (
+              <div data-testid="tab-panel-runs" className="rounded-lg border border-border bg-surface/30 p-4">
+                {data.runs.length === 0 && <p className="text-body-sm text-text-tertiary">No runs recorded.</p>}
+                {data.runs.length > 0 && (
+                  <>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-bg-elevated text-text-secondary text-left">
+                          <tr>
+                            <th className="px-3 py-2 font-medium">Step</th>
+                            <th className="px-3 py-2 font-medium">Status</th>
+                            <th className="px-3 py-2 font-medium">Profile</th>
+                            <th className="px-3 py-2 font-medium">Started</th>
+                            <th className="px-3 py-2 font-medium">Ended</th>
+                            <th className="px-3 py-2 font-medium">Outcome</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {data.runs.map((run) => (
+                            <tr key={run.id} className="hover:bg-surface/40 transition">
+                              <td className="px-3 py-2 text-text-primary font-mono text-mono-sm">{run.step_key || '-'}</td>
+                              <td className="px-3 py-2 text-text-secondary">
+                                <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${run.status === 'done' ? 'bg-success-subtle text-success border border-success/20' : run.status === 'running' ? 'bg-warning-subtle text-warning border border-warning/20' : 'bg-surface text-text-secondary border border-border'}`}>
+                                  {run.status}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2 text-text-secondary">{run.profile || '-'}</td>
+                              <td className="px-3 py-2 tabular-nums">{formatIso(run.started_at)}</td>
+                              <td className="px-3 py-2 tabular-nums">{formatIso(run.ended_at)}</td>
+                              <td className="px-3 py-2 max-w-xs truncate text-text-secondary">{run.outcome || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
+                    {data.runs.some((r) => r.summary) && (
+                      <div className="mt-4 space-y-3">
+                        {data.runs.filter((r) => r.summary).map((run) => (
+                          <div key={`summary-${run.id}`} className="rounded border border-border bg-bg-base/40 p-3">
+                            <p className="text-mono-sm font-mono text-accent mb-1">Run {run.id} — {run.step_key || '?'}</p>
+                            <p className="text-sm text-text-primary whitespace-pre-wrap">{run.summary}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {/* Comments tab */}
+            {activeTab === 'comments' && (
+              <div data-testid="tab-panel-comments" className="rounded-lg border border-border bg-surface/30 p-4">
+                {data.comments.length === 0 && <p className="text-body-sm text-text-tertiary">No comments.</p>}
+                {data.comments.length > 0 && (
+                  <div className="space-y-3">
+                    {data.comments.map((comment) => (
+                      <div key={comment.id} className="rounded border border-border bg-bg-base/40 p-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-caption font-medium text-text-primary">{comment.author}</span>
+                          <span className="text-caption text-text-tertiary">{formatIso(comment.created_at)}</span>
+                        </div>
+                        <div className="text-sm text-text-primary">
+                          <MarkdownRenderer content={comment.body} />
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
             )}
 
-            {/* Runs */}
-            <div className="rounded-lg border border-border bg-surface/30 p-4 mb-8">
-              <p className="text-h4 font-semibold text-text-primary mb-3">Runs ({data.runs.length})</p>
-              {data.runs.length === 0 && <p className="text-body-sm text-text-tertiary">No runs recorded.</p>}
-              {data.runs.length > 0 && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead className="bg-bg-elevated text-text-secondary text-left">
-                      <tr>
-                        <th className="px-3 py-2 font-medium">Step</th>
-                        <th className="px-3 py-2 font-medium">Status</th>
-                        <th className="px-3 py-2 font-medium">Profile</th>
-                        <th className="px-3 py-2 font-medium">Started</th>
-                        <th className="px-3 py-2 font-medium">Ended</th>
-                        <th className="px-3 py-2 font-medium">Outcome</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-border">
-                      {data.runs.map((run) => (
-                        <tr key={run.id} className="hover:bg-surface/40 transition">
-                          <td className="px-3 py-2 text-text-primary font-mono text-mono-sm">{run.step_key || '-'}</td>
-                          <td className="px-3 py-2 text-text-secondary">
-                            <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${run.status === 'done' ? 'bg-success-subtle text-success border border-success/20' : run.status === 'running' ? 'bg-warning-subtle text-warning border border-warning/20' : 'bg-surface text-text-secondary border border-border'}`}>
-                              {run.status}
-                            </span>
-                          </td>
-                          <td className="px-3 py-2 text-text-secondary">{run.profile || '-'}</td>
-                          <td className="px-3 py-2 tabular-nums">{formatIso(run.started_at)}</td>
-                          <td className="px-3 py-2 tabular-nums">{formatIso(run.ended_at)}</td>
-                          <td className="px-3 py-2 max-w-xs truncate text-text-secondary">{run.outcome || '-'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-              {data.runs.some((r) => r.summary) && (
-                <div className="mt-4 space-y-3">
-                  {data.runs.filter((r) => r.summary).map((run) => (
-                    <div key={`summary-${run.id}`} className="rounded border border-border bg-bg-base/40 p-3">
-                      <p className="text-mono-sm font-mono text-accent mb-1">Run {run.id} — {run.step_key || '?'}</p>
-                      <p className="text-sm text-text-primary whitespace-pre-wrap">{run.summary}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Comments */}
-            <div className="rounded-lg border border-border bg-surface/30 p-4">
-              <p className="text-h4 font-semibold text-text-primary mb-3">Comments ({data.comments.length})</p>
-              {data.comments.length === 0 && <p className="text-body-sm text-text-tertiary">No comments.</p>}
-              {data.comments.length > 0 && (
-                <div className="space-y-3">
-                  {data.comments.map((comment) => (
-                    <div key={comment.id} className="rounded border border-border bg-bg-base/40 p-3">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-caption font-medium text-text-primary">{comment.author}</span>
-                        <span className="text-caption text-text-tertiary">{formatIso(comment.created_at)}</span>
-                      </div>
-                      <p className="text-sm text-text-primary whitespace-pre-wrap">{comment.body}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
+            {/* Children tab */}
+            {activeTab === 'children' && (
+              <div data-testid="tab-panel-children" className="rounded-lg border border-border bg-surface/30 p-4">
+                {data.children.length === 0 && <p className="text-body-sm text-text-tertiary">No child tasks.</p>}
+                {data.children.length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {data.children.map((childId) => (
+                      <button
+                        key={childId}
+                        onClick={() => navigate(`/tasks/${encodeURIComponent(childId)}`)}
+                        className="text-left rounded-lg border border-border bg-bg-base/40 p-4 hover:bg-surface/50 transition cursor-pointer"
+                      >
+                        <p className="text-caption text-text-tertiary mb-1">Child task</p>
+                        <p className="font-mono text-sm text-accent">{childId}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
       </main>
