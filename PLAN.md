@@ -243,11 +243,16 @@ def test_dashboard_shows_5_agents(page: Page, seeded_db):
 - [x] Frontend: Children tab with clickable cards
 - **Entrega:** Task detail com tabs organizadas e markdown em todo conteúdo
 
-### Phase 7 — Config Viewer (Semana 9)
-- [ ] Backend: `GET /api/config` — parse seguro do `config.yaml` (safe_load)
-- [ ] Frontend: Tree view com syntax highlight (read-only)
-- [ ] E2E: `test_07_config_viewer.py` — valida tree view
-- **Entrega:** Visualizador de config
+### Phase 7 — Config Viewer (Semana 9) ✅ DONE
+- [x] Backend: `GET /api/config` — parse seguro do `config.yaml` (safe_load) com redação de secrets
+- [x] Backend: `GET /api/config/raw` — YAML redacted como texto
+- [x] Frontend: Tree view colapsável (ConfigNode recursivo, auto-expand 2 níveis)
+- [x] Frontend: YAML view com toggle (tree ↔ yaml)
+- [x] Frontend: Search/filter por key name
+- [x] Frontend: Secret indicators (🔒 + amber text para valores redacted)
+- [x] Frontend: Warning banner "Read-only — changes require container restart"
+- [x] Frontend: Navbar link "Config"
+- **Entrega:** Visualizador de config read-only com redação de secrets
 
 ### Phase 8 — Config Editor (Semana 10)
 - [ ] Backend: `PATCH /api/config` — Pydantic validation + atomic write
@@ -397,7 +402,7 @@ agentos/
 | — | ✅ Done | Bug fixes | Message overflow, default profile missing |
 | 5 | ✅ Done | Kanban DnD + Markdown | @dnd-kit, PATCH endpoint, optimistic update, MarkdownRenderer in cards |
 | 6 | ✅ Done | Task detail tabs | Overview/Runs/Comments/Children tabs, markdown in title+comments |
-| 7 | 🔲 Pending | Config viewer | — |
+| 7 | ✅ Done | Config viewer | Tree+YAML view, secret redaction, search, read-only |
 | 8 | 🔲 Pending | Config editor | — |
 | 9 | 🔲 Pending | Skills hub | — |
 | 10 | 🔲 Pending | Workflow editor | — |
