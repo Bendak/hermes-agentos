@@ -136,13 +136,13 @@ function NavBar() {
     return (
       <Link
         to={to}
-        className={`relative px-1 py-1 text-sm font-medium transition ${
-          active ? 'text-accent' : 'text-text-secondary hover:text-text-primary'
+        className={`relative px-3 py-1.5 text-sm font-medium rounded-md transition duration-200 ease-agent-os ${
+          active ? 'text-accent bg-accent-subtle' : 'text-text-secondary hover:text-text-primary hover:bg-surface/60'
         }`}
       >
         {label}
         {active && (
-          <span className="absolute bottom-[-13px] left-0 right-0 h-[2px] bg-accent rounded-full shadow-glow" />
+          <span className="absolute bottom-[-13px] left-1 right-1 h-[2px] bg-accent rounded-full shadow-glow" />
         )}
       </Link>
     )
@@ -269,7 +269,7 @@ function DashboardPage() {
           </div>
         )}
         {error && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error">
             Error: {(error as Error).message}
           </div>
         )}
@@ -395,18 +395,18 @@ function formatDuration(seconds: number | null): string {
 
 function sourceBadge(source: string) {
   const map: Record<string, string> = {
-    whatsapp: 'bg-green-600 text-text-primary',
-    discord: 'bg-indigo-600 text-text-primary',
-    telegram: 'bg-cyan-600 text-text-primary',
-    api_server: 'bg-amber-500 text-black',
-    webhook: 'bg-rose-600 text-text-primary',
-    tui: 'bg-slate-600 text-text-primary',
-    cli: 'bg-slate-600 text-text-primary',
-    cron: 'bg-slate-600 text-text-primary',
-    homeassistant: 'bg-slate-600 text-text-primary',
-    subagent: 'bg-slate-600 text-text-primary',
+    whatsapp:   'bg-success-subtle text-success border border-success/20',
+    discord:    'bg-accent-tertiary/10 text-accent-tertiary border border-accent-tertiary/20',
+    telegram:   'bg-info-subtle text-info border border-info/20',
+    api_server: 'bg-accent-secondary-subtle text-accent-secondary border border-accent-secondary/20',
+    webhook:    'bg-error-subtle text-error border border-error/20',
+    tui:        'bg-surface text-text-secondary border border-border',
+    cli:        'bg-surface text-text-secondary border border-border',
+    cron:       'bg-surface text-text-secondary border border-border',
+    homeassistant: 'bg-info-subtle text-info border border-info/20',
+    subagent:   'bg-accent-tertiary/10 text-accent-tertiary border border-accent-tertiary/20',
   }
-  return map[source.toLowerCase()] || 'bg-slate-600 text-text-primary'
+  return map[source.toLowerCase()] || 'bg-surface text-text-secondary border border-border'
 }
 
 function sourceLabel(source: string): string {
@@ -576,7 +576,7 @@ function SessionsPage() {
           </div>
         )}
         {error && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error">
             Error: {(error as Error).message}
           </div>
         )}
@@ -817,7 +817,7 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
       ))}
     </div>
   )
-  if (error) return <p className="text-red-400 text-sm py-4">Error: {(error as Error).message}</p>
+  if (error) return <p className="text-error text-sm py-4">Error: {(error as Error).message}</p>
   if (!data || data.messages.length === 0) return <p className="text-text-tertiary py-6">No messages in this session</p>
 
   return (
@@ -875,7 +875,7 @@ function SessionDetailPage() {
 
         {isLoading && <p className="text-text-secondary">Loading session…</p>}
         {error && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error">
             Error: {(error as Error).message}
           </div>
         )}
@@ -918,7 +918,7 @@ function SessionDetailPage() {
                 <p className="text-sm text-text-primary">{data.message_count} / {data.tool_call_count}</p>
               </div>
               {data.archived && (
-                <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4">
+                <div className="rounded-lg border border-warning/30 bg-warning-subtle p-4">
                   <p className="text-caption text-warning mb-1">Archived</p>
                   <p className="text-sm text-text-primary">This session is archived.</p>
                 </div>
@@ -945,11 +945,11 @@ function SessionDetailPage() {
 /* ── Kanban Board ──────────────────────────────────── */
 
 const COLUMN_META = [
-  { status: 'todo', label: 'Backlog', accent: 'border-l-slate-500', header: 'border-slate-500/50', badge: 'bg-slate-500/20 text-slate-400' },
-  { status: 'ready', label: 'Ready', accent: 'border-l-blue-500', header: 'border-blue-500/50', badge: 'bg-blue-500/20 text-blue-400' },
-  { status: 'running', label: 'Running', accent: 'border-l-amber-500', header: 'border-amber-500/50', badge: 'bg-amber-500/20 text-amber-400' },
-  { status: 'done', label: 'Done', accent: 'border-l-green-500', header: 'border-green-500/50', badge: 'bg-green-500/20 text-green-400' },
-  { status: 'blocked', label: 'Blocked', accent: 'border-l-red-500', header: 'border-red-500/50', badge: 'bg-red-500/20 text-red-400' },
+  { status: 'todo',    label: 'Backlog', accent: 'border-l-text-tertiary', header: 'border-text-tertiary/50', badge: 'bg-surface text-text-tertiary border border-text-tertiary/20' },
+  { status: 'ready',   label: 'Ready',   accent: 'border-l-info',           header: 'border-info/50',           badge: 'bg-info-subtle text-info border border-info/20' },
+  { status: 'running', label: 'Running', accent: 'border-l-warning',        header: 'border-warning/50',        badge: 'bg-warning-subtle text-warning border border-warning/20' },
+  { status: 'done',    label: 'Done',    accent: 'border-l-success',        header: 'border-success/50',        badge: 'bg-success-subtle text-success border border-success/20' },
+  { status: 'blocked', label: 'Blocked', accent: 'border-l-error',          header: 'border-error/50',          badge: 'bg-error-subtle text-error border border-error/20' },
 ]
 
 function columnForStatus(status: string): string {
@@ -959,13 +959,13 @@ function columnForStatus(status: string): string {
 
 function assigneeBadgeClass(assignee: string | null): string {
   const map: Record<string, string> = {
-    nexus: 'bg-purple-600 text-text-primary',
-    atlas: 'bg-blue-600 text-text-primary',
-    coder: 'bg-emerald-600 text-text-primary',
-    pixel: 'bg-pink-600 text-text-primary',
-    nova: 'bg-orange-600 text-text-primary',
+    nexus: 'bg-accent-tertiary/15 text-accent-tertiary border border-accent-tertiary/20',
+    atlas: 'bg-info/15 text-info border border-info/20',
+    coder: 'bg-success/15 text-success border border-success/20',
+    pixel: 'bg-accent-secondary-subtle text-accent-secondary border border-accent-secondary/20',
+    nova:  'bg-warning/15 text-warning border border-warning/20',
   }
-  return map[assignee?.toLowerCase() || ''] || 'bg-slate-600 text-text-primary'
+  return map[assignee?.toLowerCase() || ''] || 'bg-surface text-text-secondary border border-border'
 }
 
 function priorityDotClass(priority: number | null): string {
@@ -975,7 +975,7 @@ function priorityDotClass(priority: number | null): string {
     2: 'bg-semantic-info',
     3: 'bg-text-tertiary',
   }
-  return map[priority ?? 3] || 'bg-slate-500'
+  return map[priority ?? 3] || 'bg-text-tertiary'
 }
 
 function priorityLabel(priority: number | null): string {
@@ -1002,7 +1002,7 @@ function TaskCard({ task }: { task: TaskItem }) {
           navigate(`/tasks/${encodeURIComponent(task.id)}`)
         }
       }}
-      className={`card-focus mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-slate-500'}`}
+      className={`card-focus mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-text-tertiary'}`}
     >
       <h4 className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug mb-2">
         {task.title || 'Untitled'}
@@ -1099,7 +1099,7 @@ function KanbanBoardPage() {
       <main className="mx-auto max-w-7xl px-6 pb-12">
         {isLoading && <p className="text-text-secondary">Loading tasks…</p>}
         {error && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 mb-4">
+          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error mb-4">
             Error: {(error as Error).message}
           </div>
         )}
@@ -1119,9 +1119,9 @@ function KanbanBoardPage() {
 
             {showArchived && (
               <div className="mt-8">
-                <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-500/30">
+                <div className="flex items-center justify-between mb-3 pb-2 border-b border-text-tertiary/30">
                   <h3 className="text-body-sm font-semibold text-text-tertiary">Archived</h3>
-                  <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-slate-500/20 text-slate-400">
+                  <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-surface text-text-tertiary border border-text-tertiary/20">
                     {archivedTasks.length}
                   </span>
                 </div>
@@ -1180,7 +1180,7 @@ function TaskDetailPage() {
 
         {isLoading && <p className="text-text-secondary">Loading task…</p>}
         {error && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
+          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error">
             Error: {(error as Error).message}
           </div>
         )}
@@ -1307,7 +1307,7 @@ function TaskDetailPage() {
                         <tr key={run.id} className="hover:bg-surface/40 transition">
                           <td className="px-3 py-2 text-text-primary font-mono text-mono-sm">{run.step_key || '-'}</td>
                           <td className="px-3 py-2 text-text-secondary">
-                            <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${run.status === 'done' ? 'bg-green-500/20 text-green-400' : run.status === 'running' ? 'bg-amber-500/20 text-amber-400' : 'bg-slate-500/20 text-slate-400'}`}>
+                            <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${run.status === 'done' ? 'bg-success-subtle text-success border border-success/20' : run.status === 'running' ? 'bg-warning-subtle text-warning border border-warning/20' : 'bg-surface text-text-secondary border border-border'}`}>
                               {run.status}
                             </span>
                           </td>

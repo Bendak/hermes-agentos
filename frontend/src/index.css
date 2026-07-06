@@ -95,18 +95,40 @@ body::before {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(ellipse 600px 300px at 10% -5%, rgba(0, 229, 185, 0.04), transparent 70%),
-    radial-gradient(ellipse 500px 400px at 90% -10%, rgba(245, 184, 0, 0.03), transparent 70%);
+    radial-gradient(ellipse 700px 350px at 10% -5%, rgba(0, 229, 185, 0.05), transparent 70%),
+    radial-gradient(ellipse 600px 450px at 90% -10%, rgba(245, 184, 0, 0.04), transparent 70%);
+}
+
+/* Smooth default transitions on interactive elements */
+a, button, input, select, textarea, [role="button"] {
+  transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out;
+}
+
+/* Ensure body handles scrolling correctly with sticky nav */
+html, body {
+  min-height: 100vh;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+/* Table row hover transition per design system spec */
+tbody tr {
+  transition: background-color 100ms ease;
+}
+
+/* Strengthen selection visibility */
+::selection {
+  background-color: var(--accent-primary);
+  color: var(--text-inverse);
+}
+
+/* Cursor on clickable elements */
+a, button, [role="button"], select, input[type="submit"], input[type="button"], label[for] {
+  cursor: pointer;
 }
 
 code, pre, kbd, .font-mono {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-}
-
-/* Selection */
-::selection {
-  background-color: var(--accent-primary-subtle);
-  color: var(--accent-primary);
 }
 
 /* Scrollbars (WebKit) */
