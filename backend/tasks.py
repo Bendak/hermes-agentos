@@ -184,6 +184,55 @@ async def list_tasks(
         return tasks
 
 
+VALID_STATUSES = {"todo", "ready", "running", "done", "blocked", "archived"}
+
+
+async def update_task_status(task_id: str, new_status: str) -> dict | None:
+    """Update a task's status and related timestamps. Returns the updated task or None."""
+    if new_status not in VALID_STATUSES:
+        return None
+
+    if not os.path.exists(DB_PATH):
+        return None
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Check task exists
+        async with db.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)) as cur:
+            if not await cur.fetchone():
+                return None
+
+        now = int(datetime.now(timezone.utc).timestamp())
+
+        if new_status == "running":
+            await db.execute(
+                """
+                UPDATE tasks
+                SET status = ?, started_at = COALESCE(started_at, ?)
+                WHERE id = ?
+                """,
+                (new_status, now, task_id),
+            )
+        elif new_status == "done":
+            await db.execute(
+                """
+                UPDATE tasks
+                SET status = ?, completed_at = ?
+                WHERE id = ?
+                """,
+                (new_status, now, task_id),
+            )
+        else:
+            await db.execute(
+                "UPDATE tasks SET status = ? WHERE id = ?",
+                (new_status, task_id),
+            )
+
+        await db.commit()
+
+    # Return updated task via get_task
+    return await get_task(task_id)
+
+
 async def get_task(task_id: str) -> dict | None:
     """Return full task detail including runs, comments, and links."""
     if not os.path.exists(DB_PATH):
