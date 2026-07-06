@@ -7,7 +7,7 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 - **Agent Dashboard** — Live status cards for all your Hermes profiles (model, provider, gateway state, session count). Auto-discovers the default profile and all sub-profiles.
 - **Session History** — Browse, search, and filter all conversation sessions with FTS5 full-text search
 - **Session Detail** — Read-only chat thread viewer with reasoning blocks, tool call expansion, and message timeline
-- **Kanban Board** — Read-only task board with 5 columns (backlog, todo, in_progress, review, done), task detail view, and archived toggle
+- **Kanban Board** — Interactive task board with drag-and-drop between 5 columns (backlog, ready, running, done, blocked), markdown rendering in cards, task detail view, and archived toggle
 - **Visual Identity** — Dark mission-control aesthetic with teal/gold accents, Inter + JetBrains Mono typography, ambient glow effects, sticky blur navbar
 - **Cross-Platform** — Works in Docker containers, Linux/macOS pip installs, and Windows
 
@@ -23,7 +23,7 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 cd agentos
 
 # Backend
-pip install -r backend/requirements.txt
+pip install fastapi uvicorn[standard] aiosqlite pydantic-settings cachetools httpx
 python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 9120
 
 # Frontend (another terminal)
@@ -94,12 +94,10 @@ All profiles are shown on the dashboard with live gateway state, model info, and
 
 AgentOS reads Hermes state directly from:
 - `state.db` (SQLite) — session history, messages, FTS5 search
-- `kanban.db` (SQLite) — task board, task runs, comments
+- `kanban.db` (SQLite) — task board, task runs, comments (read + write for status updates)
 - `config.yaml` + `profiles/*/config.yaml` — agent model, provider info
 - `gateway_state.json` — live gateway PID and state
 - `SOUL.md` — agent role description
-
-No write access needed — AgentOS is read-only by design.
 
 ## API Endpoints
 
@@ -112,11 +110,12 @@ No write access needed — AgentOS is read-only by design.
 | `GET /api/sessions/{id}/messages` | Chat messages with pagination |
 | `GET /api/tasks` | Kanban board tasks |
 | `GET /api/tasks/{id}` | Task detail with runs and comments |
+| `PATCH /api/tasks/{id}` | Update task status (drag-and-drop) |
 
 ## Tech Stack
 
-- **Backend** — FastAPI (Python 3.13+), SQLite, uvicorn
-- **Frontend** — React 18, Vite 5, Tailwind CSS, TanStack Query, React Router
+- **Backend** — FastAPI (Python 3.13+), SQLite, uvicorn, aiosqlite
+- **Frontend** — React 18, Vite 5, Tailwind CSS, TanStack Query, React Router, @dnd-kit (drag-and-drop), react-markdown + remark-gfm + rehype-highlight
 - **Fonts** — Inter (UI), JetBrains Mono (code/data)
 - **Design** — Dark theme (`#0B1120` base), teal accent (`#00E5B9`), gold secondary (`#F5B800`)
 
@@ -126,11 +125,11 @@ No write access needed — AgentOS is read-only by design.
 - [x] Phase 1 — Agent Dashboard (live health cards, dynamic profile discovery)
 - [x] Phase 2 — Session History (list, search, FTS5, pagination, filters)
 - [x] Phase 3 — Session Detail (chat thread, reasoning blocks, tool calls)
+- [x] Phase 3.5 — Markdown rendering (react-markdown, syntax highlighting, GFM)
 - [x] Phase 4 — Kanban Board (read-only, 5 columns, task detail, archived toggle)
+- [x] Phase 5 — Kanban Drag & Drop (@dnd-kit, PATCH endpoint, markdown in cards)
 - [x] Visual Identity — DESIGN.md spec, dark mission-control theme, Pixel design refinement
-- [x] Bug Fix — Message overflow (overflowWrap: anywhere for long content)
-- [x] Bug Fix — Default profile (Hermes) missing from dashboard
-- [ ] Phase 5 — Kanban Drag & Drop (read-write)
+- [x] s6 Autostart — cont-init.d script, survives container rebuilds
 - [ ] Phase 6 — Task Detail improvements
 - [ ] Phase 7+ — Config UI, Skills Hub, Cron management, Workflow builder
 

@@ -1,6 +1,0 @@
-fastapi
-uvicorn[standard]
-pydantic-settings
-aiosqlite
-cachetools
-httpx
