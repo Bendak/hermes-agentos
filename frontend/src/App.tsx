@@ -680,50 +680,51 @@ function SessionsPage() {
 
 function MarkdownRenderer({ content }: { content: string }) {
   return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      rehypePlugins={[rehypeHighlight]}
-      components={{
-        p: ({ children }) => <p className="text-sm leading-relaxed mb-2" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{children}</p>,
-        h1: ({ children }) => <h1 className="text-text-primary font-semibold text-lg mb-2 mt-3">{children}</h1>,
-        h2: ({ children }) => <h2 className="text-text-primary font-semibold text-base mb-2 mt-3">{children}</h2>,
-        h3: ({ children }) => <h3 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h3>,
-        h4: ({ children }) => <h4 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h4>,
-        h5: ({ children }) => <h5 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h5>,
-        h6: ({ children }) => <h6 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h6>,
-        ul: ({ children }) => <ul className="list-disc pl-5 mb-2 text-sm">{children}</ul>,
-        ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 text-sm">{children}</ol>,
-        li: ({ children }) => <li className="mb-0.5">{children}</li>,
-        a: ({ children, href }) => (
-          <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
-            {children}
-          </a>
-        ),
-        blockquote: ({ children }) => (
-          <blockquote className="border-l-2 border-accent/30 pl-4 italic text-text-secondary mb-2">
-            {children}
-          </blockquote>
-        ),
-        code: ({ children, className }) => {
-          const isBlock = className?.includes('language-')
-          if (isBlock) {
-            return (
-              <pre className="bg-bg-elevated rounded-md p-3 overflow-auto max-h-96 mb-2 text-mono-sm" style={{ overflowWrap: 'anywhere', wordBreak: 'break-all' }}>
-                <code className={className}>{children}</code>
-              </pre>
-            )
-          }
-          return (
-            <code className="bg-surface rounded px-1 py-0.5 text-mono-sm text-accent">
+    <div className="max-w-full overflow-hidden">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        rehypePlugins={[rehypeHighlight]}
+        components={{
+          p: ({ children }) => <p className="text-sm leading-relaxed mb-2 max-w-full" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{children}</p>,
+          h1: ({ children }) => <h1 className="text-text-primary font-semibold text-lg mb-2 mt-3">{children}</h1>,
+          h2: ({ children }) => <h2 className="text-text-primary font-semibold text-base mb-2 mt-3">{children}</h2>,
+          h3: ({ children }) => <h3 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h3>,
+          h4: ({ children }) => <h4 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h4>,
+          h5: ({ children }) => <h5 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h5>,
+          h6: ({ children }) => <h6 className="text-text-primary font-semibold text-sm mb-1 mt-2">{children}</h6>,
+          ul: ({ children }) => <ul className="list-disc pl-5 mb-2 text-sm">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal pl-5 mb-2 text-sm">{children}</ol>,
+          li: ({ children }) => <li className="mb-0.5">{children}</li>,
+          a: ({ children, href }) => (
+            <a href={href} target="_blank" rel="noopener noreferrer" className="text-accent hover:underline">
               {children}
-            </code>
-          )
-        },
-        table: ({ children }) => (
-          <div className="overflow-auto max-w-full mb-2">
-            <table className="w-full text-sm border-collapse border border-border">{children}</table>
-          </div>
-        ),
+            </a>
+          ),
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-accent/30 pl-4 italic text-text-secondary mb-2">
+              {children}
+            </blockquote>
+          ),
+          code: ({ children, className }) => {
+            const isBlock = className?.includes('language-')
+            if (isBlock) {
+              return (
+                <pre className="bg-bg-elevated rounded-md p-3 overflow-x-auto max-h-96 mb-2 text-mono-sm max-w-full">
+                  <code className={className}>{children}</code>
+                </pre>
+              )
+            }
+            return (
+              <code className="bg-surface rounded px-1 py-0.5 text-mono-sm text-accent break-all">
+                {children}
+              </code>
+            )
+          },
+          table: ({ children }) => (
+            <div className="overflow-x-auto max-w-full mb-2">
+              <table className="w-full text-sm border-collapse border border-border">{children}</table>
+            </div>
+          ),
         thead: ({ children }) => <thead className="bg-bg-elevated">{children}</thead>,
         th: ({ children }) => (
           <th className="border border-border px-2 py-1 text-left text-text-primary font-semibold">{children}</th>
@@ -739,6 +740,7 @@ function MarkdownRenderer({ content }: { content: string }) {
     >
       {content}
     </ReactMarkdown>
+    </div>
   )
 }
 
@@ -768,7 +770,7 @@ function ReasoningBlock({ content }: { content: string }) {
         {expanded ? 'Hide thinking…' : 'Thinking…'}
       </button>
       {expanded && (
-        <div className="mt-1 text-caption text-text-tertiary italic whitespace-pre-wrap overflow-hidden">
+        <div className="mt-1 text-caption text-text-tertiary italic whitespace-pre-wrap max-w-full w-full">
           <MarkdownRenderer content={content} />
         </div>
       )}
@@ -803,7 +805,7 @@ function ToolMessage({ msg }: { msg: MessageItem }) {
         </span>
       </button>
       {expanded && (
-        <div className="px-3 py-2 border-t border-border overflow-hidden max-h-96" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+        <div className="px-3 py-2 border-t border-border max-h-96 max-w-full w-full" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
           <MarkdownRenderer content={msg.content || ''} />
         </div>
       )}
@@ -815,7 +817,7 @@ function UserMessage({ msg }: { msg: MessageItem }) {
   return (
     <div className="flex flex-col items-end my-2 max-w-[80%] self-end min-w-0">
       <div
-        className="bg-accent-subtle rounded-2xl rounded-br-sm px-4 py-2 text-sm text-accent overflow-hidden"
+        className="bg-accent-subtle rounded-2xl rounded-br-sm px-4 py-2 text-sm text-accent w-full"
         style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
       >
         <MarkdownRenderer content={msg.content || ''} />
@@ -830,7 +832,7 @@ function AssistantMessage({ msg }: { msg: MessageItem }) {
     <div className="flex flex-col items-start my-2 max-w-[80%] min-w-0">
       {msg.reasoning_content && <ReasoningBlock content={msg.reasoning_content} />}
       <div
-        className="bg-surface/60 rounded-2xl rounded-bl-sm px-4 py-2 text-sm text-text-primary overflow-hidden"
+        className="bg-surface/60 rounded-2xl rounded-bl-sm px-4 py-2 text-sm text-text-primary w-full"
         style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
       >
         <MarkdownRenderer content={msg.content || ''} />
