@@ -172,12 +172,18 @@ function NavBar() {
 function AgentCard({ agent }: { agent: AgentProfile }) {
   const isRunning = agent.process_alive && agent.gateway_state === 'running'
   return (
-    <div className="rounded-xl border border-border bg-surface/40 p-5 transition hover:bg-surface-hover/70 hover:shadow-md">
+    <div
+      tabIndex={0}
+      role="button"
+      aria-label={`${agent.name} agent card. Status: ${isRunning ? 'Running' : 'Stopped'}. Role: ${agent.role}. Sessions: ${agent.sessions}.`}
+      className="card-focus rounded-xl border border-border bg-surface/40 p-5 transition hover:bg-surface-hover/70 hover:shadow-md cursor-pointer"
+    >
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-h4 font-semibold text-text-primary">{agent.name}</h3>
         <span
           className={`inline-block h-2 w-2 rounded-full ${isRunning ? 'bg-semantic-success' : 'bg-text-tertiary'}`}
           title={isRunning ? 'Running' : 'Stopped'}
+          aria-label={isRunning ? 'Running' : 'Stopped'}
         />
       </div>
       <p className="text-body-sm text-text-secondary mb-4">{agent.role}</p>
@@ -238,8 +244,28 @@ function DashboardPage() {
 
       <main className="mx-auto max-w-7xl px-6 pb-12">
         {isLoading && (
-          <div className="flex items-center justify-center py-20">
-            <p className="text-text-secondary">Loading agents…</p>
+          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="rounded-xl border border-border bg-surface/20 p-5 animate-skeleton"
+                aria-hidden="true"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="h-5 w-24 rounded bg-surface/60" />
+                  <div className="h-2 w-2 rounded-full bg-surface/60" />
+                </div>
+                <div className="h-4 w-40 rounded bg-surface/60 mb-4" />
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="h-5 w-20 rounded bg-surface/60" />
+                  <div className="h-5 w-20 rounded bg-surface/60" />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="h-3 w-16 rounded bg-surface/60" />
+                  <div className="h-3 w-20 rounded bg-surface/60" />
+                </div>
+              </div>
+            ))}
           </div>
         )}
         {error && (
@@ -533,16 +559,42 @@ function SessionsPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-6 py-8">
-        {isLoading && <p className="text-text-secondary">Loading sessions…</p>}
+        {isLoading && (
+          <div className="rounded-xl border border-border bg-surface/20 p-8 animate-skeleton">
+            <div className="space-y-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="flex items-center gap-4">
+                  <div className="h-4 w-48 rounded bg-surface/60" />
+                  <div className="h-4 w-20 rounded bg-surface/60" />
+                  <div className="h-4 w-32 rounded bg-surface/60" />
+                  <div className="h-4 w-12 rounded bg-surface/60" />
+                  <div className="h-4 w-20 rounded bg-surface/60" />
+                  <div className="h-4 w-20 rounded bg-surface/60" />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {error && (
-          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400 mb-4">
+          <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-400">
             Error: {(error as Error).message}
           </div>
         )}
-        {data && (
+        {data && data.sessions.length === 0 && (
+          <div className="rounded-xl border border-border bg-surface/20 p-12 text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface">
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+              </svg>
+            </div>
+            <p className="text-body text-text-primary mb-1">No sessions found</p>
+            <p className="text-caption text-text-tertiary">Try adjusting your search or filters.</p>
+          </div>
+        )}
+        {data && data.sessions.length > 0 && (
           <>
-            <div className="overflow-x-auto rounded-xl border border-border">
-              <table className="w-full text-sm">
+            <div role="region" aria-label="Sessions table" tabIndex={0} className="overflow-x-auto rounded-xl border border-border focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
+              <table className="w-full text-sm" role="table" aria-label="Sessions list">
                 <thead className="bg-bg-elevated text-text-secondary text-left">
                   <tr>
                     <th className="px-4 py-3 font-medium text-text-tertiary">Title</th>
@@ -557,8 +609,17 @@ function SessionsPage() {
                   {data.sessions.map((s) => (
                     <tr
                       key={s.id}
+                      tabIndex={0}
+                      role="link"
+                      aria-label={`Session ${s.title || 'Untitled'} from ${sourceLabel(s.source)}. ${s.message_count} messages. ${formatDuration(s.duration_seconds)}.`}
                       onClick={() => navigate(`/sessions/${encodeURIComponent(s.id)}`)}
-                      className="cursor-pointer hover:bg-surface/40 transition"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          navigate(`/sessions/${encodeURIComponent(s.id)}`)
+                        }
+                      }}
+                      className="tr-focus cursor-pointer hover:bg-surface/40 transition"
                     >
                       <td className="px-4 py-3 text-text-primary truncate max-w-xs font-medium">
                         {s.title || 'Untitled'}
@@ -579,37 +640,32 @@ function SessionsPage() {
                       </td>
                     </tr>
                   ))}
-                  {data.sessions.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-8 text-center text-text-tertiary">
-                        No sessions found.
-                      </td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
             </div>
 
             {/* Pagination */}
-            <div className="flex items-center justify-between mt-4 text-sm">
+            <nav aria-label="Sessions pagination" className="flex items-center justify-between mt-4 text-sm">
               <button
                 onClick={() => handlePage(offset - limit)}
                 disabled={offset === 0}
+                aria-label="Previous page"
                 className="px-3 py-1.5 rounded-md bg-surface border border-border text-text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-hover/80 transition"
               >
                 Previous
               </button>
-              <span className="text-text-secondary">
+              <span className="text-text-secondary" aria-live="polite">
                 Page {currentPage} of {totalPages || 1}
               </span>
               <button
                 onClick={() => handlePage(offset + limit)}
                 disabled={!data || offset + limit >= data.total}
+                aria-label="Next page"
                 className="px-3 py-1.5 rounded-md bg-surface border border-border text-text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-hover/80 transition"
               >
                 Next
               </button>
-            </div>
+            </nav>
           </>
         )}
       </main>
@@ -636,6 +692,8 @@ function ReasoningBlock({ content }: { content: string }) {
     <div className="mb-1">
       <button
         onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-label={expanded ? 'Hide reasoning' : 'Show reasoning'}
         className="text-caption text-text-tertiary italic hover:text-text-secondary transition"
       >
         {expanded ? 'Hide thinking…' : 'Thinking…'}
@@ -655,7 +713,9 @@ function ToolMessage({ msg }: { msg: MessageItem }) {
     <div className="w-full my-2 border border-border rounded-lg bg-bg-elevated font-mono">
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between px-3 py-2 text-mono-sm text-text-secondary hover:bg-surface-hover/40 transition"
+        aria-expanded={expanded}
+        aria-label={expanded ? `Collapse ${msg.tool_name || 'tool'} result` : `Expand ${msg.tool_name || 'tool'} result`}
+        className="w-full flex items-center justify-between px-3 py-2 text-mono-sm text-text-secondary hover:bg-surface-hover/40 transition cursor-pointer"
       >
         <span className="flex items-center gap-2">
           <span className="inline-block rounded bg-surface px-1.5 py-0.5 text-overline uppercase">
@@ -663,7 +723,15 @@ function ToolMessage({ msg }: { msg: MessageItem }) {
           </span>
           <span className="text-mono-sm text-text-secondary">{msg.tool_name || 'unknown'}</span>
         </span>
-        <span className="text-text-tertiary">{expanded ? '▼' : '▶'}</span>
+        <span
+          className="text-text-tertiary transition-transform duration-200"
+          style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+          aria-hidden="true"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
       </button>
       {expanded && (
         <pre className="px-3 py-2 text-mono-sm text-text-secondary overflow-auto max-h-96 whitespace-pre-wrap border-t border-border">
@@ -737,7 +805,18 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
     hasScrolledRef.current = false
   }
 
-  if (isLoading) return <p className="text-text-secondary py-6">Loading messages…</p>
+  if (isLoading) return (
+    <div className="space-y-3 py-6" aria-label="Loading messages" role="status">
+      {Array.from({ length: 4 }).map((_, i) => (
+        <div key={i} className={`flex ${i % 2 === 0 ? 'justify-end' : 'justify-start'}`}>
+          <div className="animate-skeleton rounded-2xl px-4 py-3 bg-surface/30 max-w-[70%] min-w-[12rem]">
+            <div className="h-3 w-full rounded bg-surface/40 mb-2" />
+            <div className="h-3 w-3/4 rounded bg-surface/40" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
   if (error) return <p className="text-red-400 text-sm py-4">Error: {(error as Error).message}</p>
   if (!data || data.messages.length === 0) return <p className="text-text-tertiary py-6">No messages in this session</p>
 
@@ -913,8 +992,17 @@ function TaskCard({ task }: { task: TaskItem }) {
   const navigate = useNavigate()
   return (
     <div
+      tabIndex={0}
+      role="button"
+      aria-label={`Task ${task.title || 'Untitled'}. Priority ${priorityLabel(task.priority)}. Assignee ${task.assignee || 'unassigned'}. ${task.run_count} runs. ${task.comment_count} comments.`}
       onClick={() => navigate(`/tasks/${encodeURIComponent(task.id)}`)}
-      className={`mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-slate-500'}`}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          navigate(`/tasks/${encodeURIComponent(task.id)}`)
+        }
+      }}
+      className={`card-focus mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-slate-500'}`}
     >
       <h4 className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug mb-2">
         {task.title || 'Untitled'}
@@ -926,7 +1014,7 @@ function TaskCard({ task }: { task: TaskItem }) {
           </span>
         )}
         <span className="inline-flex items-center gap-1 text-caption text-text-secondary">
-          <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityDotClass(task.priority)}`} />
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityDotClass(task.priority)}`} aria-hidden="true" />
           {priorityLabel(task.priority)}
         </span>
         {task.run_count > 0 && (
