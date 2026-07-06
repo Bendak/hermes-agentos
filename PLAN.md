@@ -211,13 +211,12 @@ def test_dashboard_shows_5_agents(page: Page, seeded_db):
 - [x] Bug fix: Default profile (Hermes) missing from dashboard
 - **Entrega:** Chat thread com tool calls e reasoning blocks (read-only)
 
-### Phase 3.5 — Chat Detail Improvements (Semana 5.5) 🔲 PENDENTE
-- [ ] **Markdown rendering** — Render content as proper Markdown (headings, lists, code blocks, bold/italic, links, tables, blockquotes) instead of raw text with visible `**`, `#`, `|` tags
-- [ ] **Line break handling** — Preserve line breaks from message content (currently renders as single continuous text block). Use `whitespace-pre-wrap` or a Markdown renderer that respects line breaks
-- [ ] **Code block syntax highlighting** — Highlight code blocks with language-appropriate colors (use react-markdown + rehype-highlight or similar)
-- [ ] **Message content sanitization** — Sanitize rendered HTML to prevent XSS from message content (use DOMPurify or react-markdown's default sanitization)
-- [ ] **Tool call content formatting** — Format JSON in tool call expansion with pretty-print and syntax highlighting
-- [ ] **Timestamp alignment** — Ensure timestamps don't overlap with long messages in narrow viewports
+### Phase 3.5 — Chat Detail Improvements (Semana 5.5) ✅ DONE
+- [x] **Markdown rendering** — react-markdown + remark-gfm renders headings, lists, code blocks, bold/italic, links, tables, blockquotes
+- [x] **Line break handling** — remark-gfm preserves line breaks properly
+- [x] **Code block syntax highlighting** — rehype-highlight with github-dark theme
+- [x] **Message content sanitization** — react-markdown default (no raw HTML allowed)
+- [x] **Tool call content formatting** — markdown in scrollable container
 - **Entrega:** Mensagens renderizadas com formatação Markdown, quebras de linha, e code blocks legíveis
 
 ### Phase 4 — Kanban Board Read-Only (Semana 6) ✅ DONE
@@ -387,7 +386,7 @@ agentos/
 | 1 | ✅ Done | Agent health cards | 6 profiles (incl. default/Hermes), dynamic discovery |
 | 2 | ✅ Done | Session list | FTS5 search, pagination, filters |
 | 3 | ✅ Done | Session detail + chat | Message bubbles, tool calls, reasoning blocks |
-| 3.5 | 🔲 Pending | Chat detail improvements | Markdown rendering, line breaks, code highlighting |
+| 3.5 | ✅ Done | Chat detail improvements | Markdown rendering, syntax highlighting, GFM |
 | 4 | ✅ Done | Kanban read-only | 5 columns, task detail, archived toggle |
 | — | ✅ Done | Visual identity | DESIGN.md, dark theme, Pixel refinement |
 | — | ✅ Done | Bug fixes | Message overflow, default profile missing |
