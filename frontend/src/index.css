@@ -130,3 +130,48 @@ code, pre, kbd, .font-mono {
   outline: 2px solid var(--accent-primary);
   outline-offset: 2px;
 }
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  body::before {
+    display: none;
+  }
+}
+
+/* Skeleton Loading */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-skeleton {
+  animation: skeleton-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-skeleton {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* Card row focus for keyboard nav */
+.card-focus:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+  border-radius: 0.75rem;
+}
+
+/* Table row focus */
+.tr-focus:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -2px;
+}
