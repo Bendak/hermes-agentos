@@ -1,0 +1,45 @@
+#!/command/with-contenv sh
+# shellcheck shell=sh
+# AgentOS s6 service registration.
+#
+# If /opt/data/agentos/s6/ exists (AgentOS is installed in the data volume),
+# register it as an s6 longrun service in /run/service/agentos so s6-svscan
+# picks it up and supervises it (auto-start + auto-restart on crash).
+#
+# This script runs during cont-init.d (before user services start), so the
+# service is available by the time the container is fully up.
+#
+# AgentOS is NOT part of the Hermes image — it lives entirely in the
+# /opt/data volume. This script is the bridge: it checks if the volume
+# has AgentOS installed and wires it into the s6 supervision tree.
+
+set -eu
+
+AGENTOS_S6_SRC="/opt/data/agentos/s6"
+AGENTOS_S6_DST="/run/service/agentos"
+
+if [ ! -d "$AGENTOS_S6_SRC" ]; then
+    # AgentOS not installed — skip silently
+    exit 0
+fi
+
+if [ ! -f "$AGENTOS_S6_SRC/run" ]; then
+    echo "[agentos] s6/run script missing, skipping"
+    exit 0
+fi
+
+# Skip if already registered (idempotent — safe on container restart)
+if [ -d "$AGENTOS_S6_DST/supervise" ]; then
+    echo "[agentos] service already registered, skipping"
+    exit 0
+fi
+
+# Create the service directory in /run/service (tmpfs, scanned by s6-svscan)
+mkdir -p "$AGENTOS_S6_DST"
+cp "$AGENTOS_S6_SRC/run"    "$AGENTOS_S6_DST/run"
+cp "$AGENTOS_S6_SRC/type"   "$AGENTOS_S6_DST/type"
+cp "$AGENTOS_S6_SRC/finish" "$AGENTOS_S6_DST/finish"
+chmod +x "$AGENTOS_S6_DST/run" "$AGENTOS_S6_DST/finish"
+
+echo "[agentos] service registered in /run/service/agentos"
+echo "[agentos] s6-svscan will start uvicorn on port 9120 shortly"
