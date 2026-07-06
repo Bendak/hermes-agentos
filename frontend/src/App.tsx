@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
-import { useQuery, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { DndContext, DragOverlay, useDroppable, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { useSortable } from '@dnd-kit/sortable'
+import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
+import { CSS } from '@dnd-kit/utilities'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -1059,21 +1063,45 @@ function priorityLabel(priority: number | null): string {
   return map[priority ?? 3] || 'P?'
 }
 
-function TaskCard({ task }: { task: TaskItem }) {
+function TaskCard({ task, isOverlay }: { task: TaskItem; isOverlay?: boolean }) {
   const navigate = useNavigate()
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: task.id, data: { task } })
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging && !isOverlay ? 0.25 : 1,
+  }
+
+  const handleClick = (_e: React.MouseEvent) => {
+    // DnD kit activationConstraint handles click vs drag; navigation is allowed here.
+    navigate(`/tasks/${encodeURIComponent(task.id)}`)
+  }
+
   return (
     <div
+      ref={setNodeRef}
+      style={style}
+      {...attributes}
+      {...listeners}
       tabIndex={0}
       role="button"
       aria-label={`Task ${task.title || 'Untitled'}. Priority ${priorityLabel(task.priority)}. Assignee ${task.assignee || 'unassigned'}. ${task.run_count} runs. ${task.comment_count} comments.`}
-      onClick={() => navigate(`/tasks/${encodeURIComponent(task.id)}`)}
+      onClick={handleClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
           navigate(`/tasks/${encodeURIComponent(task.id)}`)
         }
       }}
-      className={`card-focus mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-text-tertiary'}`}
+      className={`card-focus mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-text-tertiary'} ${isOverlay ? 'shadow-lg rotate-1' : ''}`}
     >
       <h4 className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug mb-2">
         {task.title || 'Untitled'}
@@ -1108,6 +1136,8 @@ function TaskCard({ task }: { task: TaskItem }) {
 
 function KanbanColumn({ label, status, tasks }: { label: string; status: string; tasks: TaskItem[] }) {
   const meta = COLUMN_META.find((c) => c.status === status) || COLUMN_META[0]
+  const { setNodeRef, isOver } = useDroppable({ id: status })
+
   return (
     <div className="flex flex-col min-w-[16rem] max-w-[20rem] flex-1">
       <div className={`flex items-center justify-between mb-3 pb-2 border-b ${meta.header}`}>
@@ -1116,7 +1146,10 @@ function KanbanColumn({ label, status, tasks }: { label: string; status: string;
           {tasks.length}
         </span>
       </div>
-      <div className="flex-1 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1">
+      <div
+        ref={setNodeRef}
+        className={`flex-1 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1 rounded-lg transition ${isOver ? 'bg-accent/5 ring-1 ring-accent/20' : ''}`}
+      >
         {tasks.map((task) => (
           <TaskCard key={task.id} task={task} />
         ))}
@@ -1130,6 +1163,14 @@ function KanbanColumn({ label, status, tasks }: { label: string; status: string;
 
 function KanbanBoardPage() {
   const [showArchived, setShowArchived] = useState(false)
+  const [draggedTask, setDraggedTask] = useState<TaskItem | null>(null)
+  const queryClient = useQueryClient()
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    })
+  )
 
   const { data, isLoading, error } = useQuery<TaskItem[]>({
     queryKey: ['tasks', 'all'],
@@ -1140,6 +1181,52 @@ function KanbanBoardPage() {
     },
     refetchInterval: 10000,
   })
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ taskId, status }: { taskId: string; status: string }) => {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      return res.json()
+    },
+    onMutate: async ({ taskId, status }) => {
+      await queryClient.cancelQueries({ queryKey: ['tasks', 'all'] })
+      const previousTasks = queryClient.getQueryData<TaskItem[]>(['tasks', 'all'])
+      queryClient.setQueryData<TaskItem[]>(['tasks', 'all'], (old) => {
+        if (!old) return old
+        return old.map((t) => (t.id === taskId ? { ...t, status } : t))
+      })
+      return { previousTasks }
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previousTasks) {
+        queryClient.setQueryData(['tasks', 'all'], context.previousTasks)
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+    },
+  })
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const { active } = event
+    const task = data?.find((t) => t.id === active.id)
+    if (task) setDraggedTask(task)
+  }
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+    setDraggedTask(null)
+    if (!over) return
+    const taskId = active.id as string
+    const newStatus = over.id as string
+    const task = data?.find((t) => t.id === taskId)
+    if (!task || task.status === newStatus) return
+    updateMutation.mutate({ taskId, status: newStatus })
+  }
 
   const activeTasks = data?.filter((t) => t.status !== 'archived') || []
   const archivedTasks = data?.filter((t) => t.status === 'archived') || []
@@ -1177,16 +1264,30 @@ function KanbanBoardPage() {
 
         {data && (
           <>
-            <div className="flex gap-4 overflow-x-auto pb-4">
-              {columns.map((col) => (
-                <KanbanColumn
-                  key={col.status}
-                  label={col.label}
-                  status={col.status}
-                  tasks={col.tasks}
-                />
-              ))}
-            </div>
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCorners}
+              onDragStart={handleDragStart}
+              onDragEnd={handleDragEnd}
+            >
+              <div className="flex gap-4 overflow-x-auto pb-4">
+                {columns.map((col) => (
+                  <KanbanColumn
+                    key={col.status}
+                    label={col.label}
+                    status={col.status}
+                    tasks={col.tasks}
+                  />
+                ))}
+              </div>
+              <DragOverlay>
+                {draggedTask ? (
+                  <div className="opacity-90">
+                    <TaskCard task={draggedTask} isOverlay />
+                  </div>
+                ) : null}
+              </DragOverlay>
+            </DndContext>
 
             {showArchived && (
               <div className="mt-8">

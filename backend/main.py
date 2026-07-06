@@ -109,7 +109,18 @@ async def session_messages(
 
 # ── Tasks endpoints ──────────────────────────────────────────────
 
-from backend.tasks import list_tasks, get_task  # noqa: E402
+from backend.tasks import list_tasks, get_task, update_task_status  # noqa: E402
+
+
+@app.patch("/api/tasks/{task_id}")
+async def update_task(task_id: str, body: dict):
+    new_status = body.get("status")
+    if not new_status:
+        raise HTTPException(status_code=400, detail="Missing 'status' field")
+    result = await update_task_status(task_id, new_status)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found or invalid status")
+    return result
 
 
 @app.get("/api/tasks")
