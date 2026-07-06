@@ -168,6 +168,7 @@ function NavBar() {
           {navLink('/', 'Dashboard')}
           {navLink('/sessions', 'Sessions')}
           {navLink('/tasks', 'Tasks')}
+          {navLink('/config', 'Config')}
         </div>
       </div>
     </nav>
@@ -1590,6 +1591,208 @@ function TaskDetailPage() {
   )
 }
 
+/* ── Config Viewer ─────────────────────────────────── */
+
+function ConfigNode({
+  name,
+  value,
+  depth,
+  searchTerm,
+}: {
+  name: string
+  value: any
+  depth: number
+  searchTerm: string
+}) {
+  const [expanded, setExpanded] = useState(depth < 2)
+
+  const matches = searchTerm === '' || name.toLowerCase().includes(searchTerm.toLowerCase())
+
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const children = Object.entries(value)
+    const anyChildMatches = searchTerm === '' || children.some(([k]) => k.toLowerCase().includes(searchTerm.toLowerCase()))
+    const shouldShow = matches || anyChildMatches
+
+    if (!shouldShow) return null
+
+    return (
+      <div style={{ marginLeft: depth * 16 }}>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1 text-sm font-medium text-text-primary hover:text-accent transition-colors py-0.5"
+        >
+          <span className="text-text-tertiary w-3 inline-block">{expanded ? '▼' : '▶'}</span>
+          <span>{name}</span>
+          <span className="text-text-tertiary text-xs ml-1">{'{}'}</span>
+        </button>
+        {expanded &&
+          children.map(([k, v]) => (
+            <ConfigNode key={k} name={k} value={v} depth={depth + 1} searchTerm={searchTerm} />
+          ))}
+      </div>
+    )
+  }
+
+  if (Array.isArray(value)) {
+    const shouldShow = matches || searchTerm === ''
+    if (!shouldShow) return null
+
+    return (
+      <div style={{ marginLeft: depth * 16 }}>
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex items-center gap-1 text-sm font-medium text-text-primary hover:text-accent transition-colors py-0.5"
+        >
+          <span className="text-text-tertiary w-3 inline-block">{expanded ? '▼' : '▶'}</span>
+          <span>{name}</span>
+          <span className="text-text-tertiary text-xs ml-1">[{value.length}]</span>
+        </button>
+        {expanded &&
+          value.map((item, idx) =>
+            typeof item === 'object' && item !== null ? (
+              <ConfigNode
+                key={idx}
+                name={`[${idx}]`}
+                value={item}
+                depth={depth + 1}
+                searchTerm={searchTerm}
+              />
+            ) : (
+              <div
+                key={idx}
+                style={{ marginLeft: (depth + 1) * 16 }}
+                className="flex items-start gap-2 py-0.5 text-sm"
+              >
+                <span className="text-text-tertiary">[{idx}]</span>
+                <span className="text-text-primary">{JSON.stringify(item)}</span>
+              </div>
+            )
+          )}
+      </div>
+    )
+  }
+
+  if (!matches) return null
+
+  const isRedacted = typeof value === 'string' && value.startsWith('***')
+  return (
+    <div style={{ marginLeft: depth * 16 }} className="flex items-start gap-2 py-0.5 text-sm">
+      <span className="text-text-secondary shrink-0">{name}:</span>
+      {isRedacted ? (
+        <span className="text-warning font-mono text-xs" title="Redacted secret">
+          🔒 {value}
+        </span>
+      ) : (
+        <span className="text-text-primary break-all">{JSON.stringify(value)}</span>
+      )}
+    </div>
+  )
+}
+
+function ConfigPage() {
+  const [viewMode, setViewMode] = useState<'tree' | 'yaml'>('tree')
+  const [searchTerm, setSearchTerm] = useState('')
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['config'],
+    queryFn: async () => {
+      const res = await fetch('/api/config')
+      if (!res.ok) throw new Error('Failed to load config')
+      return res.json()
+    },
+  })
+
+  const { data: rawData } = useQuery({
+    queryKey: ['config-raw'],
+    queryFn: async () => {
+      const res = await fetch('/api/config/raw')
+      if (!res.ok) throw new Error('Failed to load raw config')
+      return res.json()
+    },
+    enabled: viewMode === 'yaml',
+  })
+
+  return (
+    <div className="min-h-screen bg-bg-base">
+      <NavBar />
+      <header className="px-6 pt-8 pb-4">
+        <div className="mx-auto max-w-5xl">
+          <h1 className="text-h2 font-bold text-text-primary">Configuration</h1>
+          <p className="text-body-sm text-text-secondary mt-1">Read-only view of Hermes config.yaml</p>
+        </div>
+      </header>
+      <main className="mx-auto max-w-5xl px-6 pb-12">
+        {/* Warning banner */}
+        <div className="mb-6 rounded-lg border border-warning/30 bg-warning-subtle p-4 flex items-center gap-3">
+          <span className="text-warning text-lg">⚠️</span>
+          <p className="text-sm text-warning">
+            Read-only view — changes to config.yaml require a container restart
+          </p>
+        </div>
+
+        {/* Toolbar */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+          <div className="flex gap-2">
+            <button
+              onClick={() => setViewMode('tree')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition duration-200 ${
+                viewMode === 'tree'
+                  ? 'text-accent bg-accent-subtle'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-surface/60'
+              }`}
+            >
+              Tree
+            </button>
+            <button
+              onClick={() => setViewMode('yaml')}
+              className={`px-3 py-1.5 text-sm font-medium rounded-md transition duration-200 ${
+                viewMode === 'yaml'
+                  ? 'text-accent bg-accent-subtle'
+                  : 'text-text-secondary hover:text-text-primary hover:bg-surface/60'
+              }`}
+            >
+              YAML
+            </button>
+          </div>
+          <input
+            type="text"
+            placeholder="Search keys..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="bg-surface/60 border border-border rounded-md px-3 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 w-full sm:w-auto"
+          />
+        </div>
+
+        {/* Content */}
+        {isLoading && (
+          <div className="flex items-center justify-center py-20">
+            <div className="w-6 h-6 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+          </div>
+        )}
+        {error && (
+          <div className="rounded-lg border border-danger/30 bg-danger-subtle p-4 text-sm text-danger">
+            Error loading config: {String(error)}
+          </div>
+        )}
+
+        {viewMode === 'tree' && data && (
+          <div className="rounded-lg border border-border bg-surface/30 p-4">
+            {Object.entries(data).map(([k, v]) => (
+              <ConfigNode key={k} name={k} value={v} depth={0} searchTerm={searchTerm} />
+            ))}
+          </div>
+        )}
+
+        {viewMode === 'yaml' && rawData && (
+          <pre className="rounded-lg border border-border bg-surface/30 p-4 overflow-x-auto text-sm font-mono text-text-primary">
+            {rawData.yaml}
+          </pre>
+        )}
+      </main>
+    </div>
+  )
+}
+
 /* ── App ───────────────────────────────────────────── */
 
 export default function App() {
@@ -1602,6 +1805,7 @@ export default function App() {
         <Route path="/sessions/:id" element={<SessionDetailPage />} />
         <Route path="/tasks" element={<KanbanBoardPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
+        <Route path="/config" element={<ConfigPage />} />
       </Routes>
     </QueryClientProvider>
   )

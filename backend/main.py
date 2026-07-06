@@ -8,6 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.agents import get_profiles, get_profile_detail, check_process_alive
 from backend.config import settings
+from backend.config_viewer import get_config
 
 app = FastAPI(title="AgentOS", version="0.1.0")
 
@@ -141,6 +142,28 @@ async def tasks_detail(task_id: str) -> dict:
     if detail is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return detail
+
+
+# ── Config viewer endpoints ──────────────────────────────────────
+
+@app.get("/api/config")
+async def config_view():
+    config = await get_config()
+    if config is None:
+        raise HTTPException(status_code=404, detail="Configuration file not found")
+    return config
+
+
+@app.get("/api/config/raw")
+async def config_raw():
+    import yaml as yaml_lib
+
+    config = await get_config()
+    if config is None:
+        raise HTTPException(status_code=404, detail="Configuration file not found")
+    return {
+        "yaml": yaml_lib.dump(config, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    }
 
 
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
