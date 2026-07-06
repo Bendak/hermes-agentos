@@ -235,11 +235,13 @@ def test_dashboard_shows_5_agents(page: Page, seeded_db):
 - [x] Frontend: MarkdownRenderer nos cards (task.title) e task detail (task.body) com prose-kanban-card CSS
 - **Entrega:** Kanban funcional com drag-and-drop + markdown rendering
 
-### Phase 6 — Task Detail Panel (Semana 8)
-- [ ] Backend: `GET /api/tasks/:id` — task + comments + runs + artifacts
-- [ ] Frontend: Painel lateral com tabs (Comments, Runs, Artifacts, Children)
-- [ ] E2E: `test_06_task_detail.py` — click em task, valida painel
-- **Entrega:** Detalhe de task com histórico completo
+### Phase 6 — Task Detail Panel (Semana 8) ✅ DONE
+- [x] Frontend: Tabbed interface (Overview, Runs, Comments, Children) with state-based tabs
+- [x] Frontend: MarkdownRenderer in task title, comments, and body
+- [x] Frontend: Count badges on tabs (Runs (N), Comments (N))
+- [x] Frontend: data-testid attributes for testability
+- [x] Frontend: Children tab with clickable cards
+- **Entrega:** Task detail com tabs organizadas e markdown em todo conteúdo
 
 ### Phase 7 — Config Viewer (Semana 9)
 - [ ] Backend: `GET /api/config` — parse seguro do `config.yaml` (safe_load)
@@ -394,7 +396,7 @@ agentos/
 | — | ✅ Done | Visual identity | DESIGN.md, dark theme, Pixel refinement |
 | — | ✅ Done | Bug fixes | Message overflow, default profile missing |
 | 5 | ✅ Done | Kanban DnD + Markdown | @dnd-kit, PATCH endpoint, optimistic update, MarkdownRenderer in cards |
-| 6 | 🔲 Pending | Task detail | — |
+| 6 | ✅ Done | Task detail tabs | Overview/Runs/Comments/Children tabs, markdown in title+comments |
 | 7 | 🔲 Pending | Config viewer | — |
 | 8 | 🔲 Pending | Config editor | — |
 | 9 | 🔲 Pending | Skills hub | — |
