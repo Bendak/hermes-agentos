@@ -1,0 +1,6 @@
+#!/command/with-contenv sh
+set -e
+export HOME=/opt/data
+cd /opt/data/agentos
+. /opt/data/agentos/.venv/bin/activate
+exec python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 9120
