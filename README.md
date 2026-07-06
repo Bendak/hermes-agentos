@@ -111,6 +111,8 @@ AgentOS reads Hermes state directly from:
 | `GET /api/tasks` | Kanban board tasks |
 | `GET /api/tasks/{id}` | Task detail with runs and comments |
 | `PATCH /api/tasks/{id}` | Update task status (drag-and-drop) |
+| `GET /api/config` | Config tree (secrets redacted) |
+| `GET /api/config/raw` | Config as YAML text (secrets redacted) |
 
 ## Tech Stack
 
@@ -129,9 +131,10 @@ AgentOS reads Hermes state directly from:
 - [x] Phase 4 — Kanban Board (read-only, 5 columns, task detail, archived toggle)
 - [x] Phase 5 — Kanban Drag & Drop (@dnd-kit, PATCH endpoint, markdown in cards)
 - [x] Phase 6 — Task Detail Panel (tabs: Overview, Runs, Comments, Children)
+- [x] Phase 7 — Config Viewer (read-only tree + YAML view, secret redaction)
 - [x] Visual Identity — DESIGN.md spec, dark mission-control theme, Pixel design refinement
 - [x] s6 Autostart — cont-init.d script, survives container rebuilds
-- [ ] Phase 7+ — Config UI, Skills Hub, Cron management, Workflow builder
+- [ ] Phase 8+ — Config editor, Skills Hub, Cron management, Workflow builder
 
 See [PLAN.md](PLAN.md) for the full roadmap and [DESIGN.md](DESIGN.md) for the visual identity spec.
 
