@@ -1103,9 +1103,9 @@ function TaskCard({ task, isOverlay }: { task: TaskItem; isOverlay?: boolean }) 
       }}
       className={`card-focus mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-text-tertiary'} ${isOverlay ? 'shadow-lg rotate-1' : ''}`}
     >
-      <h4 className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug mb-2">
-        {task.title || 'Untitled'}
-      </h4>
+      <div className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug mb-2 prose-kanban-card">
+        <MarkdownRenderer content={task.title || 'Untitled'} />
+      </div>
       <div className="flex flex-wrap items-center gap-2 mb-2">
         {task.assignee && (
           <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${assigneeBadgeClass(task.assignee)}`}>
@@ -1148,7 +1148,7 @@ function KanbanColumn({ label, status, tasks }: { label: string; status: string;
       </div>
       <div
         ref={setNodeRef}
-        className={`flex-1 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1 rounded-lg transition ${isOver ? 'bg-accent/5 ring-1 ring-accent/20' : ''}`}
+        className={`flex-1 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1 rounded-lg transition ${isOver ? 'bg-accent/10 ring-1 ring-accent/30' : ''}`}
       >
         {tasks.map((task) => (
           <TaskCard key={task.id} task={task} />
@@ -1419,7 +1419,9 @@ function TaskDetailPage() {
             {data.body && (
               <div className="rounded-lg border border-border bg-surface/30 p-4 mb-8">
                 <p className="text-caption text-text-tertiary mb-2">Body</p>
-                <pre className="text-sm text-text-primary whitespace-pre-wrap font-sans">{data.body}</pre>
+                <div className="text-sm text-text-primary">
+                  <MarkdownRenderer content={data.body} />
+                </div>
               </div>
             )}
 

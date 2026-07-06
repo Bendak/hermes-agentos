@@ -288,3 +288,14 @@ code, pre, kbd, .font-mono {
   outline: 2px solid var(--accent-primary);
   outline-offset: -2px;
 }
+
+/* Prose Kanban Card */
+.prose-kanban-card p { margin: 0; }
+.prose-kanban-card h1, .prose-kanban-card h2, .prose-kanban-card h3 {
+  font-size: inherit; font-weight: inherit; margin: 0;
+}
+.prose-kanban-card ul, .prose-kanban-card ol { margin: 0; padding-left: 1rem; }
+.prose-kanban-card li { margin: 0; }
+.prose-kanban-card code { font-size: 0.85em; }
+.prose-kanban-card pre { margin: 0; padding: 0.25rem; font-size: 0.8em; }
+.prose-kanban-card table { font-size: 0.85em; }
