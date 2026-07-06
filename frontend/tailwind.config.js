@@ -101,6 +101,16 @@ export default {
       },
       transitionTimingFunction: {
         'agent-os': 'cubic-bezier(0.4, 0, 0.2, 1)',
+        'agent-os-bounce': 'cubic-bezier(0.34, 1.56, 0.64, 1)',
+      },
+      transitionDuration: {
+        '150': '150ms',
+        '200': '200ms',
+        '300': '300ms',
+      },
+      spacing: {
+        '18': '4.5rem',
+        '22': '5.5rem',
       },
     },
   },
