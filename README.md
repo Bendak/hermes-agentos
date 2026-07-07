@@ -114,6 +114,8 @@ AgentOS reads Hermes state directly from:
 | `GET /api/config` | Config tree (secrets redacted) |
 | `GET /api/config/raw` | Config as YAML text (secrets redacted) |
 | `PATCH /api/config` | Update config fields (secret fields rejected) |
+| `GET /api/skills` | List all installed skills (metadata only) |
+| `GET /api/skills/{slug}` | Get skill detail (full SKILL.md + file list) |
 
 ## Tech Stack
 
@@ -136,7 +138,8 @@ AgentOS reads Hermes state directly from:
 - [x] Phase 8 — Config Editor (inline editing, atomic write, secret field protection)
 - [x] Visual Identity — DESIGN.md spec, dark mission-control theme, Pixel design refinement
 - [x] s6 Autostart — cont-init.d script, survives container rebuilds
-- [ ] Phase 9+ — Skills Hub, Cron management, Workflow builder
+- [x] Phase 9 — Skills Hub (browse installed skills, search, filter, detail modal)
+- [ ] Phase 10+ — Cron management, Workflow builder
 
 See [PLAN.md](PLAN.md) for the full roadmap and [DESIGN.md](DESIGN.md) for the visual identity spec.
 

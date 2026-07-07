@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DndContext, DragOverlay, useDroppable, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
@@ -135,6 +135,24 @@ interface TaskDetail {
   parent_id: string | null
 }
 
+interface Skill {
+  slug: string
+  name: string
+  description: string
+  category: string
+  icon: string
+  file_count: number
+  preview: string
+  has_references: boolean
+  has_scripts: boolean
+  has_templates: boolean
+}
+
+interface SkillDetail extends Skill {
+  full_content: string
+  files: { path: string; size: number }[]
+}
+
 /* ── NavBar ────────────────────────────────────────── */
 
 function NavBar() {
@@ -169,6 +187,7 @@ function NavBar() {
           {navLink('/sessions', 'Sessions')}
           {navLink('/tasks', 'Tasks')}
           {navLink('/config', 'Config')}
+          {navLink('/skills', 'Skills')}
         </div>
       </div>
     </nav>
@@ -1984,7 +2003,177 @@ export default function App() {
         <Route path="/tasks" element={<KanbanBoardPage />} />
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route path="/config" element={<ConfigPage />} />
+        <Route path="/skills" element={<SkillsHubPage />} />
       </Routes>
     </QueryClientProvider>
+  )
+}
+
+/* ── Skills Hub ────────────────────────────────────── */
+
+function SkillCard({ skill, onClick }: { skill: Skill; onClick: () => void }) {
+  const categoryColors: Record<string, string> = {
+    devops: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+    creative: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+    productivity: 'bg-green-500/20 text-green-400 border-green-500/30',
+    research: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    security: 'bg-red-500/20 text-red-400 border-red-500/30',
+    'mlops/research': 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    uncategorized: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  }
+  const colorClass = categoryColors[skill.category?.toLowerCase()] || categoryColors.uncategorized
+
+  return (
+    <button
+      onClick={onClick}
+      className="text-left rounded-lg border border-border bg-surface/30 p-4 hover:border-accent/40 hover:bg-surface/50 transition-colors"
+    >
+      <div className="flex items-start justify-between mb-2">
+        <h3 className="text-body font-semibold text-text-primary">{skill.name}</h3>
+        <span className={`text-xs px-2 py-0.5 rounded-full border ${colorClass}`}>
+          {skill.category || 'misc'}
+        </span>
+      </div>
+      <p className="text-body-sm text-text-secondary line-clamp-2 mb-3">
+        {skill.description}
+      </p>
+      <div className="flex items-center gap-3 text-xs text-text-tertiary">
+        <span>{skill.file_count} files</span>
+        {skill.has_references && <span title="Has references">📄</span>}
+        {skill.has_scripts && <span title="Has scripts">⚙️</span>}
+        {skill.has_templates && <span title="Has templates">📋</span>}
+      </div>
+    </button>
+  )
+}
+
+function SkillsHubPage() {
+  const [search, setSearch] = useState('')
+  const [category, setCategory] = useState('all')
+  const [sort, setSort] = useState<'name-asc' | 'name-desc' | 'files'>('name-asc')
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
+
+  const { data: skills, isLoading } = useQuery({
+    queryKey: ['skills'],
+    queryFn: async () => {
+      const res = await fetch('/api/skills')
+      if (!res.ok) throw new Error('Failed to load skills')
+      return res.json() as Promise<Skill[]>
+    },
+  })
+
+  const { data: selectedSkill } = useQuery({
+    queryKey: ['skill', selectedSlug],
+    queryFn: async () => {
+      const res = await fetch(`/api/skills/${selectedSlug}`)
+      if (!res.ok) throw new Error('Failed')
+      return res.json() as Promise<SkillDetail>
+    },
+    enabled: !!selectedSlug,
+  })
+
+  const filtered = useMemo(() => {
+    if (!skills) return []
+    let result = skills.filter((s: Skill) => {
+      const matchesSearch = !search || s.name.toLowerCase().includes(search.toLowerCase()) || s.description.toLowerCase().includes(search.toLowerCase())
+      const matchesCategory = category === 'all' || s.category?.toLowerCase() === category.toLowerCase()
+      return matchesSearch && matchesCategory
+    })
+    if (sort === 'name-asc') result.sort((a: Skill, b: Skill) => a.name.localeCompare(b.name))
+    if (sort === 'name-desc') result.sort((a: Skill, b: Skill) => b.name.localeCompare(a.name))
+    if (sort === 'files') result.sort((a: Skill, b: Skill) => b.file_count - a.file_count)
+    return result
+  }, [skills, search, category, sort])
+
+  const categories = useMemo(() => {
+    if (!skills) return ['all']
+    const cats = [...new Set(skills.map((s: Skill) => s.category || 'uncategorized'))]
+    return ['all', ...cats.sort()]
+  }, [skills])
+
+  return (
+    <div className="min-h-screen bg-bg-base">
+      <NavBar />
+      <header className="px-6 pt-8 pb-4">
+        <div className="mx-auto max-w-6xl">
+          <h1 className="text-h2 font-bold text-text-primary">Skills Hub</h1>
+          <p className="text-body-sm text-text-secondary mt-1">
+            {skills?.length || 0} installed skills
+          </p>
+        </div>
+      </header>
+      <main className="mx-auto max-w-6xl px-6 pb-12">
+        <div className="flex flex-col sm:flex-row gap-3 mb-6">
+          <input
+            type="text"
+            placeholder="Search skills..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="search-input flex-1 bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40"
+          />
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+            className="bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
+          >
+            {categories.map((cat: string) => (
+              <option key={cat} value={cat}>{cat === 'all' ? 'All Categories' : cat}</option>
+            ))}
+          </select>
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as 'name-asc' | 'name-desc' | 'files')}
+            className="bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
+          >
+            <option value="name-asc">Name A-Z</option>
+            <option value="name-desc">Name Z-A</option>
+            <option value="files">Most Files</option>
+          </select>
+        </div>
+
+        {isLoading ? (
+          <div className="text-text-secondary text-center py-12">Loading skills...</div>
+        ) : filtered.length === 0 ? (
+          <div className="text-text-secondary text-center py-12">No skills found.</div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filtered.map((skill: Skill) => (
+              <SkillCard key={skill.slug} skill={skill} onClick={() => setSelectedSlug(skill.slug)} />
+            ))}
+          </div>
+        )}
+
+        {selectedSkill && (
+          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedSlug(null)}>
+            <div className="bg-bg-elevated border border-border rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+              <div className="flex items-start justify-between mb-4">
+                <h2 className="text-h2 font-bold text-text-primary">{selectedSkill.name}</h2>
+                <button onClick={() => setSelectedSlug(null)} className="text-text-secondary hover:text-text-primary text-xl">×</button>
+              </div>
+              <p className="text-text-secondary mb-4">{selectedSkill.description}</p>
+              <div className="flex gap-4 text-xs text-text-tertiary mb-4">
+                <span>{selectedSkill.file_count} files</span>
+                <span>{selectedSkill.category}</span>
+              </div>
+              <div className="border-t border-border pt-4">
+                <MarkdownRenderer content={selectedSkill.full_content} />
+              </div>
+              {selectedSkill.files?.length > 0 && (
+                <div className="border-t border-border mt-4 pt-4">
+                  <h3 className="text-body font-semibold text-text-primary mb-2">Files</h3>
+                  <ul className="text-sm text-text-secondary space-y-1">
+                    {selectedSkill.files.map((f: { path: string; size: number }) => (
+                      <li key={f.path} className="font-mono text-xs">
+                        {f.path} <span className="text-text-tertiary">({f.size} bytes)</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
   )
 }

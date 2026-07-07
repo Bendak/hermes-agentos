@@ -2,9 +2,9 @@
 
 ## Reporting a Vulnerability
 
-Email: security@example.com (replace with real contact)
+Report security vulnerabilities via [GitHub Issues](https://github.com/Bendak/hermes-agentos/issues).
 
-Do NOT open public issues for security vulnerabilities.
+Do NOT open public issues for security vulnerabilities — use a private channel if possible.
 
 ## Supported Versions
 

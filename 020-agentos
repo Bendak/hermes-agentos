@@ -1,5 +1,10 @@
 #!/command/with-contenv sh
 # shellcheck shell=sh
+#
+# DEPLOYMENT NOTE: This file goes to /etc/cont-init.d/020-agentos in the
+# Docker image. It is kept in the repo as a reference — copy it during
+# image build or mount it at the correct path.
+#
 # AgentOS s6 service registration.
 #
 # If /opt/data/agentos/s6/ exists (AgentOS is installed in the data volume),
