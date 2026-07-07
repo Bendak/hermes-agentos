@@ -116,6 +116,7 @@ AgentOS reads Hermes state directly from:
 | `PATCH /api/config` | Update config fields (secret fields rejected) |
 | `GET /api/skills` | List all installed skills (metadata only) |
 | `GET /api/skills/{slug}` | Get skill detail (full SKILL.md + file list) |
+| `GET /api/profiles` | List profiles with model, skill counts, external dirs |
 
 ## Tech Stack
 
