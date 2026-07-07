@@ -306,3 +306,34 @@ input[type="number"]:not(.search-input) {
 }
 .prose-kanban-card pre { margin: 0; padding: 0.25rem; font-size: 0.8em; }
 .prose-kanban-card table { font-size: 0.85em; }
+
+/* ── React Flow dark theme overrides ─────────────── */
+.react-flow__background {
+  background-color: var(--bg-base) !important;
+}
+.react-flow__edge-path {
+  stroke: var(--border) !important;
+}
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke: var(--accent-primary) !important;
+}
+.react-flow__minimap {
+  background-color: var(--surface) !important;
+}
+.react-flow__controls {
+  background: var(--surface) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 8px !important;
+}
+.react-flow__controls-button {
+  background: var(--surface) !important;
+  border-bottom: 1px solid var(--border) !important;
+  fill: var(--text-secondary) !important;
+}
+.react-flow__controls-button:hover {
+  background: var(--surface-hover) !important;
+  fill: var(--text-primary) !important;
+}
+.react-flow__panel {
+  margin: 12px !important;
+}

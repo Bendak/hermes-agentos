@@ -199,6 +199,45 @@ async def profiles_list():
     return await list_profiles_summary()
 
 
+# ── Workflows endpoints ────────────────────────────────────────────
+
+from backend.workflows import list_workflows, get_workflow, create_workflow, update_workflow, delete_workflow  # noqa: E402
+
+
+@app.get("/api/workflows")
+async def workflows_list():
+    return await list_workflows()
+
+
+@app.get("/api/workflows/{workflow_id}")
+async def workflow_detail(workflow_id: str):
+    result = await get_workflow(workflow_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return result
+
+
+@app.post("/api/workflows")
+async def workflow_create(body: dict):
+    return await create_workflow(body)
+
+
+@app.put("/api/workflows/{workflow_id}")
+async def workflow_update(workflow_id: str, body: dict):
+    result = await update_workflow(workflow_id, body)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return result
+
+
+@app.delete("/api/workflows/{workflow_id}")
+async def workflow_delete(workflow_id: str):
+    success = await delete_workflow(workflow_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Workflow not found")
+    return {"ok": True}
+
+
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 index_html = os.path.join(dist_path, "index.html")
 
