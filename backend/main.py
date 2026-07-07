@@ -202,6 +202,7 @@ async def profiles_list():
 # ── Workflows endpoints ────────────────────────────────────────────
 
 from backend.workflows import list_workflows, get_workflow, create_workflow, update_workflow, delete_workflow  # noqa: E402
+from backend.workflow_engine import run_workflow, get_workflow_runs, get_run_detail  # noqa: E402
 
 
 @app.get("/api/workflows")
@@ -236,6 +237,28 @@ async def workflow_delete(workflow_id: str):
     if not success:
         raise HTTPException(status_code=404, detail="Workflow not found")
     return {"ok": True}
+
+
+@app.post("/api/workflows/{workflow_id}/run")
+async def workflow_run(workflow_id: str):
+    try:
+        result = await run_workflow(workflow_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return result
+
+
+@app.get("/api/workflows/{workflow_id}/runs")
+async def workflow_runs_list(workflow_id: str):
+    return await get_workflow_runs(workflow_id)
+
+
+@app.get("/api/runs/{run_id}")
+async def run_detail(run_id: str):
+    result = await get_run_detail(run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return result
 
 
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")

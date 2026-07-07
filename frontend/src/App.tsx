@@ -170,6 +170,7 @@ interface WorkflowNodeData {
   label: string
   nodeType: 'trigger' | 'action' | 'condition'
   config?: Record<string, any>
+  runStatus?: string
 }
 
 /* ── NavBar ────────────────────────────────────────── */
@@ -2012,6 +2013,17 @@ function ConfigPage() {
 
 /* ── Workflow Editor ─────────────────────────────────── */
 
+function calculateDuration(start: string, end: string): string {
+  const ms = new Date(end).getTime() - new Date(start).getTime()
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
 const nodeColors: Record<string, { bg: string; border: string; icon: string }> = {
   trigger: { bg: 'bg-emerald-500/20', border: 'border-emerald-500/40', icon: '⚡' },
   action: { bg: 'bg-blue-500/20', border: 'border-blue-500/40', icon: '🔧' },
@@ -2022,11 +2034,28 @@ function WorkflowNode({ data }: NodeProps) {
   const nd = data as unknown as WorkflowNodeData
   const colors = nodeColors[nd.nodeType] || nodeColors.action
 
+  const runStatusStyles: Record<string, string> = {
+    completed: 'ring-2 ring-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.3)]',
+    skipped: 'opacity-50',
+    failed: 'ring-2 ring-red-500/60 shadow-[0_0_12px_rgba(239,68,68,0.3)]',
+  }
+
+  const runStatusIcons: Record<string, string> = {
+    completed: '✅',
+    skipped: '⏭️',
+    failed: '❌',
+  }
+
+  const statusClass = nd.runStatus ? runStatusStyles[nd.runStatus] || '' : ''
+
   return (
-    <div className={`rounded-lg border-2 ${colors.border} ${colors.bg} min-w-[180px] shadow-lg`}>
+    <div className={`rounded-lg border-2 ${colors.border} ${colors.bg} min-w-[180px] shadow-lg ${statusClass}`}>
       <div className={`px-3 py-1.5 border-b ${colors.border} flex items-center gap-2`}>
         <span>{colors.icon}</span>
         <span className="text-xs font-semibold text-text-secondary uppercase">{nd.nodeType}</span>
+        {nd.runStatus && (
+          <span className="ml-auto text-xs">{runStatusIcons[nd.runStatus] || ''}</span>
+        )}
       </div>
       <div className="px-3 py-2">
         <p className="text-sm font-medium text-text-primary">{nd.label}</p>
@@ -2185,6 +2214,7 @@ function WorkflowEditorPage() {
   const [wfDescription, setWfDescription] = useState('')
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [runResults, setRunResults] = useState<Record<string, string>>({})
   const loadedRef = useRef(false)
 
   // Load workflow
@@ -2261,6 +2291,39 @@ function WorkflowEditorPage() {
     },
   })
 
+  // Run workflow mutation
+  const runMutation = useMutation({
+    mutationFn: async () => {
+      // Save first
+      await saveMutation.mutateAsync()
+      const res = await fetch(`/api/workflows/${id}/run`, { method: 'POST' })
+      if (!res.ok) throw new Error('Run failed')
+      return res.json()
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['workflow-runs', id] })
+      // Build runResults map from node results
+      if (data.result?.node_results) {
+        const results: Record<string, string> = {}
+        for (const nr of data.result.node_results) {
+          results[nr.node_id] = nr.status
+        }
+        setRunResults(results)
+      }
+    },
+  })
+
+  // Run history query
+  const { data: runs } = useQuery({
+    queryKey: ['workflow-runs', id],
+    queryFn: async () => {
+      const res = await fetch(`/api/workflows/${id}/runs`)
+      if (!res.ok) return []
+      return res.json()
+    },
+    enabled: !!id,
+  })
+
   // Add node to canvas
   const addNode = useCallback((nodeType: 'trigger' | 'action' | 'condition') => {
     const id = `${nodeType}-${Date.now()}`
@@ -2292,6 +2355,23 @@ function WorkflowEditorPage() {
       )
     )
     setSelectedNode((prev) => prev ? { ...prev, data: { ...prev.data, label } } : null)
+  }, [selectedNode, setNodes])
+
+  // Update selected node's config
+  const updateNodeConfig = useCallback((key: string, value: any) => {
+    if (!selectedNode) return
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === selectedNode.id
+          ? { ...n, data: { ...n.data, config: { ...((n.data as any)?.config || {}), [key]: value } } }
+          : n
+      )
+    )
+    setSelectedNode((prev) => {
+      if (!prev) return null
+      const currentConfig = (prev.data as any)?.config || {}
+      return { ...prev, data: { ...prev.data, config: { ...currentConfig, [key]: value } } }
+    })
   }, [selectedNode, setNodes])
 
   // Delete selected node
@@ -2372,6 +2452,13 @@ function WorkflowEditorPage() {
           >
             {saveStatus === 'saving' ? 'Saving...' : 'Save'}
           </button>
+          <button
+            onClick={() => runMutation.mutate()}
+            disabled={runMutation.isPending}
+            className="bg-emerald-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+          >
+            {runMutation.isPending ? '⏳ Running...' : '▶ Run Now'}
+          </button>
         </div>
       </div>
 
@@ -2413,7 +2500,10 @@ function WorkflowEditorPage() {
         {/* Canvas */}
         <div className="flex-1">
           <ReactFlow
-            nodes={nodes}
+            nodes={nodes.map(n => ({
+              ...n,
+              data: { ...n.data, runStatus: runResults[n.id] || undefined },
+            }))}
             edges={edges}
             onNodesChange={onNodesChange}
             onEdgesChange={onEdgesChange}
@@ -2467,6 +2557,178 @@ function WorkflowEditorPage() {
               </div>
             </label>
 
+            {/* Node Config Fields */}
+            {nodeInfo.nodeType === 'trigger' && (
+              <div className="mb-4 space-y-3">
+                <h4 className="text-caption font-semibold text-text-secondary">Trigger Config</h4>
+                <label className="block">
+                  <span className="text-caption text-text-tertiary mb-1 block">Type</span>
+                  <select
+                    value={(nodeInfo as any).config?.type || 'manual'}
+                    onChange={(e) => updateNodeConfig('type', e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                  >
+                    <option value="manual">Manual</option>
+                    <option value="schedule">Schedule</option>
+                    <option value="webhook">Webhook</option>
+                  </select>
+                </label>
+              </div>
+            )}
+
+            {nodeInfo.nodeType === 'action' && (
+              <div className="mb-4 space-y-3">
+                <h4 className="text-caption font-semibold text-text-secondary">Action Config</h4>
+                <label className="block">
+                  <span className="text-caption text-text-tertiary mb-1 block">Action Type</span>
+                  <select
+                    value={(nodeInfo as any).config?.action_type || 'log'}
+                    onChange={(e) => updateNodeConfig('action_type', e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                  >
+                    <option value="log">Log</option>
+                    <option value="set_variable">Set Variable</option>
+                    <option value="create_task">Create Task</option>
+                    <option value="http_request">HTTP Request</option>
+                  </select>
+                </label>
+
+                {((nodeInfo as any).config?.action_type || 'log') === 'log' && (
+                  <label className="block">
+                    <span className="text-caption text-text-tertiary mb-1 block">Message</span>
+                    <input
+                      type="text"
+                      value={(nodeInfo as any).config?.message || ''}
+                      onChange={(e) => updateNodeConfig('message', e.target.value)}
+                      placeholder="Log message"
+                      className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                    />
+                  </label>
+                )}
+
+                {(nodeInfo as any).config?.action_type === 'set_variable' && (
+                  <>
+                    <label className="block">
+                      <span className="text-caption text-text-tertiary mb-1 block">Variable Name</span>
+                      <input
+                        type="text"
+                        value={(nodeInfo as any).config?.variable || ''}
+                        onChange={(e) => updateNodeConfig('variable', e.target.value)}
+                        placeholder="variable_name"
+                        className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-caption text-text-tertiary mb-1 block">Value</span>
+                      <input
+                        type="text"
+                        value={(nodeInfo as any).config?.value || ''}
+                        onChange={(e) => updateNodeConfig('value', e.target.value)}
+                        placeholder="value"
+                        className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                      />
+                    </label>
+                  </>
+                )}
+
+                {(nodeInfo as any).config?.action_type === 'create_task' && (
+                  <>
+                    <label className="block">
+                      <span className="text-caption text-text-tertiary mb-1 block">Title</span>
+                      <input
+                        type="text"
+                        value={(nodeInfo as any).config?.title || ''}
+                        onChange={(e) => updateNodeConfig('title', e.target.value)}
+                        placeholder="Task title"
+                        className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-caption text-text-tertiary mb-1 block">Assignee</span>
+                      <select
+                        value={(nodeInfo as any).config?.assignee || 'coder'}
+                        onChange={(e) => updateNodeConfig('assignee', e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                      >
+                        <option value="coder">Coder</option>
+                        <option value="pixel">Pixel</option>
+                        <option value="atlas">Atlas</option>
+                        <option value="nova">Nova</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+
+                {(nodeInfo as any).config?.action_type === 'http_request' && (
+                  <>
+                    <label className="block">
+                      <span className="text-caption text-text-tertiary mb-1 block">URL</span>
+                      <input
+                        type="text"
+                        value={(nodeInfo as any).config?.url || ''}
+                        onChange={(e) => updateNodeConfig('url', e.target.value)}
+                        placeholder="https://..."
+                        className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-caption text-text-tertiary mb-1 block">Method</span>
+                      <select
+                        value={(nodeInfo as any).config?.method || 'GET'}
+                        onChange={(e) => updateNodeConfig('method', e.target.value)}
+                        className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                      >
+                        <option value="GET">GET</option>
+                        <option value="POST">POST</option>
+                        <option value="PUT">PUT</option>
+                        <option value="DELETE">DELETE</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+              </div>
+            )}
+
+            {nodeInfo.nodeType === 'condition' && (
+              <div className="mb-4 space-y-3">
+                <h4 className="text-caption font-semibold text-text-secondary">Condition Config</h4>
+                <label className="block">
+                  <span className="text-caption text-text-tertiary mb-1 block">Field</span>
+                  <input
+                    type="text"
+                    value={(nodeInfo as any).config?.field || ''}
+                    onChange={(e) => updateNodeConfig('field', e.target.value)}
+                    placeholder="context_field"
+                    className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-caption text-text-tertiary mb-1 block">Operator</span>
+                  <select
+                    value={(nodeInfo as any).config?.operator || 'equals'}
+                    onChange={(e) => updateNodeConfig('operator', e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                  >
+                    <option value="equals">Equals</option>
+                    <option value="not_equals">Not Equals</option>
+                    <option value="contains">Contains</option>
+                    <option value="greater_than">Greater Than</option>
+                    <option value="less_than">Less Than</option>
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="text-caption text-text-tertiary mb-1 block">Value</span>
+                  <input
+                    type="text"
+                    value={(nodeInfo as any).config?.value || ''}
+                    onChange={(e) => updateNodeConfig('value', e.target.value)}
+                    placeholder="comparison value"
+                    className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
+                  />
+                </label>
+              </div>
+            )}
+
             {/* Delete button */}
             <button
               onClick={deleteSelectedNode}
@@ -2478,6 +2740,46 @@ function WorkflowEditorPage() {
           </div>
         )}
       </div>
+
+      {/* Run History Panel */}
+      {runs && runs.length > 0 && (
+        <div className="border-t border-border p-4 bg-bg-elevated/60">
+          <h3 className="text-sm font-semibold text-text-secondary mb-2">Run History</h3>
+          <div className="space-y-1">
+            {runs.slice(0, 10).map((run: any) => (
+              <div key={run.id} className="flex items-center gap-2 text-xs">
+                <span className={run.status === 'completed' ? 'text-emerald-400' : 'text-red-400'}>
+                  {run.status === 'completed' ? '✅' : '❌'}
+                </span>
+                <span className="text-text-secondary font-mono">{run.id}</span>
+                <span className="text-text-tertiary">{formatTime(run.started_at)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Run result toast */}
+      {runMutation.isSuccess && runMutation.data && (
+        <div className="fixed bottom-20 right-4 bg-bg-elevated border border-border rounded-lg p-4 shadow-xl max-w-sm z-50">
+          <div className="flex items-center gap-2 mb-2">
+            <span className={runMutation.data.status === 'completed' ? 'text-emerald-400' : 'text-red-400'}>
+              {runMutation.data.status === 'completed' ? '✅' : '❌'}
+            </span>
+            <span className="text-sm font-medium text-text-primary">
+              Run {runMutation.data.status}
+            </span>
+          </div>
+          <div className="text-xs text-text-secondary space-y-1">
+            <p>Nodes executed: {runMutation.data.result?.executed_nodes || 0}</p>
+            <p>Nodes skipped: {runMutation.data.result?.skipped_nodes || 0}</p>
+            <p>Duration: {calculateDuration(runMutation.data.started_at, runMutation.data.finished_at)}</p>
+          </div>
+          <button onClick={() => { runMutation.reset(); setRunResults({}) }} className="mt-2 text-xs text-text-tertiary hover:text-text-secondary">
+            Dismiss
+          </button>
+        </div>
+      )}
     </div>
   )
 }
