@@ -1593,16 +1593,32 @@ function TaskDetailPage() {
 
 /* ── Config Viewer ─────────────────────────────────── */
 
+function isEditableKey(key: string): boolean {
+  const lower = key.toLowerCase()
+  const protectedKeys = [
+    'api_key', 'apikey', 'token', 'secret', 'password', 'pwd',
+    'client_secret', 'access_token', 'refresh_token', 'basic_auth',
+    'oauth', 'secrets', 'hermes_api_server_key', 'oauth_client_id',
+  ]
+  return !protectedKeys.some((p) => lower.includes(p))
+}
+
 function ConfigNode({
   name,
   value,
   depth,
   searchTerm,
+  editMode,
+  path,
+  onChange,
 }: {
   name: string
   value: any
   depth: number
   searchTerm: string
+  editMode?: boolean
+  path?: string
+  onChange?: (path: string, value: any) => void
 }) {
   const [expanded, setExpanded] = useState(depth < 2)
 
@@ -1627,7 +1643,16 @@ function ConfigNode({
         </button>
         {expanded &&
           children.map(([k, v]) => (
-            <ConfigNode key={k} name={k} value={v} depth={depth + 1} searchTerm={searchTerm} />
+            <ConfigNode
+              key={k}
+              name={k}
+              value={v}
+              depth={depth + 1}
+              searchTerm={searchTerm}
+              editMode={editMode}
+              path={path ? `${path}.${k}` : k}
+              onChange={onChange}
+            />
           ))}
       </div>
     )
@@ -1656,6 +1681,9 @@ function ConfigNode({
                 value={item}
                 depth={depth + 1}
                 searchTerm={searchTerm}
+                editMode={editMode}
+                path={`${path}[${idx}]`}
+                onChange={onChange}
               />
             ) : (
               <div
@@ -1675,6 +1703,56 @@ function ConfigNode({
   if (!matches) return null
 
   const isRedacted = typeof value === 'string' && value.startsWith('***')
+  const editable = editMode && isEditableKey(name) && !isRedacted
+
+  if (editable && onChange) {
+    // Editable leaf — show inline input
+    if (typeof value === 'boolean') {
+      return (
+        <div style={{ marginLeft: depth * 16 }} className="flex items-center gap-2 py-0.5 text-sm border-l-2 border-accent/50 pl-2">
+          <span className="text-text-secondary shrink-0">{name}:</span>
+          <label className="flex items-center gap-1.5 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={value}
+              onChange={(e) => onChange(path || name, e.target.checked)}
+              className="w-4 h-4 accent-accent rounded"
+            />
+            <span className="text-text-primary">{value ? 'true' : 'false'}</span>
+          </label>
+        </div>
+      )
+    }
+
+    if (typeof value === 'number') {
+      return (
+        <div style={{ marginLeft: depth * 16 }} className="flex items-center gap-2 py-0.5 text-sm border-l-2 border-accent/50 pl-2">
+          <span className="text-text-secondary shrink-0">{name}:</span>
+          <input
+            type="number"
+            value={value}
+            onChange={(e) => onChange(path || name, e.target.valueAsNumber)}
+            className="bg-surface/60 border border-border rounded px-2 py-0.5 text-sm text-text-primary w-32 font-mono focus:outline-none focus:ring-2 focus:ring-accent/40"
+          />
+        </div>
+      )
+    }
+
+    // string or other — text input
+    return (
+      <div style={{ marginLeft: depth * 16 }} className="flex items-center gap-2 py-0.5 text-sm border-l-2 border-accent/50 pl-2">
+        <span className="text-text-secondary shrink-0">{name}:</span>
+        <input
+          type="text"
+          value={String(value)}
+          onChange={(e) => onChange(path || name, e.target.value)}
+          className="bg-surface/60 border border-border rounded px-2 py-0.5 text-sm text-text-primary font-mono flex-1 min-w-0 focus:outline-none focus:ring-2 focus:ring-accent/40"
+        />
+      </div>
+    )
+  }
+
+  // Read-only leaf
   return (
     <div style={{ marginLeft: depth * 16 }} className="flex items-start gap-2 py-0.5 text-sm">
       <span className="text-text-secondary shrink-0">{name}:</span>
@@ -1692,6 +1770,9 @@ function ConfigNode({
 function ConfigPage() {
   const [viewMode, setViewMode] = useState<'tree' | 'yaml'>('tree')
   const [searchTerm, setSearchTerm] = useState('')
+  const [editMode, setEditMode] = useState(false)
+  const [changes, setChanges] = useState<Record<string, any>>({})
+  const queryClient = useQueryClient()
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['config'],
@@ -1712,13 +1793,53 @@ function ConfigPage() {
     enabled: viewMode === 'yaml',
   })
 
+  const saveMutation = useMutation({
+    mutationFn: async (patches: { path: string[]; value: any }[]) => {
+      const res = await fetch('/api/config', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patches }),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.detail || 'Failed to save')
+      }
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['config'] })
+      queryClient.invalidateQueries({ queryKey: ['config-raw'] })
+      setChanges({})
+      setEditMode(false)
+    },
+  })
+
+  const handleChange = (path: string, value: any) => {
+    setChanges((prev) => ({ ...prev, [path]: value }))
+  }
+
+  const handleCancel = () => {
+    setChanges({})
+    setEditMode(false)
+  }
+
+  const handleSave = () => {
+    const patches = Object.entries(changes).map(([path, value]) => ({
+      path: path.split('.').filter(Boolean),
+      value,
+    }))
+    saveMutation.mutate(patches)
+  }
+
   return (
     <div className="min-h-screen bg-bg-base">
       <NavBar />
       <header className="px-6 pt-8 pb-4">
         <div className="mx-auto max-w-5xl">
           <h1 className="text-h2 font-bold text-text-primary">Configuration</h1>
-          <p className="text-body-sm text-text-secondary mt-1">Read-only view of Hermes config.yaml</p>
+          <p className="text-body-sm text-text-secondary mt-1">
+            {editMode ? 'Edit mode — secret fields are locked' : 'Read-only view of Hermes config.yaml'}
+          </p>
         </div>
       </header>
       <main className="mx-auto max-w-5xl px-6 pb-12">
@@ -1726,7 +1847,9 @@ function ConfigPage() {
         <div className="mb-6 rounded-lg border border-warning/30 bg-warning-subtle p-4 flex items-center gap-3">
           <span className="text-warning text-lg">⚠️</span>
           <p className="text-sm text-warning">
-            Read-only view — changes to config.yaml require a container restart
+            {editMode
+              ? 'Editing config.yaml — secret fields (API keys, tokens, passwords) cannot be modified. A container restart is required for changes to take effect.'
+              : 'Read-only view — changes to config.yaml require a container restart'}
           </p>
         </div>
 
@@ -1753,6 +1876,21 @@ function ConfigPage() {
             >
               YAML
             </button>
+            {viewMode === 'tree' && (
+              <button
+                onClick={() => {
+                  if (editMode) handleCancel()
+                  else setEditMode(true)
+                }}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md transition duration-200 ${
+                  editMode
+                    ? 'text-warning bg-warning-subtle'
+                    : 'text-text-secondary hover:text-text-primary hover:bg-surface/60'
+                }`}
+              >
+                {editMode ? '✎ Editing' : '✎ Edit'}
+              </button>
+            )}
           </div>
           <input
             type="text"
@@ -1774,11 +1912,25 @@ function ConfigPage() {
             Error loading config: {String(error)}
           </div>
         )}
+        {saveMutation.isError && (
+          <div className="mb-4 rounded-lg border border-danger/30 bg-danger-subtle p-4 text-sm text-danger">
+            Save failed: {String(saveMutation.error?.message || 'Unknown error')}
+          </div>
+        )}
 
         {viewMode === 'tree' && data && (
           <div className="rounded-lg border border-border bg-surface/30 p-4">
             {Object.entries(data).map(([k, v]) => (
-              <ConfigNode key={k} name={k} value={v} depth={0} searchTerm={searchTerm} />
+              <ConfigNode
+                key={k}
+                name={k}
+                value={v}
+                depth={0}
+                searchTerm={searchTerm}
+                editMode={editMode}
+                path={k}
+                onChange={handleChange}
+              />
             ))}
           </div>
         )}
@@ -1789,6 +1941,32 @@ function ConfigPage() {
           </pre>
         )}
       </main>
+
+      {/* Sticky save bar */}
+      {editMode && (
+        <div className="fixed bottom-0 left-0 right-0 bg-bg-elevated border-t border-border px-6 py-3 flex items-center justify-between z-50 shadow-lg">
+          <span className="text-body-sm text-text-secondary">
+            {Object.keys(changes).length === 0
+              ? 'No changes yet — edit fields above'
+              : `${Object.keys(changes).length} change(s) pending`}
+          </span>
+          <div className="flex gap-3">
+            <button
+              onClick={handleCancel}
+              className="px-4 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary border border-border rounded-md hover:bg-surface/60 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={Object.keys(changes).length === 0 || saveMutation.isPending}
+              className="bg-accent text-text-inverse px-4 py-1.5 rounded-md text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+            >
+              {saveMutation.isPending ? 'Saving...' : `Save Changes (${Object.keys(changes).length})`}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

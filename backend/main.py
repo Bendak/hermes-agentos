@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend.agents import get_profiles, get_profile_detail, check_process_alive
 from backend.config import settings
-from backend.config_viewer import get_config
+from backend.config_viewer import get_config, update_config
 
 app = FastAPI(title="AgentOS", version="0.1.0")
 
@@ -164,6 +164,20 @@ async def config_raw():
     return {
         "yaml": yaml_lib.dump(config, default_flow_style=False, sort_keys=False, allow_unicode=True)
     }
+
+
+@app.patch("/api/config")
+async def config_edit(body: dict):
+    patches = body.get("patches")
+    if not patches or not isinstance(patches, list):
+        raise HTTPException(status_code=400, detail="Missing or invalid 'patches' list")
+    try:
+        result = await update_config(patches)
+    except ValueError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    if result is None:
+        raise HTTPException(status_code=404, detail="Configuration file not found")
+    return result
 
 
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
