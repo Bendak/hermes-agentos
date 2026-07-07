@@ -113,6 +113,7 @@ AgentOS reads Hermes state directly from:
 | `PATCH /api/tasks/{id}` | Update task status (drag-and-drop) |
 | `GET /api/config` | Config tree (secrets redacted) |
 | `GET /api/config/raw` | Config as YAML text (secrets redacted) |
+| `PATCH /api/config` | Update config fields (secret fields rejected) |
 
 ## Tech Stack
 
@@ -132,9 +133,10 @@ AgentOS reads Hermes state directly from:
 - [x] Phase 5 — Kanban Drag & Drop (@dnd-kit, PATCH endpoint, markdown in cards)
 - [x] Phase 6 — Task Detail Panel (tabs: Overview, Runs, Comments, Children)
 - [x] Phase 7 — Config Viewer (read-only tree + YAML view, secret redaction)
+- [x] Phase 8 — Config Editor (inline editing, atomic write, secret field protection)
 - [x] Visual Identity — DESIGN.md spec, dark mission-control theme, Pixel design refinement
 - [x] s6 Autostart — cont-init.d script, survives container rebuilds
-- [ ] Phase 8+ — Config editor, Skills Hub, Cron management, Workflow builder
+- [ ] Phase 9+ — Skills Hub, Cron management, Workflow builder
 
 See [PLAN.md](PLAN.md) for the full roadmap and [DESIGN.md](DESIGN.md) for the visual identity spec.
 

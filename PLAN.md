@@ -254,11 +254,16 @@ def test_dashboard_shows_5_agents(page: Page, seeded_db):
 - [x] Frontend: Navbar link "Config"
 - **Entrega:** Visualizador de config read-only com redação de secrets
 
-### Phase 8 — Config Editor (Semana 10)
-- [ ] Backend: `PATCH /api/config` — Pydantic validation + atomic write
-- [ ] Frontend: Form editor pra top-level keys (model, provider, toolsets)
-- [ ] E2E: `test_08_config_editor.py` — edita campo seguro, valida, rollback
-- **Entrega:** Editor de config com validação
+### Phase 8 — Config Editor (Semana 10) ✅ DONE
+- [x] Backend: `PATCH /api/config` — atomic write (temp + rename), yaml.safe_dump
+- [x] Backend: Secret field validation (NEVER_EDITABLE list, rejects api_key/token/password/etc)
+- [x] Backend: Suffix-based matching (avoids false positives like max_tokens)
+- [x] Frontend: Edit toggle (View ↔ Edit mode)
+- [x] Frontend: Inline editors by type (text, number, boolean checkbox, list)
+- [x] Frontend: Change tracking with modified indicator + count badge
+- [x] Frontend: Sticky save bar (Save Changes (N) / Cancel)
+- [x] Frontend: useMutation with cache invalidation
+- **Entrega:** Editor de config seguro com validação e atomic write
 
 ### Phase 9 — Skills Hub Browser (Semana 11)
 - [ ] Backend: `GET /api/skills` — parse `SKILL.md` frontmatter
@@ -403,7 +408,7 @@ agentos/
 | 5 | ✅ Done | Kanban DnD + Markdown | @dnd-kit, PATCH endpoint, optimistic update, MarkdownRenderer in cards |
 | 6 | ✅ Done | Task detail tabs | Overview/Runs/Comments/Children tabs, markdown in title+comments |
 | 7 | ✅ Done | Config viewer | Tree+YAML view, secret redaction, search, read-only |
-| 8 | 🔲 Pending | Config editor | — |
+| 8 | ✅ Done | Config editor | Atomic write, secret validation, inline editors, change tracking |
 | 9 | 🔲 Pending | Skills hub | — |
 | 10 | 🔲 Pending | Workflow editor | — |
 | 11 | 🔲 Pending | Workflow execution | — |
