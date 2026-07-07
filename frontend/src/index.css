@@ -297,5 +297,12 @@ code, pre, kbd, .font-mono {
 .prose-kanban-card ul, .prose-kanban-card ol { margin: 0; padding-left: 1rem; }
 .prose-kanban-card li { margin: 0; }
 .prose-kanban-card code { font-size: 0.85em; }
+
+/* Config editor inputs — force dark background to avoid white-on-white */
+input[type="text"]:not(.search-input),
+input[type="number"]:not(.search-input) {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+}
 .prose-kanban-card pre { margin: 0; padding: 0.25rem; font-size: 0.8em; }
 .prose-kanban-card table { font-size: 0.85em; }

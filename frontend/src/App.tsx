@@ -520,7 +520,7 @@ function SessionsPage() {
                 params.delete('offset')
                 setSearchParams(params)
               }}
-              className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent w-full sm:w-72"
+              className="search-input rounded-md bg-bg-elevated border border-border px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent w-full sm:w-72"
             />
             <select
               value={source}
@@ -1732,7 +1732,7 @@ function ConfigNode({
             type="number"
             value={value}
             onChange={(e) => onChange(path || name, e.target.valueAsNumber)}
-            className="bg-surface/60 border border-border rounded px-2 py-0.5 text-sm text-text-primary w-32 font-mono focus:outline-none focus:ring-2 focus:ring-accent/40"
+            className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-sm text-text-primary w-32 font-mono focus:outline-none focus:ring-2 focus:ring-accent/40"
           />
         </div>
       )
@@ -1746,7 +1746,7 @@ function ConfigNode({
           type="text"
           value={String(value)}
           onChange={(e) => onChange(path || name, e.target.value)}
-          className="bg-surface/60 border border-border rounded px-2 py-0.5 text-sm text-text-primary font-mono flex-1 min-w-0 focus:outline-none focus:ring-2 focus:ring-accent/40"
+          className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-sm text-text-primary font-mono flex-1 min-w-0 focus:outline-none focus:ring-2 focus:ring-accent/40"
         />
       </div>
     )
@@ -1897,7 +1897,7 @@ function ConfigPage() {
             placeholder="Search keys..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="bg-surface/60 border border-border rounded-md px-3 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 w-full sm:w-auto"
+            className="search-input bg-bg-elevated border border-border rounded-md px-3 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 w-full sm:w-auto"
           />
         </div>
 
