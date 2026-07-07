@@ -122,6 +122,9 @@ AgentOS reads Hermes state directly from:
 | `POST /api/workflows` | Create new workflow |
 | `PUT /api/workflows/{id}` | Update workflow (name, nodes, edges) |
 | `DELETE /api/workflows/{id}` | Delete workflow |
+| `POST /api/workflows/{id}/run` | Execute workflow (toposort engine) |
+| `GET /api/workflows/{id}/runs` | Get workflow run history |
+| `GET /api/runs/{id}` | Get run detail with node results |
 
 ## Tech Stack
 
@@ -146,7 +149,8 @@ AgentOS reads Hermes state directly from:
 - [x] s6 Autostart — cont-init.d script, survives container rebuilds
 - [x] Phase 9 — Skills Hub (browse installed skills, search, filter, detail modal)
 - [x] Phase 10 — Workflow Editor (React Flow canvas, CRUD, node palette, dark theme)
-- [ ] Phase 11+ — Workflow execution, Polish
+- [x] Phase 11 — Workflow Execution (toposort engine, Run Now, run history, node config)
+- [ ] Phase 12 — Polish (dark mode, keyboard shortcuts, responsive)
 
 See [PLAN.md](PLAN.md) for the full roadmap and [DESIGN.md](DESIGN.md) for the visual identity spec.
 

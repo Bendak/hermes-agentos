@@ -239,10 +239,14 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 - [x] Styling: Dark theme CSS overrides pra React Flow
 - **Entrega:** Editor visual de workflows (estático)
 
-### Phase 11 — Workflow Execution (Semana 13)
-- [ ] Backend: `POST /api/workflows/:id/run` — gera cron + kanban tasks
-- [ ] Frontend: Botão "Run Now" + status indicator
-- **Entrega:** Workflows executáveis
+### Phase 11 — Workflow Execution (Semana 13) ✅ DONE
+- [x] Backend: `backend/workflow_engine.py` — topological sort, node executor, cycle detection
+- [x] Backend: `POST /api/workflows/{id}/run`, `GET /runs`, `GET /runs/{id}`
+- [x] Backend: `workflow_runs` table com histórico + result JSON
+- [x] Frontend: ▶ Run Now button, toast de resultado, Run History panel
+- [x] Frontend: Node config panel (action types, condition fields, trigger types)
+- [x] Frontend: runResults state pra indicadores visuais nos nodes
+- **Entrega:** Workflows executáveis com engine de execução
 
 ### Phase 12 — Polish (Semana 14)
 - [ ] Dark mode (já com shadcn/ui, só ajustar tokens)
@@ -371,7 +375,7 @@ agentos/
 | 8 | ✅ Done | Config editor | Atomic write, secret validation, inline editors, change tracking |
 | 9 | ✅ Done | Skills hub | Grid view, category colors, search/filter/sort, detail modal |
 | 10 | ✅ Done | Workflow editor | React Flow canvas, CRUD, node palette, dark theme |
-| 11 | 🔲 Pending | Workflow execution | — |
+| 11 | ✅ Done | Workflow execution | Toposort engine, Run Now, run history, node config |
 | 12 | 🔲 Pending | Polish | — |
 | 13 | 🔲 Optional | Auth | — |
 
