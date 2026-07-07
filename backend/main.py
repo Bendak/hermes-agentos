@@ -9,6 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.agents import get_profiles, get_profile_detail, check_process_alive
 from backend.config import settings
 from backend.config_viewer import get_config, update_config
+from backend.skills_hub import list_skills, get_skill_detail
 
 app = FastAPI(title="AgentOS", version="0.1.0")
 
@@ -177,6 +178,19 @@ async def config_edit(body: dict):
         raise HTTPException(status_code=403, detail=str(e))
     if result is None:
         raise HTTPException(status_code=404, detail="Configuration file not found")
+    return result
+
+
+@app.get("/api/skills")
+async def skills_list():
+    return await list_skills()
+
+
+@app.get("/api/skills/{slug}")
+async def skill_detail(slug: str):
+    result = await get_skill_detail(slug)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Skill not found")
     return result
 
 

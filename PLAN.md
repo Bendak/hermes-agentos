@@ -80,7 +80,6 @@ Deploy:    s6 service (uvicorn :9120)
    .pytest_cache/
    /tmp/playwright-screenshots/
    ```
-3. `example.env` com valores dummy pra documentar variáveis necessárias
 4. CI GitHub Action que rejeita commits com arquivos `.*env*` ou `*.key`
 5. SQLite Hermes DBs abertos **read-only** (`mode=ro` na URI)
 6. Escritas no config.yaml via **Pydantic validation** + atomic write (temp+rename)
@@ -134,48 +133,9 @@ AGENTOS_HOST=0.0.0.0                          # Bind address
    b. Atualiza PLAN.md marcando o increment como done
 ```
 
-### Estrutura de testes
+### Testing (future)
 
-```
-tests/e2e/
-├── conftest.py                    # Fixtures: start/stop AgentOS, clean DB
-├── fixtures/
-│   └── agentos_client.py          # Helper pra seed data via API
-├── features/
-│   ├── test_00_health.py          # Phase 0
-│   ├── test_01_dashboard.py       # Phase 1
-│   ├── test_02_sessions.py        # Phase 2
-│   ├── test_03_chat_streaming.py  # Phase 3
-│   ├── test_04_kanban_readonly.py # Phase 4
-│   ├── test_05_kanban_dnd.py      # Phase 5
-│   ├── test_06_task_detail.py     # Phase 6
-│   ├── test_07_config_viewer.py   # Phase 7
-│   ├── test_08_config_editor.py   # Phase 8
-│   ├── test_09_skills_hub.py      # Phase 9
-│   ├── test_10_workflow_view.py   # Phase 10
-│   ├── test_11_workflow_run.py    # Phase 11
-│   └── test_12_dark_mode.py       # Phase 12
-└── screenshots/
-    └── baseline/                  # Screenshots aprovados pra visual diff
-```
-
-### Padrão de teste (exemplo)
-
-```python
-@pytest.mark.feature("dashboard")
-def test_dashboard_shows_5_agents(page: Page, seeded_db):
-    page.goto("http://localhost:9120/")
-    page.wait_for_selector("[data-testid='agent-card']")
-    assert page.locator("[data-testid='agent-card']").count() == 5
-    
-    # Vision validation
-    screenshot = page.screenshot(path="/tmp/dashboard_test.png")
-    analysis = vision_analyze(
-        image_url="/tmp/dashboard_test.png",
-        question="Does this dashboard show 5 agent cards with status indicators (online/offline)?"
-    )
-    assert "yes" in analysis.lower()
-```
+E2E tests with Playwright + vision validation will be added in a future phase.
 
 ---
 
@@ -265,29 +225,27 @@ def test_dashboard_shows_5_agents(page: Page, seeded_db):
 - [x] Frontend: useMutation with cache invalidation
 - **Entrega:** Editor de config seguro com validação e atomic write
 
-### Phase 9 — Skills Hub Browser (Semana 11)
-- [ ] Backend: `GET /api/skills` — parse `SKILL.md` frontmatter
-- [ ] Frontend: Grid de skills com ícones, descrições, filtros
-- [ ] E2E: `test_09_skills_hub.py` — valida grid
-- **Entrega:** Browser de skills
-
+### Phase 9 — Skills Hub Browser (Semana 11) ✅ DONE
+- [x] Backend: `GET /api/skills` — parse SKILL.md YAML frontmatter
+- [x] Backend: `GET /api/skills/{slug}` — full detail + file list
+- [x] Frontend: Grid de skills com category colors, search, filtros, sort
+- [x] Frontend: Detail modal com MarkdownRenderer
+- [x] Cleanup: remove example.env, fix SECURITY.md, clean PLAN.md tests, improve .gitignore
+- **Entrega:** Browser de skills funcional
 ### Phase 10 — Workflow Editor Visual (Semana 12)
 - [ ] Backend: `GET /api/workflows` — do `agentos.db`
 - [ ] Frontend: React Flow com nodes (trigger, action, condition)
-- [ ] E2E: `test_10_workflow_view.py` — valida canvas
 - **Entrega:** Editor visual de workflows (estático)
 
 ### Phase 11 — Workflow Execution (Semana 13)
 - [ ] Backend: `POST /api/workflows/:id/run` — gera cron + kanban tasks
 - [ ] Frontend: Botão "Run Now" + status indicator
-- [ ] E2E: `test_11_workflow_run.py` — executa workflow, valida tasks criadas
 - **Entrega:** Workflows executáveis
 
 ### Phase 12 — Polish (Semana 14)
 - [ ] Dark mode (já com shadcn/ui, só ajustar tokens)
 - [ ] Keyboard shortcuts (Cmd+K search, etc)
 - [ ] Responsive (mobile breakpoints)
-- [ ] E2E: `test_12_dark_mode.py` — vision valida dark theme
 - **Entrega:** App polido e responsive
 
 ### Phase 13 — Auth (Opcional, Semana 15)
@@ -341,7 +299,7 @@ agentos/
 ├── README.md                     # Visão geral + instalação
 ├── SECURITY.md                   # Política de disclosure
 ├── LICENSE                       # MIT
-├── example.env                   # Env vars com valores dummy
+├── 020-agentos                   # s6 cont-init.d script (reference)
 ├── .gitignore                    # Bulletproof
 ├── .github/
 │   └── workflows/
@@ -409,7 +367,7 @@ agentos/
 | 6 | ✅ Done | Task detail tabs | Overview/Runs/Comments/Children tabs, markdown in title+comments |
 | 7 | ✅ Done | Config viewer | Tree+YAML view, secret redaction, search, read-only |
 | 8 | ✅ Done | Config editor | Atomic write, secret validation, inline editors, change tracking |
-| 9 | 🔲 Pending | Skills hub | — |
+| 9 | ✅ Done | Skills hub | Grid view, category colors, search/filter/sort, detail modal |
 | 10 | 🔲 Pending | Workflow editor | — |
 | 11 | 🔲 Pending | Workflow execution | — |
 | 12 | 🔲 Pending | Polish | — |

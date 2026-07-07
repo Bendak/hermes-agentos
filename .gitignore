@@ -15,3 +15,12 @@ dist/
 *.pyc
 .venv/
 screenshots/
+
+# Temp/backup files
+*.tmp
+*.bak
+
+# AI editor directories
+.claude/
+.codeium/
+.cursor/
