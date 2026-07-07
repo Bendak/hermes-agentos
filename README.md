@@ -117,6 +117,11 @@ AgentOS reads Hermes state directly from:
 | `GET /api/skills` | List all installed skills (metadata only) |
 | `GET /api/skills/{slug}` | Get skill detail (full SKILL.md + file list) |
 | `GET /api/profiles` | List profiles with model, skill counts, external dirs |
+| `GET /api/workflows` | List all workflows |
+| `GET /api/workflows/{id}` | Get workflow detail (nodes + edges) |
+| `POST /api/workflows` | Create new workflow |
+| `PUT /api/workflows/{id}` | Update workflow (name, nodes, edges) |
+| `DELETE /api/workflows/{id}` | Delete workflow |
 
 ## Tech Stack
 
@@ -140,7 +145,8 @@ AgentOS reads Hermes state directly from:
 - [x] Visual Identity — DESIGN.md spec, dark mission-control theme, Pixel design refinement
 - [x] s6 Autostart — cont-init.d script, survives container rebuilds
 - [x] Phase 9 — Skills Hub (browse installed skills, search, filter, detail modal)
-- [ ] Phase 10+ — Cron management, Workflow builder
+- [x] Phase 10 — Workflow Editor (React Flow canvas, CRUD, node palette, dark theme)
+- [ ] Phase 11+ — Workflow execution, Polish
 
 See [PLAN.md](PLAN.md) for the full roadmap and [DESIGN.md](DESIGN.md) for the visual identity spec.
 
