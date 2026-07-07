@@ -35,8 +35,10 @@ NEVER_EDITABLE = {
 def _is_editable(key_name: str) -> bool:
     """Check if a config key is safe to edit."""
     key_lower = key_name.lower()
+    # Suffix matching: blocks "api_key", "access_token", "client_secret"
+    # but allows "max_tokens", "subtitle", "desecretize" etc.
     for pattern in NEVER_EDITABLE:
-        if pattern in key_lower:
+        if key_lower == pattern or key_lower.endswith("_" + pattern) or key_lower.endswith("." + pattern):
             return False
     return True
 
