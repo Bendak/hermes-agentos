@@ -186,9 +186,18 @@ async def list_tasks(
 
 VALID_STATUSES = {"todo", "ready", "running", "done", "blocked", "archived"}
 
+# Columns a PATCH is allowed to write. Anything else is silently ignored to
+# avoid clobbering dispatcher-managed fields (claim_lock, worker_pid, …).
+EDITABLE_FIELDS = {"title", "body", "assignee", "priority", "status", "project_id"}
+
 
 async def update_task_status(task_id: str, new_status: str) -> dict | None:
-    """Update a task's status and related timestamps. Returns the updated task or None."""
+    """Update a task's status and related timestamps. Returns the updated task or None.
+
+    Kept for backwards compatibility with the Phase 5 PATCH endpoint that only
+    changed status. New callers should prefer ``update_task`` which accepts a
+    partial dict.
+    """
     if new_status not in VALID_STATUSES:
         return None
 
@@ -231,6 +240,222 @@ async def update_task_status(task_id: str, new_status: str) -> dict | None:
 
     # Return updated task via get_task
     return await get_task(task_id)
+
+
+async def update_task(task_id: str, updates: dict) -> dict | None:
+    """Apply a partial update to a task. ``updates`` is a dict of field→value.
+
+    Only fields in ``EDITABLE_FIELDS`` are considered. When ``status`` is
+    present the same timestamp bookkeeping as ``update_task_status`` applies.
+    Returns the refreshed task dict or ``None`` if the task is missing.
+    """
+    if not os.path.exists(DB_PATH):
+        return None
+
+    # Filter to editable fields and validate status/priority up front.
+    filtered: dict = {}
+    for k, v in updates.items():
+        if k not in EDITABLE_FIELDS:
+            continue
+        if v is None and k in ("title",):
+            # title is NOT NULL in the schema; never null it out.
+            continue
+        if k == "status" and v not in VALID_STATUSES:
+            return None  # invalid status value
+        if k == "priority" and v is not None:
+            try:
+                v = int(v)
+            except (TypeError, ValueError):
+                return None
+        filtered[k] = v
+
+    if not filtered:
+        # Nothing to do — return the current task so the caller gets a 200.
+        return await get_task(task_id)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)) as cur:
+            if not await cur.fetchone():
+                return None
+
+        now = int(datetime.now(timezone.utc).timestamp())
+
+        # Special-case status so we keep started_at/completed_at consistent.
+        new_status = filtered.pop("status", None)
+        if new_status is not None:
+            if new_status == "running":
+                await db.execute(
+                    "UPDATE tasks SET status = ?, started_at = COALESCE(started_at, ?) WHERE id = ?",
+                    (new_status, now, task_id),
+                )
+            elif new_status == "done":
+                await db.execute(
+                    "UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?",
+                    (new_status, now, task_id),
+                )
+            else:
+                await db.execute(
+                    "UPDATE tasks SET status = ? WHERE id = ?",
+                    (new_status, task_id),
+                )
+
+        # Apply any remaining editable columns.
+        if filtered:
+            set_clause = ", ".join(f"{col} = ?" for col in filtered)
+            params: list = list(filtered.values()) + [task_id]
+            await db.execute(
+                f"UPDATE tasks SET {set_clause} WHERE id = ?",
+                params,
+            )
+
+        await db.commit()
+
+    return await get_task(task_id)
+
+
+async def add_comment(task_id: str, author: str, body: str) -> dict | None:
+    """Append a comment to ``task_comments``. Returns the new comment dict."""
+    if not os.path.exists(DB_PATH):
+        return None
+    if not body.strip():
+        return None
+    author = author or "agentos"
+    now = int(datetime.now(timezone.utc).timestamp())
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT id FROM tasks WHERE id = ?", (task_id,)) as cur:
+            if not await cur.fetchone():
+                return None
+
+        cur = await db.execute(
+            "INSERT INTO task_comments (task_id, author, body, created_at) VALUES (?, ?, ?, ?)",
+            (task_id, author, body, now),
+        )
+        await db.commit()
+        comment_id = cur.lastrowid
+
+    return {
+        "id": comment_id,
+        "task_id": task_id,
+        "author": author,
+        "body": body,
+        "created_at": _ts_to_iso(now),
+    }
+
+
+async def bulk_update(task_ids: list[str], updates: dict) -> dict:
+    """Apply the same partial update to many tasks at once.
+
+    Returns ``{"updated": N, "skipped": M, "ids": [...]}`` where ``ids`` lists
+    the tasks that were actually modified.
+    """
+    if not task_ids or not updates:
+        return {"updated": 0, "skipped": len(task_ids), "ids": []}
+
+    updated_ids: list[str] = []
+    skipped = 0
+    for tid in task_ids:
+        result = await update_task(tid, updates)
+        if result is None:
+            skipped += 1
+        else:
+            updated_ids.append(tid)
+    return {"updated": len(updated_ids), "skipped": skipped, "ids": updated_ids}
+
+
+async def search_tasks(q: str, limit: int = 50) -> list[dict]:
+    """Free-text search across task titles (LIKE-based; kanban.db has no FTS5)."""
+    if not os.path.exists(DB_PATH):
+        return []
+    pattern = f"%{q}%"
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        async with db.execute(
+            """
+            SELECT id, title, assignee, status, priority, created_at
+            FROM tasks
+            WHERE title LIKE ? OR body LIKE ?
+            ORDER BY created_at DESC
+            LIMIT ?
+            """,
+            (pattern, pattern, max(1, min(limit, 200))),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [
+            {
+                "id": r["id"],
+                "title": r["title"],
+                "assignee": r["assignee"],
+                "status": r["status"],
+                "priority": r["priority"],
+                "created_at": _ts_to_iso(r["created_at"]),
+            }
+            for r in rows
+        ]
+
+
+async def get_kanban_stats() -> dict:
+    """Aggregate statistics for the dashboard / kanban header.
+
+    Returns counts by status, by assignee, by priority, plus totals and recent
+    completion timestamps. Designed to be cheap — a handful of grouped queries
+    against kanban.db.
+    """
+    if not os.path.exists(DB_PATH):
+        return {"by_status": {}, "by_assignee": {}, "by_priority": {}, "total": 0}
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+
+        by_status: dict[str, int] = {}
+        async with db.execute(
+            "SELECT status, COUNT(*) as c FROM tasks WHERE status != 'archived' GROUP BY status"
+        ) as cur:
+            async for r in cur:
+                by_status[r["status"]] = r["c"]
+
+        by_assignee: dict[str, int] = {}
+        async with db.execute(
+            """
+            SELECT COALESCE(assignee, 'unassigned') as a, COUNT(*) as c
+            FROM tasks WHERE status != 'archived'
+            GROUP BY a ORDER BY c DESC
+            """,
+        ) as cur:
+            async for r in cur:
+                by_assignee[r["a"]] = r["c"]
+
+        by_priority: dict[str, int] = {}
+        async with db.execute(
+            """
+            SELECT COALESCE(priority, 0) as p, COUNT(*) as c
+            FROM tasks WHERE status != 'archived'
+            GROUP BY p ORDER BY p ASC
+            """,
+        ) as cur:
+            async for r in cur:
+                by_priority[str(r["p"])] = r["c"]
+
+        total = sum(by_status.values())
+
+        # Recently completed (last 7 days)
+        cutoff = int(datetime.now(timezone.utc).timestamp()) - 7 * 86400
+        recent_done = 0
+        async with db.execute(
+            "SELECT COUNT(*) as c FROM tasks WHERE status = 'done' AND completed_at IS NOT NULL AND completed_at >= ?",
+            (cutoff,),
+        ) as cur:
+            r = await cur.fetchone()
+            if r:
+                recent_done = r["c"]
+
+    return {
+        "by_status": by_status,
+        "by_assignee": by_assignee,
+        "by_priority": by_priority,
+        "total": total,
+        "recent_done_7d": recent_done,
+    }
 
 
 async def get_task(task_id: str) -> dict | None:

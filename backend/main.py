@@ -111,17 +111,30 @@ async def session_messages(
 
 # ── Tasks endpoints ──────────────────────────────────────────────
 
-from backend.tasks import list_tasks, get_task, update_task_status  # noqa: E402
+from backend.tasks import (  # noqa: E402
+    list_tasks,
+    get_task,
+    update_task_status,
+    update_task,
+    add_comment,
+    bulk_update,
+    search_tasks,
+    get_kanban_stats,
+)
 
 
 @app.patch("/api/tasks/{task_id}")
-async def update_task(task_id: str, body: dict):
-    new_status = body.get("status")
-    if not new_status:
-        raise HTTPException(status_code=400, detail="Missing 'status' field")
-    result = await update_task_status(task_id, new_status)
+async def update_task_endpoint(task_id: str, body: dict):
+    # Accept both the legacy {status: "..."} shape and the full partial-update
+    # shape ({title, body, assignee, priority, status, project_id, …}).
+    # If the only field present is "status" we route through the legacy helper
+    # so existing DnD callers keep working unchanged.
+    if body.get("status") and len(body) == 1:
+        result = await update_task_status(task_id, body["status"])
+    else:
+        result = await update_task(task_id, body)
     if result is None:
-        raise HTTPException(status_code=404, detail="Task not found or invalid status")
+        raise HTTPException(status_code=404, detail="Task not found or invalid field value")
     return result
 
 
@@ -137,12 +150,78 @@ async def tasks_list(
     )
 
 
+@app.get("/api/tasks/search")
+async def tasks_search(
+    q: str = Query(min_length=1),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> list[dict]:
+    return await search_tasks(q, limit=limit)
+
+
 @app.get("/api/tasks/{task_id}")
 async def tasks_detail(task_id: str) -> dict:
     detail = await get_task(task_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return detail
+
+
+@app.post("/api/tasks/{task_id}/comments")
+async def tasks_add_comment(task_id: str, body: dict):
+    text = (body.get("body") or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Comment body is required")
+    author = body.get("author") or "agentos"
+    result = await add_comment(task_id, author, text)
+    if result is None:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return result
+
+
+@app.post("/api/tasks/bulk")
+async def tasks_bulk(body: dict):
+    ids = body.get("ids")
+    updates = body.get("updates")
+    if not isinstance(ids, list) or not ids:
+        raise HTTPException(status_code=400, detail="'ids' must be a non-empty list")
+    if not isinstance(updates, dict) or not updates:
+        raise HTTPException(status_code=400, detail="'updates' must be a non-empty object")
+    return await bulk_update(ids, updates)
+
+
+@app.get("/api/kanban/stats")
+async def kanban_stats() -> dict:
+    return await get_kanban_stats()
+
+
+@app.post("/api/kanban/notify")
+async def kanban_notify(body: dict):
+    """Webhook receiver for dispatcher completion notifications.
+
+    The body is stored as a row in ``task_events`` (kind='notify') so it can be
+    surfaced on the task detail page without a separate table. Returns a 202 so
+    callers know the event was accepted even if the task doesn't exist yet.
+    """
+    import json as _json
+    from datetime import datetime, timezone
+
+    task_id = body.get("task_id")
+    if not task_id:
+        raise HTTPException(status_code=400, detail="'task_id' is required")
+
+    from backend.tasks import DB_PATH  # noqa: PLC0415
+    import aiosqlite  # noqa: PLC0415
+
+    now = int(datetime.now(timezone.utc).timestamp())
+    if os.path.exists(DB_PATH):
+        async with aiosqlite.connect(DB_PATH) as db:
+            await db.execute(
+                "INSERT INTO task_events (task_id, run_id, kind, payload, created_at) VALUES (?, ?, ?, ?, ?)",
+                (task_id, body.get("run_id"), "notify", _json.dumps(body), now),
+            )
+            await db.commit()
+
+    return {"accepted": True, "task_id": task_id}
 
 
 # ── Config viewer endpoints ──────────────────────────────────────
