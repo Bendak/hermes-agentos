@@ -232,9 +232,11 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 - [x] Frontend: Detail modal com MarkdownRenderer
 - [x] Cleanup: remove example.env, fix SECURITY.md, clean PLAN.md tests, improve .gitignore
 - **Entrega:** Browser de skills funcional
-### Phase 10 — Workflow Editor Visual (Semana 12)
-- [ ] Backend: `GET /api/workflows` — do `agentos.db`
-- [ ] Frontend: React Flow com nodes (trigger, action, condition)
+### Phase 10 — Workflow Editor Visual (Semana 12) ✅ DONE
+- [x] Backend: CRUD completo — `backend/workflows.py` (SQLite table, 5 endpoints)
+- [x] Frontend: React Flow canvas com nodes customizados (trigger/action/condition)
+- [x] Frontend: WorkflowListPage + WorkflowEditorPage + node palette + properties panel
+- [x] Styling: Dark theme CSS overrides pra React Flow
 - **Entrega:** Editor visual de workflows (estático)
 
 ### Phase 11 — Workflow Execution (Semana 13)
@@ -368,7 +370,7 @@ agentos/
 | 7 | ✅ Done | Config viewer | Tree+YAML view, secret redaction, search, read-only |
 | 8 | ✅ Done | Config editor | Atomic write, secret validation, inline editors, change tracking |
 | 9 | ✅ Done | Skills hub | Grid view, category colors, search/filter/sort, detail modal |
-| 10 | 🔲 Pending | Workflow editor | — |
+| 10 | ✅ Done | Workflow editor | React Flow canvas, CRUD, node palette, dark theme |
 | 11 | 🔲 Pending | Workflow execution | — |
 | 12 | 🔲 Pending | Polish | — |
 | 13 | 🔲 Optional | Auth | — |
