@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 48" fill="none">
+  <!-- Winged Glyph icon -->
+  <g transform="translate(4, 4)">
+    <!-- Left wing stroke (primary accent - electric teal) -->
+    <path d="M2 32 C8 28, 14 18, 20 8 C16 14, 10 22, 6 28 Z" fill="#0EA5E9" opacity="0.9"/>
+    <!-- Right wing stroke (lighter tint) -->
+    <path d="M8 32 C14 26, 20 16, 28 4 C22 12, 16 22, 12 28 Z" fill="#38BDF8" opacity="0.7"/>
+    <!-- Forward slash / speed mark -->
+    <path d="M16 6 L22 34" stroke="#0EA5E9" stroke-width="2.5" stroke-linecap="round"/>
+  </g>
+  <!-- Wordmark: AgentOS -->
+  <text x="48" y="33" font-family="Inter, system-ui, sans-serif" font-size="28" font-weight="600" fill="#F1F5F9" letter-spacing="-0.5">Agent<tspan font-weight="400" fill="#94A3B8">OS</tspan></text>
+</svg>
