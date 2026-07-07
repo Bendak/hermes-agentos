@@ -1136,9 +1136,262 @@ const COLUMN_META = [
   { status: 'blocked', label: 'Blocked', accent: 'border-l-error',          header: 'border-error/50',          badge: 'bg-error-subtle text-error border border-error/20' },
 ]
 
+const ALL_STATUSES = ['todo', 'ready', 'running', 'done', 'blocked', 'archived']
+const ALL_ASSIGNEES = ['coder', 'pixel', 'atlas', 'nova', 'nexus']
+const ALL_PRIORITIES = [0, 1, 2, 3]
+
 function columnForStatus(status: string): string {
   const known = ['todo', 'ready', 'running', 'done', 'blocked']
   return known.includes(status) ? status : 'todo'
+}
+
+/* ── Task Editor Modal ─────────────────────────────── */
+
+function TaskEditorModal({ task, onClose, onSaved }: {
+  task: TaskItem | TaskDetail
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [title, setTitle] = useState(task.title || '')
+  const [body, setBody] = useState(task.body || '')
+  const [assignee, setAssignee] = useState(task.assignee || '')
+  const [priority, setPriority] = useState(task.priority ?? 2)
+  const [status, setStatus] = useState(task.status)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(task.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, body, assignee: assignee || null, priority, status }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      return res.json()
+    },
+    onMutate: () => { setSaving(true); setError(null) },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+      queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+      onSaved()
+      onClose()
+    },
+    onError: (err: Error) => { setError(err.message); setSaving(false) },
+  })
+
+  // ESC to close
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [onClose])
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+      <div
+        className="w-full max-w-2xl rounded-xl border border-border bg-bg-elevated shadow-2xl max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit task"
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-bg-elevated z-10">
+          <h2 className="text-h3 font-bold text-text-primary">Edit Task</h2>
+          <button onClick={onClose} className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface/60 transition" aria-label="Close">
+            ✕
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-6 py-5 space-y-4">
+          {/* Title */}
+          <div>
+            <label className="block text-caption text-text-secondary mb-1.5 font-medium">Title</label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
+              placeholder="Task title…"
+            />
+          </div>
+
+          {/* Body */}
+          <div>
+            <label className="block text-caption text-text-secondary mb-1.5 font-medium">Body (Markdown)</label>
+            <textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              rows={8}
+              className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary font-mono focus:border-accent focus:ring-1 focus:ring-accent outline-none transition resize-y"
+              placeholder="## Objective&#10;Describe the task…"
+            />
+          </div>
+
+          {/* Grid: assignee, status, priority */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-caption text-text-secondary mb-1.5 font-medium">Assignee</label>
+              <select
+                value={assignee}
+                onChange={(e) => setAssignee(e.target.value)}
+                className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
+              >
+                <option value="">Unassigned</option>
+                {ALL_ASSIGNEES.map((a) => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-caption text-text-secondary mb-1.5 font-medium">Status</label>
+              <select
+                value={status}
+                onChange={(e) => setStatus(e.target.value)}
+                className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
+              >
+                {ALL_STATUSES.filter((s) => s !== 'archived').map((s) => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-caption text-text-secondary mb-1.5 font-medium">Priority</label>
+              <select
+                value={priority}
+                onChange={(e) => setPriority(Number(e.target.value))}
+                className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
+              >
+                {ALL_PRIORITIES.map((p) => (
+                  <option key={p} value={p}>{priorityLabel(p)}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Task ID */}
+          <div className="pt-2">
+            <p className="text-caption text-text-tertiary font-mono">ID: {task.id}</p>
+          </div>
+
+          {error && (
+            <div className="rounded-md border border-error/30 bg-error-subtle px-3 py-2 text-sm text-error">
+              {error}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-border sticky bottom-0 bg-bg-elevated">
+          <button
+            onClick={onClose}
+            className="rounded-md border border-border px-4 py-2 text-sm text-text-secondary hover:bg-surface/60 transition"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => saveMutation.mutate()}
+            disabled={saving || !title.trim()}
+            className="rounded-md bg-accent px-4 py-2 text-sm text-white font-medium hover:bg-accent-hover transition disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {saving ? 'Saving…' : 'Save changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── Filter Bar ────────────────────────────────────── */
+
+interface FilterState {
+  search: string
+  assignee: string
+  priority: string
+  status: string
+}
+
+function FilterBar({ filters, onChange, stats }: {
+  filters: FilterState
+  onChange: (f: FilterState) => void
+  stats?: { total: number; by_status?: Record<string, number>; by_assignee?: Record<string, number> }
+}) {
+  const selectClass = "rounded-md border border-border bg-bg-base px-2.5 py-1.5 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition cursor-pointer"
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 mb-4">
+      {/* Search */}
+      <div className="relative flex-1 min-w-[200px]">
+        <input
+          type="text"
+          value={filters.search}
+          onChange={(e) => onChange({ ...filters, search: e.target.value })}
+          placeholder="Search tasks…"
+          className="w-full rounded-md border border-border bg-bg-base pl-9 pr-3 py-1.5 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
+        />
+        <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      </div>
+
+      {/* Assignee filter */}
+      <select
+        value={filters.assignee}
+        onChange={(e) => onChange({ ...filters, assignee: e.target.value })}
+        className={selectClass}
+        title="Filter by assignee"
+      >
+        <option value="">All assignees</option>
+        {ALL_ASSIGNEES.map((a) => (
+          <option key={a} value={a}>
+            {a}{stats?.by_assignee?.[a] ? ` (${stats.by_assignee[a]})` : ''}
+          </option>
+        ))}
+      </select>
+
+      {/* Priority filter */}
+      <select
+        value={filters.priority}
+        onChange={(e) => onChange({ ...filters, priority: e.target.value })}
+        className={selectClass}
+        title="Filter by priority"
+      >
+        <option value="">All priorities</option>
+        {ALL_PRIORITIES.map((p) => (
+          <option key={p} value={String(p)}>{priorityLabel(p)}</option>
+        ))}
+      </select>
+
+      {/* Status filter (column highlight) */}
+      <select
+        value={filters.status}
+        onChange={(e) => onChange({ ...filters, status: e.target.value })}
+        className={selectClass}
+        title="Filter by status"
+      >
+        <option value="">All statuses</option>
+        {ALL_STATUSES.filter((s) => s !== 'archived').map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+
+      {/* Clear */}
+      {(filters.search || filters.assignee || filters.priority || filters.status) && (
+        <button
+          onClick={() => onChange({ search: '', assignee: '', priority: '', status: '' })}
+          className="text-caption text-text-tertiary hover:text-text-primary transition px-2"
+        >
+          Clear filters
+        </button>
+      )}
+
+      {/* Total count badge */}
+      {stats && (
+        <span className="ml-auto text-caption text-text-tertiary">
+          {stats.total} task{stats.total === 1 ? '' : 's'}
+        </span>
+      )}
+    </div>
+  )
 }
 
 function assigneeBadgeClass(assignee: string | null): string {
@@ -1172,7 +1425,7 @@ function priorityLabel(priority: number | null): string {
   return map[priority ?? 3] || 'P?'
 }
 
-function TaskCard({ task, isOverlay }: { task: TaskItem; isOverlay?: boolean }) {
+function TaskCard({ task, isOverlay, onEdit }: { task: TaskItem; isOverlay?: boolean; onEdit?: (task: TaskItem) => void }) {
   const navigate = useNavigate()
   const {
     attributes,
@@ -1194,6 +1447,11 @@ function TaskCard({ task, isOverlay }: { task: TaskItem; isOverlay?: boolean }) 
     navigate(`/tasks/${encodeURIComponent(task.id)}`)
   }
 
+  const handleEditClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    onEdit?.(task)
+  }
+
   return (
     <div
       ref={setNodeRef}
@@ -1212,8 +1470,20 @@ function TaskCard({ task, isOverlay }: { task: TaskItem; isOverlay?: boolean }) 
       }}
       className={`card-focus mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-text-tertiary'} ${isOverlay ? 'shadow-lg rotate-1' : ''}`}
     >
-      <div className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug mb-2 prose-kanban-card">
-        <MarkdownRenderer content={task.title || 'Untitled'} />
+      <div className="flex items-start justify-between gap-2 mb-2">
+        <div className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug flex-1 prose-kanban-card">
+          <MarkdownRenderer content={task.title || 'Untitled'} />
+        </div>
+        {onEdit && !isOverlay && (
+          <button
+            onClick={handleEditClick}
+            className="shrink-0 p-1 rounded text-text-tertiary hover:text-accent hover:bg-surface/60 transition opacity-0 group-hover:opacity-100"
+            aria-label="Edit task"
+            title="Edit task"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+          </button>
+        )}
       </div>
       <div className="flex flex-wrap items-center gap-2 mb-2">
         {task.assignee && (
@@ -1243,7 +1513,7 @@ function TaskCard({ task, isOverlay }: { task: TaskItem; isOverlay?: boolean }) 
   )
 }
 
-function KanbanColumn({ label, status, tasks }: { label: string; status: string; tasks: TaskItem[] }) {
+function KanbanColumn({ label, status, tasks, onEdit }: { label: string; status: string; tasks: TaskItem[]; onEdit?: (task: TaskItem) => void }) {
   const meta = COLUMN_META.find((c) => c.status === status) || COLUMN_META[0]
   const { setNodeRef, isOver } = useDroppable({ id: status })
 
@@ -1260,7 +1530,9 @@ function KanbanColumn({ label, status, tasks }: { label: string; status: string;
         className={`flex-1 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1 rounded-lg transition ${isOver ? 'bg-accent/10 ring-1 ring-accent/30' : ''}`}
       >
         {tasks.map((task) => (
-          <TaskCard key={task.id} task={task} />
+          <div key={task.id} className="group">
+            <TaskCard task={task} onEdit={onEdit} />
+          </div>
         ))}
         {tasks.length === 0 && (
           <p className="text-caption text-text-tertiary text-center py-6">No tasks</p>
@@ -1273,6 +1545,8 @@ function KanbanColumn({ label, status, tasks }: { label: string; status: string;
 function KanbanBoardPage() {
   const [showArchived, setShowArchived] = useState(false)
   const [draggedTask, setDraggedTask] = useState<TaskItem | null>(null)
+  const [editingTask, setEditingTask] = useState<TaskItem | null>(null)
+  const [filters, setFilters] = useState<FilterState>({ search: '', assignee: '', priority: '', status: '' })
   const queryClient = useQueryClient()
 
   const sensors = useSensors(
@@ -1289,6 +1563,16 @@ function KanbanBoardPage() {
       return res.json()
     },
     refetchInterval: 10000,
+  })
+
+  const { data: stats } = useQuery<{ total: number; by_status: Record<string, number>; by_assignee: Record<string, number>; by_priority: Record<string, number>; recent_done_7d: number }>({
+    queryKey: ['kanban', 'stats'],
+    queryFn: async () => {
+      const res = await fetch('/api/kanban/stats')
+      if (!res.ok) throw new Error('Failed to load stats')
+      return res.json()
+    },
+    refetchInterval: 15000,
   })
 
   const updateMutation = useMutation({
@@ -1317,6 +1601,7 @@ function KanbanBoardPage() {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+      queryClient.invalidateQueries({ queryKey: ['kanban', 'stats'] })
     },
   })
 
@@ -1337,8 +1622,21 @@ function KanbanBoardPage() {
     updateMutation.mutate({ taskId, status: newStatus })
   }
 
-  const activeTasks = data?.filter((t) => t.status !== 'archived') || []
-  const archivedTasks = data?.filter((t) => t.status === 'archived') || []
+  // Apply client-side filters
+  const filterTask = (t: TaskItem): boolean => {
+    if (filters.search) {
+      const q = filters.search.toLowerCase()
+      if (!(t.title || '').toLowerCase().includes(q) && !(t.body || '').toLowerCase().includes(q))
+        return false
+    }
+    if (filters.assignee && t.assignee !== filters.assignee) return false
+    if (filters.priority && String(t.priority) !== filters.priority) return false
+    if (filters.status && columnForStatus(t.status) !== filters.status) return false
+    return true
+  }
+
+  const activeTasks = (data?.filter((t) => t.status !== 'archived') || []).filter(filterTask)
+  const archivedTasks = (data?.filter((t) => t.status === 'archived') || []).filter(filterTask)
 
   const columns = COLUMN_META.map((col) => ({
     ...col,
@@ -1354,16 +1652,29 @@ function KanbanBoardPage() {
             <h1 className="text-h2 font-bold text-text-primary">Kanban Board</h1>
             <p className="text-body-sm text-text-secondary mt-1">Task pipeline</p>
           </div>
-          <button
-            onClick={() => setShowArchived((v) => !v)}
-            className="rounded-md bg-surface border border-border px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover/80 transition"
-          >
-            {showArchived ? 'Hide archived' : 'Show archived'}
-          </button>
+          <div className="flex items-center gap-3">
+            {stats && (
+              <div className="hidden sm:flex items-center gap-4 text-caption text-text-tertiary">
+                <span title="Total active tasks">{stats.total} total</span>
+                <span title="Completed in last 7 days" className="text-success">{stats.recent_done_7d} done/7d</span>
+              </div>
+            )}
+            <button
+              onClick={() => setShowArchived((v) => !v)}
+              className="rounded-md bg-surface border border-border px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover/80 transition"
+            >
+              {showArchived ? 'Hide archived' : 'Show archived'}
+            </button>
+          </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-6 pb-12">
+        {/* Filter bar */}
+        {data && (
+          <FilterBar filters={filters} onChange={setFilters} stats={stats} />
+        )}
+
         {isLoading && <p className="text-text-secondary">Loading tasks…</p>}
         {error && (
           <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error mb-4">
@@ -1386,6 +1697,7 @@ function KanbanBoardPage() {
                     label={col.label}
                     status={col.status}
                     tasks={col.tasks}
+                    onEdit={setEditingTask}
                   />
                 ))}
               </div>
@@ -1419,6 +1731,17 @@ function KanbanBoardPage() {
           </>
         )}
       </main>
+
+      {/* Task Editor Modal */}
+      {editingTask && (
+        <TaskEditorModal
+          task={editingTask}
+          onClose={() => setEditingTask(null)}
+          onSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ['kanban', 'stats'] })
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -1428,7 +1751,11 @@ function KanbanBoardPage() {
 function TaskDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<'overview' | 'runs' | 'comments' | 'children'>('overview')
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [commentText, setCommentText] = useState('')
+  const [commentAuthor, setCommentAuthor] = useState('agentos')
 
   const { data, isLoading, error } = useQuery<TaskDetail>({
     queryKey: ['task', id],
@@ -1443,6 +1770,38 @@ function TaskDetailPage() {
     refetchInterval: 10000,
   })
 
+  // Fetch child task titles for richer display
+  const childIds = data?.children || []
+  const { data: childTasks } = useQuery<TaskItem[]>({
+    queryKey: ['tasks', 'children', childIds],
+    queryFn: async () => {
+      if (childIds.length === 0) return []
+      const res = await fetch('/api/tasks?include_archived=true&limit=500')
+      if (!res.ok) return []
+      const all: TaskItem[] = await res.json()
+      return all.filter((t) => childIds.includes(t.id))
+    },
+    enabled: childIds.length > 0,
+    staleTime: 30000,
+  })
+
+  const addCommentMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/tasks/${encodeURIComponent(id!)}/comments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: commentText, author: commentAuthor }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      return res.json()
+    },
+    onSuccess: () => {
+      setCommentText('')
+      queryClient.invalidateQueries({ queryKey: ['task', id] })
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+    },
+  })
+
   function formatIso(iso: string | null): string {
     if (!iso) return '-'
     const d = new Date(iso)
@@ -1453,12 +1812,23 @@ function TaskDetailPage() {
     <div className="min-h-screen bg-bg-base text-text-secondary">
       <NavBar />
       <main className="mx-auto max-w-4xl px-6 py-8">
-        <button
-          onClick={() => navigate('/tasks')}
-          className="mb-4 text-body-sm text-accent hover:underline"
-        >
-          ← Back to tasks
-        </button>
+        <div className="flex items-center justify-between mb-4">
+          <button
+            onClick={() => navigate('/tasks')}
+            className="text-body-sm text-accent hover:underline"
+          >
+            ← Back to tasks
+          </button>
+          {data && (
+            <button
+              onClick={() => setShowEditModal(true)}
+              className="rounded-md bg-accent px-3 py-1.5 text-sm text-white font-medium hover:bg-accent-hover transition flex items-center gap-1.5"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+              Edit
+            </button>
+          )}
+        </div>
 
         {isLoading && <p className="text-text-secondary">Loading task…</p>}
         {error && (
@@ -1653,7 +2023,38 @@ function TaskDetailPage() {
             {/* Comments tab */}
             {activeTab === 'comments' && (
               <div data-testid="tab-panel-comments" className="rounded-lg border border-border bg-surface/30 p-4">
-                {data.comments.length === 0 && <p className="text-body-sm text-text-tertiary">No comments.</p>}
+                {/* Comment form */}
+                <div className="mb-4 pb-4 border-b border-border">
+                  <div className="flex gap-2 mb-2">
+                    <input
+                      type="text"
+                      value={commentAuthor}
+                      onChange={(e) => setCommentAuthor(e.target.value)}
+                      placeholder="Author"
+                      className="w-32 rounded-md border border-border bg-bg-base px-2.5 py-1.5 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
+                    />
+                    <button
+                      onClick={() => addCommentMutation.mutate()}
+                      disabled={!commentText.trim() || addCommentMutation.isPending}
+                      className="ml-auto rounded-md bg-accent px-3 py-1.5 text-sm text-white font-medium hover:bg-accent-hover transition disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {addCommentMutation.isPending ? 'Posting…' : 'Add comment'}
+                    </button>
+                  </div>
+                  <textarea
+                    value={commentText}
+                    onChange={(e) => setCommentText(e.target.value)}
+                    rows={3}
+                    placeholder="Write a comment… (Markdown supported)"
+                    className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition resize-y"
+                  />
+                  {addCommentMutation.isError && (
+                    <p className="mt-2 text-sm text-error">{(addCommentMutation.error as Error).message}</p>
+                  )}
+                </div>
+
+                {/* Comment list */}
+                {data.comments.length === 0 && <p className="text-body-sm text-text-tertiary">No comments yet.</p>}
                 {data.comments.length > 0 && (
                   <div className="space-y-3">
                     {data.comments.map((comment) => (
@@ -1678,16 +2079,29 @@ function TaskDetailPage() {
                 {data.children.length === 0 && <p className="text-body-sm text-text-tertiary">No child tasks.</p>}
                 {data.children.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {data.children.map((childId) => (
-                      <button
-                        key={childId}
-                        onClick={() => navigate(`/tasks/${encodeURIComponent(childId)}`)}
-                        className="text-left rounded-lg border border-border bg-bg-base/40 p-4 hover:bg-surface/50 transition cursor-pointer"
-                      >
-                        <p className="text-caption text-text-tertiary mb-1">Child task</p>
-                        <p className="font-mono text-sm text-accent">{childId}</p>
-                      </button>
-                    ))}
+                    {data.children.map((childId) => {
+                      const childTask = childTasks?.find((t) => t.id === childId)
+                      return (
+                        <button
+                          key={childId}
+                          onClick={() => navigate(`/tasks/${encodeURIComponent(childId)}`)}
+                          className="text-left rounded-lg border border-border bg-bg-base/40 p-4 hover:bg-surface/50 transition cursor-pointer"
+                        >
+                          <div className="flex items-center gap-2 mb-1">
+                            <p className="font-mono text-xs text-accent">{childId}</p>
+                            {childTask && (
+                              <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${childTask.status === 'done' ? 'bg-success-subtle text-success border border-success/20' : childTask.status === 'running' ? 'bg-warning-subtle text-warning border border-warning/20' : childTask.status === 'blocked' ? 'bg-error-subtle text-error border border-error/20' : 'bg-surface text-text-secondary border border-border'}`}>
+                                {childTask.status}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-text-primary line-clamp-2">{childTask?.title || 'Untitled task'}</p>
+                          {childTask?.assignee && (
+                            <p className="text-caption text-text-tertiary mt-1">@{childTask.assignee}</p>
+                          )}
+                        </button>
+                      )
+                    })}
                   </div>
                 )}
               </div>
@@ -1695,6 +2109,19 @@ function TaskDetailPage() {
           </>
         )}
       </main>
+
+      {/* Edit modal */}
+      {data && showEditModal && (
+        <TaskEditorModal
+          task={data}
+          onClose={() => setShowEditModal(false)}
+          onSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ['task', id] })
+            queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+            queryClient.invalidateQueries({ queryKey: ['kanban', 'stats'] })
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -2894,7 +3321,7 @@ function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) 
         const q = query.toLowerCase()
         const [sessions, tasks, skills, workflows] = await Promise.all([
           fetch(`/api/sessions?limit=20&search=${encodeURIComponent(query)}`, { signal: ctrl.signal }).then(r => r.ok ? r.json() : { sessions: [] }).catch(() => ({ sessions: [] })),
-          fetch(`/api/tasks?limit=20&search=${encodeURIComponent(query)}`, { signal: ctrl.signal }).then(r => r.ok ? r.json() : { tasks: [] }).catch(() => ({ tasks: [] })),
+          fetch(`/api/tasks/search?q=${encodeURIComponent(query)}&limit=20`, { signal: ctrl.signal }).then(r => r.ok ? r.json() : []).catch(() => []),
           fetch(`/api/skills`, { signal: ctrl.signal }).then(r => r.ok ? r.json() : []).catch(() => []),
           fetch(`/api/workflows`, { signal: ctrl.signal }).then(r => r.ok ? r.json() : []).catch(() => []),
         ])
@@ -2904,7 +3331,7 @@ function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) 
             out.push({ type: 'session', id: s.id, title: s.title || 'Untitled', subtitle: `${s.message_count} messages`, path: `/sessions/${encodeURIComponent(s.id)}` })
           }
         }
-        for (const t of (tasks.tasks || [])) {
+        for (const t of (Array.isArray(tasks) ? tasks : [])) {
           if ((t.title || '').toLowerCase().includes(q)) {
             out.push({ type: 'task', id: t.id, title: t.title || 'Untitled', subtitle: t.status, path: `/tasks/${encodeURIComponent(t.id)}` })
           }
