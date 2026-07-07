@@ -98,6 +98,11 @@ body::before {
     radial-gradient(ellipse 700px 350px at 10% -5%, rgba(0, 229, 185, 0.05), transparent 70%),
     radial-gradient(ellipse 600px 450px at 90% -10%, rgba(245, 184, 0, 0.04), transparent 70%);
 }
+html.light body::before {
+  background:
+    radial-gradient(ellipse 700px 350px at 10% -5%, rgba(5, 150, 105, 0.04), transparent 70%),
+    radial-gradient(ellipse 600px 450px at 90% -10%, rgba(217, 119, 6, 0.03), transparent 70%);
+}
 
 /* Smooth default transitions on interactive elements */
 a, button, input, select, textarea, [role="button"] {
@@ -147,6 +152,13 @@ code, pre, kbd, .font-mono {
   background: var(--border-strong);
 }
 
+html.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 /* Focus Ring (global) */
 *:focus-visible {
   outline: 2px solid var(--accent-primary);
@@ -161,6 +173,24 @@ code, pre, kbd, .font-mono {
   color: #e6edf3;
   background: #0B1120;
 }
+
+html.light .hljs {
+  color: #24292e;
+  background: #f6f8fa;
+}
+html.light .hljs-comment, html.light .hljs-quote { color: #6a737d; }
+html.light .hljs-keyword, html.light .hljs-selector-tag, html.light .hljs-subst { color: #d73a49; }
+html.light .hljs-number, html.light .hljs-literal, html.light .hljs-variable, html.light .hljs-template-variable, html.light .hljs-tag .hljs-attr { color: #005cc5; }
+html.light .hljs-string, html.light .hljs-doctag { color: #032f62; }
+html.light .hljs-title, html.light .hljs-section, html.light .hljs-selector-id { color: #6f42c1; font-weight: normal; }
+html.light .hljs-type, html.light .hljs-class .hljs-title { color: #e36209; }
+html.light .hljs-tag, html.light .hljs-name, html.light .hljs-attribute { color: #22863a; }
+html.light .hljs-regexp, html.light .hljs-link { color: #032f62; }
+html.light .hljs-symbol, html.light .hljs-bullet { color: #005cc5; }
+html.light .hljs-built_in, html.light .hljs-builtin-name { color: #6f42c1; }
+html.light .hljs-meta { color: #005cc5; font-weight: normal; }
+html.light .hljs-deletion { background: #ffeef0; }
+html.light .hljs-addition { background: #e6ffec; }
 
 .hljs-comment,
 .hljs-quote {

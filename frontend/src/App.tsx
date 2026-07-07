@@ -3041,6 +3041,7 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const keySeqRef = useRef<string[]>([])
+  const navigate = useNavigate()
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -3080,14 +3081,14 @@ export default function App() {
           d: '/', s: '/sessions', t: '/tasks', c: '/config', k: '/skills', w: '/workflows'
         }
         if (routes[seq[1]]) {
-          window.location.pathname = routes[seq[1]]
+          navigate(routes[seq[1]])
           keySeqRef.current = []
         }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [])
+  }, [navigate])
 
   return (
     <QueryClientProvider client={queryClient}>
