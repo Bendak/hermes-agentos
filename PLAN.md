@@ -260,6 +260,14 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 ### Phase 13 — Auth (Opcional, Semana 15)
 - [ ] JWT auth (apenas se precisar multi-user)
 - [ ] RBAC (admin/operator/viewer)
+
+### Phase 14 — Kanban Integration (Semana 16)
+- [ ] Task Editor Modal — editar title, body, assignee, priority, status
+- [ ] Enhanced Kanban Board — 5 colunas, DnD melhorado, cards com badges
+- [ ] Filters & Search — por assignee, priority, status, busca por título
+- [ ] Notificações — cron job monitora conclusão, notifica no Discord
+- [ ] Bulk Operations — seleção múltipla, mudanças em batch
+- **Entrega:** Kanban board completo integrado com Hermes dispatcher
 - [ ] Só adicionar se o homelab efetivamente precisar
 
 ---

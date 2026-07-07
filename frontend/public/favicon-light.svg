@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <rect width="32" height="32" rx="6" fill="#F8FAFC"/>
+  <!-- Left wing stroke -->
+  <path d="M6 24 C10 20, 14 14, 18 8 C14 12, 10 18, 8 22 Z" fill="#059669"/>
+  <!-- Right wing stroke -->
+  <path d="M10 24 C14 20, 18 12, 22 6 C18 12, 14 18, 12 22 Z" fill="#0EA5E9" opacity="0.75"/>
+  <!-- Forward slash -->
+  <path d="M14 6 L18 26" stroke="#059669" stroke-width="2" stroke-linecap="round"/>
+</svg>
