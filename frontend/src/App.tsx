@@ -1600,7 +1600,7 @@ function isEditableKey(key: string): boolean {
     'client_secret', 'access_token', 'refresh_token', 'basic_auth',
     'oauth', 'secrets', 'hermes_api_server_key', 'oauth_client_id',
   ]
-  return !protectedKeys.some((p) => lower.includes(p))
+  return !protectedKeys.some((p) => lower === p || lower.endsWith('_' + p) || lower.endsWith('.' + p))
 }
 
 function ConfigNode({
