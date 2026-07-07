@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DndContext, DragOverlay, useDroppable, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
@@ -176,42 +176,110 @@ interface WorkflowNodeData {
 /* ── NavBar ────────────────────────────────────────── */
 
 function NavBar() {
-  const navLink = (to: string, label: string) => {
+  const onOpenSearch = useOpenSearch()
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    if (typeof window !== 'undefined') {
+      return (localStorage.getItem('agentos-theme') as 'dark' | 'light') || 'dark'
+    }
+    return 'dark'
+  })
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', theme === 'light')
+    localStorage.setItem('agentos-theme', theme)
+  }, [theme])
+
+  const navLink = (to: string, label: string, closeMobile?: () => void) => {
     const active = location.pathname === to || (to !== '/' && location.pathname.startsWith(to))
     return (
       <Link
         to={to}
+        onClick={() => { setMobileMenuOpen(false); closeMobile?.() }}
         className={`relative px-3 py-1.5 text-sm font-medium rounded-md transition duration-200 ease-agent-os ${
           active ? 'text-accent bg-accent-subtle' : 'text-text-secondary hover:text-text-primary hover:bg-surface/60'
         }`}
       >
         {label}
         {active && (
-          <span className="absolute bottom-[-13px] left-1 right-1 h-[2px] bg-accent rounded-full shadow-glow" />
+          <span className="absolute bottom-[-13px] left-1 right-1 h-[2px] bg-accent rounded-full shadow-glow hidden sm:block" />
         )}
       </Link>
     )
   }
 
   return (
-    <nav className="bg-bg-elevated/80 backdrop-blur-md border-b border-border px-6 py-3 sticky top-0 z-50">
-      <div className="mx-auto max-w-7xl flex items-center gap-6">
-        <Link to="/" className="flex items-center gap-2 text-text-primary font-bold text-lg tracking-tight group">
-          <span className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-accent/10 border border-accent/20">
-            <span className="w-2 h-2 rounded-full bg-accent shadow-glow animate-pulse" />
-          </span>
-          <span>AgentOS</span>
-        </Link>
-        <div className="flex items-center gap-5 ml-2">
-          {navLink('/', 'Dashboard')}
-          {navLink('/sessions', 'Sessions')}
-          {navLink('/tasks', 'Tasks')}
-          {navLink('/config', 'Config')}
-          {navLink('/skills', 'Skills')}
-          {navLink('/workflows', 'Workflows')}
+    <>
+      <nav className="bg-bg-elevated/80 backdrop-blur-md border-b border-border px-4 sm:px-6 py-3 sticky top-0 z-50">
+        <div className="mx-auto max-w-7xl flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4">
+            <Link to="/" className="flex items-center gap-2 text-text-primary font-bold text-lg tracking-tight group shrink-0">
+              <img src="/logo.svg" alt="AgentOS" className="h-7 w-auto" />
+            </Link>
+            {/* Desktop nav links */}
+            <div className="hidden sm:flex items-center gap-1 ml-2">
+              {navLink('/', 'Dashboard')}
+              {navLink('/sessions', 'Sessions')}
+              {navLink('/tasks', 'Tasks')}
+              {navLink('/config', 'Config')}
+              {navLink('/skills', 'Skills')}
+              {navLink('/workflows', 'Workflows')}
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            {/* Search shortcut hint (desktop only) */}
+            {onOpenSearch && (
+              <button
+                onClick={onOpenSearch}
+                className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-md text-sm text-text-tertiary hover:text-text-secondary hover:bg-surface/60 transition-colors border border-border"
+                title="Quick search (⌘K)"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <span className="hidden lg:inline">Search…</span>
+                <kbd className="hidden lg:inline text-[10px] font-mono bg-bg-base border border-border rounded px-1 py-0.5 ml-1">⌘K</kbd>
+              </button>
+            )}
+            {/* Theme toggle */}
+            <button
+              onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+              className="p-2 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface/60 transition-colors"
+              title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              {theme === 'dark' ? '☀️' : '🌙'}
+            </button>
+            {/* Mobile hamburger */}
+            <button
+              className="sm:hidden p-2 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface/60 transition-colors"
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+            >
+              {mobileMenuOpen ? '✕' : '☰'}
+            </button>
+          </div>
         </div>
-      </div>
-    </nav>
+      </nav>
+      {/* Mobile menu dropdown */}
+      {mobileMenuOpen && (
+        <div className="sm:hidden border-b border-border bg-bg-elevated/95 backdrop-blur-md px-4 py-3 sticky top-[53px] z-40">
+          <div className="flex flex-col gap-1">
+            {navLink('/', 'Dashboard')}
+            {navLink('/sessions', 'Sessions')}
+            {navLink('/tasks', 'Tasks')}
+            {navLink('/config', 'Config')}
+            {navLink('/skills', 'Skills')}
+            {navLink('/workflows', 'Workflows')}
+            {onOpenSearch && (
+              <button
+                onClick={() => { setMobileMenuOpen(false); onOpenSearch() }}
+                className="px-3 py-1.5 text-sm font-medium rounded-md text-text-secondary hover:text-text-primary hover:bg-surface/60 text-left transition-colors"
+              >
+                🔍 Search
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </>
   )
 }
 
@@ -2784,23 +2852,261 @@ function WorkflowEditorPage() {
   )
 }
 
+/* ── Search / Keyboard Context ──────────────────────── */
+
+const SearchContext = createContext<{ openSearch: () => void }>({ openSearch: () => {} })
+
+function useOpenSearch() {
+  return useContext(SearchContext).openSearch
+}
+
+/* ── Search Modal ──────────────────────────────────── */
+
+interface SearchResult {
+  type: 'session' | 'task' | 'skill' | 'workflow'
+  id: string
+  title: string
+  subtitle?: string
+  path: string
+}
+
+function SearchModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<SearchResult[]>([])
+  const [loading, setLoading] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (open) {
+      setQuery('')
+      setResults([])
+      setTimeout(() => inputRef.current?.focus(), 50)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!query.trim()) { setResults([]); return }
+    const ctrl = new AbortController()
+    const timer = setTimeout(async () => {
+      setLoading(true)
+      try {
+        const q = query.toLowerCase()
+        const [sessions, tasks, skills, workflows] = await Promise.all([
+          fetch(`/api/sessions?limit=20&search=${encodeURIComponent(query)}`, { signal: ctrl.signal }).then(r => r.ok ? r.json() : { sessions: [] }).catch(() => ({ sessions: [] })),
+          fetch(`/api/tasks?limit=20&search=${encodeURIComponent(query)}`, { signal: ctrl.signal }).then(r => r.ok ? r.json() : { tasks: [] }).catch(() => ({ tasks: [] })),
+          fetch(`/api/skills`, { signal: ctrl.signal }).then(r => r.ok ? r.json() : []).catch(() => []),
+          fetch(`/api/workflows`, { signal: ctrl.signal }).then(r => r.ok ? r.json() : []).catch(() => []),
+        ])
+        const out: SearchResult[] = []
+        for (const s of (sessions.sessions || [])) {
+          if ((s.title || '').toLowerCase().includes(q)) {
+            out.push({ type: 'session', id: s.id, title: s.title || 'Untitled', subtitle: `${s.message_count} messages`, path: `/sessions/${encodeURIComponent(s.id)}` })
+          }
+        }
+        for (const t of (tasks.tasks || [])) {
+          if ((t.title || '').toLowerCase().includes(q)) {
+            out.push({ type: 'task', id: t.id, title: t.title || 'Untitled', subtitle: t.status, path: `/tasks/${encodeURIComponent(t.id)}` })
+          }
+        }
+        for (const sk of (Array.isArray(skills) ? skills : [])) {
+          if ((sk.name || '').toLowerCase().includes(q)) {
+            out.push({ type: 'skill', id: sk.slug, title: sk.name, subtitle: sk.category, path: `/skills` })
+          }
+        }
+        for (const wf of (Array.isArray(workflows) ? workflows : [])) {
+          if ((wf.name || '').toLowerCase().includes(q)) {
+            out.push({ type: 'workflow', id: wf.id, title: wf.name, subtitle: wf.description?.slice(0, 60), path: `/workflows/${encodeURIComponent(wf.id)}` })
+          }
+        }
+        if (!ctrl.signal.aborted) setResults(out)
+      } catch { /* ignore */ }
+      finally { if (!ctrl.signal.aborted) setLoading(false) }
+    }, 250)
+    return () => { clearTimeout(timer); ctrl.abort() }
+  }, [query])
+
+  if (!open) return null
+
+  const typeColors: Record<string, string> = {
+    session: 'bg-blue-500/20 text-blue-400',
+    task: 'bg-orange-500/20 text-orange-400',
+    skill: 'bg-purple-500/20 text-purple-400',
+    workflow: 'bg-green-500/20 text-green-400',
+  }
+
+  const grouped = results.reduce<Record<string, SearchResult[]>>((acc, r) => {
+    (acc[r.type] = acc[r.type] || []).push(r)
+    return acc
+  }, {})
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-start justify-center pt-[15vh] px-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <div className="relative bg-bg-elevated border border-border rounded-xl shadow-lg w-full max-w-xl max-h-[60vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-text-tertiary shrink-0"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input
+            ref={inputRef}
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Search sessions, tasks, skills, workflows…"
+            className="flex-1 bg-transparent text-text-primary text-sm outline-none placeholder:text-text-tertiary"
+            onKeyDown={e => { if (e.key === 'Escape') onClose() }}
+          />
+          <kbd className="text-[10px] font-mono text-text-tertiary bg-bg-base border border-border rounded px-1.5 py-0.5">ESC</kbd>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2">
+          {loading && <div className="px-3 py-6 text-center text-text-tertiary text-sm">Searching…</div>}
+          {!loading && query && results.length === 0 && <div className="px-3 py-6 text-center text-text-tertiary text-sm">No results found</div>}
+          {!loading && !query && <div className="px-3 py-6 text-center text-text-tertiary text-sm">Type to search across all pages…</div>}
+          {Object.entries(grouped).map(([type, items]) => (
+            <div key={type} className="mb-2">
+              <div className="px-3 py-1 text-[10px] uppercase tracking-wider text-text-tertiary font-semibold">{type}s</div>
+              {items.map(item => (
+                <button
+                  key={`${item.type}-${item.id}`}
+                  className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-surface/60 text-left transition-colors"
+                  onClick={() => { navigate(item.path); onClose() }}
+                >
+                  <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded ${typeColors[item.type] || ''}`}>{item.type}</span>
+                  <span className="flex-1 text-sm text-text-primary truncate">{item.title}</span>
+                  {item.subtitle && <span className="text-xs text-text-tertiary truncate max-w-[120px]">{item.subtitle}</span>}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+/* ── Help Modal ────────────────────────────────────── */
+
+function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center px-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" />
+      <div className="relative bg-bg-elevated border border-border rounded-xl shadow-lg w-full max-w-md p-6" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="text-lg font-semibold text-text-primary">Keyboard Shortcuts</h2>
+          <button onClick={onClose} className="p-1 rounded text-text-tertiary hover:text-text-primary hover:bg-surface/60">✕</button>
+        </div>
+        <div className="space-y-4">
+          <div>
+            <h3 className="text-xs uppercase tracking-wider text-text-tertiary font-semibold mb-2">Navigation</h3>
+            <div className="space-y-1.5">
+              {[
+                ['g d', 'Dashboard'],
+                ['g s', 'Sessions'],
+                ['g t', 'Tasks'],
+                ['g c', 'Config'],
+                ['g k', 'Skills'],
+                ['g w', 'Workflows'],
+              ].map(([key, label]) => (
+                <div key={key} className="flex items-center justify-between">
+                  <span className="text-sm text-text-secondary">{label}</span>
+                  <kbd className="text-xs font-mono bg-bg-base border border-border rounded px-2 py-0.5 text-text-tertiary">{key}</kbd>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="border-t border-border pt-4">
+            <h3 className="text-xs uppercase tracking-wider text-text-tertiary font-semibold mb-2">Actions</h3>
+            <div className="space-y-1.5">
+              {[
+                ['⌘ K', 'Quick search'],
+                ['?', 'Show this help'],
+                ['Esc', 'Close modal'],
+              ].map(([key, label]) => (
+                <div key={key} className="flex items-center justify-between">
+                  <span className="text-sm text-text-secondary">{label}</span>
+                  <kbd className="text-xs font-mono bg-bg-base border border-border rounded px-2 py-0.5 text-text-tertiary">{key}</kbd>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ── App ───────────────────────────────────────────── */
 
 export default function App() {
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
+  const keySeqRef = useRef<string[]>([])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      const isInput = target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target.isContentEditable
+
+      // Cmd+K / Ctrl+K — quick search
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault()
+        setSearchOpen(true)
+        setHelpOpen(false)
+        return
+      }
+
+      // Escape — close modals
+      if (e.key === 'Escape') {
+        setSearchOpen(false)
+        setHelpOpen(false)
+        return
+      }
+
+      // Don't trigger shortcuts in input fields
+      if (isInput) return
+
+      // ? — show help
+      if (e.key === '?' && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault()
+        setHelpOpen(h => !h)
+        return
+      }
+
+      // g + key — navigation shortcuts
+      keySeqRef.current = [...keySeqRef.current, e.key].slice(-2)
+      const seq = keySeqRef.current
+      if (seq.length === 2 && seq[0] === 'g') {
+        const routes: Record<string, string> = {
+          d: '/', s: '/sessions', t: '/tasks', c: '/config', k: '/skills', w: '/workflows'
+        }
+        if (routes[seq[1]]) {
+          window.location.pathname = routes[seq[1]]
+          keySeqRef.current = []
+        }
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
+
   return (
     <QueryClientProvider client={queryClient}>
-      <Routes>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/health" element={<HealthPage />} />
-        <Route path="/sessions" element={<SessionsPage />} />
-        <Route path="/sessions/:id" element={<SessionDetailPage />} />
-        <Route path="/tasks" element={<KanbanBoardPage />} />
-        <Route path="/tasks/:id" element={<TaskDetailPage />} />
-        <Route path="/config" element={<ConfigPage />} />
-        <Route path="/skills" element={<SkillsHubPage />} />
-        <Route path="/workflows" element={<WorkflowListPage />} />
-        <Route path="/workflows/:id" element={<WorkflowEditorPage />} />
-      </Routes>
+      <SearchContext.Provider value={{ openSearch: () => setSearchOpen(true) }}>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/health" element={<HealthPage />} />
+          <Route path="/sessions" element={<SessionsPage />} />
+          <Route path="/sessions/:id" element={<SessionDetailPage />} />
+          <Route path="/tasks" element={<KanbanBoardPage />} />
+          <Route path="/tasks/:id" element={<TaskDetailPage />} />
+          <Route path="/config" element={<ConfigPage />} />
+          <Route path="/skills" element={<SkillsHubPage />} />
+          <Route path="/workflows" element={<WorkflowListPage />} />
+          <Route path="/workflows/:id" element={<WorkflowEditorPage />} />
+        </Routes>
+        <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
+        <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
+      </SearchContext.Provider>
     </QueryClientProvider>
   )
 }
