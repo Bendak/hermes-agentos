@@ -150,7 +150,8 @@ AgentOS reads Hermes state directly from:
 - [x] Phase 9 — Skills Hub (browse installed skills, search, filter, detail modal)
 - [x] Phase 10 — Workflow Editor (React Flow canvas, CRUD, node palette, dark theme)
 - [x] Phase 11 — Workflow Execution (toposort engine, Run Now, run history, node config)
-- [ ] Phase 12 — Polish (dark mode, keyboard shortcuts, responsive)
+- [x] Phase 12 — Polish (dark/light toggle, ⌘K search, nav shortcuts, responsive)
+- [ ] Phase 13 — Auth (optional, JWT + RBAC)
 
 See [PLAN.md](PLAN.md) for the full roadmap and [DESIGN.md](DESIGN.md) for the visual identity spec.
 

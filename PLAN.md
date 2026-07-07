@@ -248,11 +248,14 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 - [x] Frontend: runResults state pra indicadores visuais nos nodes
 - **Entrega:** Workflows executáveis com engine de execução
 
-### Phase 12 — Polish (Semana 14)
-- [ ] Dark mode (já com shadcn/ui, só ajustar tokens)
-- [ ] Keyboard shortcuts (Cmd+K search, etc)
-- [ ] Responsive (mobile breakpoints)
-- **Entrega:** App polido e responsive
+### Phase 12 — Polish (Semana 14) ✅ DONE
+- [x] Dark/Light mode toggle — ☀️/🌙 no navbar, localStorage persistence
+- [x] Light theme CSS variables — `.light` class com todas as variáveis
+- [x] Keyboard shortcuts — ⌘K quick search, `g+{d,s,t,c,k,w}` navigation, `?` help modal
+- [x] Responsive navbar — hamburger menu no mobile, `sm:hidden`/`sm:flex`
+- [x] SearchModal — busca across sessions, tasks, skills, workflows
+- [x] HelpModal — lista todas as shortcuts disponíveis
+- **Entrega:** App polido com dark/light mode, shortcuts e responsive
 
 ### Phase 13 — Auth (Opcional, Semana 15)
 - [ ] JWT auth (apenas se precisar multi-user)
@@ -376,7 +379,7 @@ agentos/
 | 9 | ✅ Done | Skills hub | Grid view, category colors, search/filter/sort, detail modal |
 | 10 | ✅ Done | Workflow editor | React Flow canvas, CRUD, node palette, dark theme |
 | 11 | ✅ Done | Workflow execution | Toposort engine, Run Now, run history, node config |
-| 12 | 🔲 Pending | Polish | — |
+| 12 | ✅ Done | Polish | Dark/light toggle, ⌘K search, nav shortcuts, responsive |
 | 13 | 🔲 Optional | Auth | — |
 
 ---
