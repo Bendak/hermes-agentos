@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DndContext, DragOverlay, useDroppable, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
@@ -8,6 +8,8 @@ import { CSS } from '@dnd-kit/utilities'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
+import '@xyflow/react/dist/style.css'
+import { ReactFlow, Handle, Position, Controls, Background, type NodeProps, type Node, type Connection, addEdge, useNodesState, useEdgesState, BackgroundVariant } from '@xyflow/react'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -154,6 +156,22 @@ interface SkillDetail extends Skill {
   files: { path: string; size: number }[]
 }
 
+interface Workflow {
+  id: string
+  name: string
+  description: string
+  nodes: string  // JSON string from backend
+  edges: string  // JSON string from backend
+  created_at: string
+  updated_at: string
+}
+
+interface WorkflowNodeData {
+  label: string
+  nodeType: 'trigger' | 'action' | 'condition'
+  config?: Record<string, any>
+}
+
 /* ── NavBar ────────────────────────────────────────── */
 
 function NavBar() {
@@ -189,6 +207,7 @@ function NavBar() {
           {navLink('/tasks', 'Tasks')}
           {navLink('/config', 'Config')}
           {navLink('/skills', 'Skills')}
+          {navLink('/workflows', 'Workflows')}
         </div>
       </div>
     </nav>
@@ -1991,6 +2010,478 @@ function ConfigPage() {
   )
 }
 
+/* ── Workflow Editor ─────────────────────────────────── */
+
+const nodeColors: Record<string, { bg: string; border: string; icon: string }> = {
+  trigger: { bg: 'bg-emerald-500/20', border: 'border-emerald-500/40', icon: '⚡' },
+  action: { bg: 'bg-blue-500/20', border: 'border-blue-500/40', icon: '🔧' },
+  condition: { bg: 'bg-amber-500/20', border: 'border-amber-500/40', icon: '🔀' },
+}
+
+function WorkflowNode({ data }: NodeProps) {
+  const nd = data as unknown as WorkflowNodeData
+  const colors = nodeColors[nd.nodeType] || nodeColors.action
+
+  return (
+    <div className={`rounded-lg border-2 ${colors.border} ${colors.bg} min-w-[180px] shadow-lg`}>
+      <div className={`px-3 py-1.5 border-b ${colors.border} flex items-center gap-2`}>
+        <span>{colors.icon}</span>
+        <span className="text-xs font-semibold text-text-secondary uppercase">{nd.nodeType}</span>
+      </div>
+      <div className="px-3 py-2">
+        <p className="text-sm font-medium text-text-primary">{nd.label}</p>
+      </div>
+      {nd.nodeType !== 'trigger' && (
+        <Handle type="target" position={Position.Left} className="!bg-text-secondary !w-2 !h-2" />
+      )}
+      <Handle type="source" position={Position.Right} className="!bg-accent !w-2 !h-2" />
+    </div>
+  )
+}
+
+const workflowNodeTypes = { workflowNode: WorkflowNode }
+
+function WorkflowListPage() {
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+  const { data: workflows, isLoading } = useQuery<Workflow[]>({
+    queryKey: ['workflows'],
+    queryFn: async () => {
+      const res = await fetch('/api/workflows')
+      if (!res.ok) throw new Error('Failed to fetch workflows')
+      return res.json()
+    },
+  })
+
+  const createMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/workflows', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Untitled Workflow',
+          description: '',
+          nodes: [
+            { id: 'trigger-1', type: 'workflowNode', position: { x: 250, y: 150 }, data: { label: 'Start', nodeType: 'trigger' } }
+          ],
+          edges: [],
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to create workflow')
+      return res.json()
+    },
+    onSuccess: (wf: Workflow) => {
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      navigate(`/workflows/${wf.id}`)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/workflows/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('Failed to delete workflow')
+      return res.json()
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workflows'] }),
+  })
+
+  const handleDelete = (e: React.MouseEvent, id: string, name: string) => {
+    e.stopPropagation()
+    if (window.confirm(`Delete workflow "${name}"?`)) {
+      deleteMutation.mutate(id)
+    }
+  }
+
+  const formatDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+    } catch {
+      return iso
+    }
+  }
+
+  return (
+    <div className="min-h-screen">
+      <NavBar />
+      <main className="mx-auto max-w-7xl px-6 py-8">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-h2 font-bold text-text-primary">Workflows</h1>
+            <p className="text-body text-text-secondary mt-1">Design and manage your automation workflows</p>
+          </div>
+          <button
+            onClick={() => createMutation.mutate()}
+            disabled={createMutation.isPending}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-text-inverse font-medium text-body hover:bg-accent-hover transition-colors disabled:opacity-50"
+          >
+            <span>+</span>
+            <span>{createMutation.isPending ? 'Creating...' : 'New Workflow'}</span>
+          </button>
+        </div>
+
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="animate-skeleton rounded-xl border border-border bg-surface/40 h-40" />
+            ))}
+          </div>
+        ) : workflows && workflows.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {workflows.map(wf => (
+              <div
+                key={wf.id}
+                tabIndex={0}
+                role="button"
+                onClick={() => navigate(`/workflows/${wf.id}`)}
+                className="card-focus rounded-xl border border-border bg-surface/40 p-5 transition hover:bg-surface-hover/70 hover:shadow-md cursor-pointer group"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-h4 font-semibold text-text-primary truncate flex-1 mr-2">{wf.name}</h3>
+                  <button
+                    onClick={(e) => handleDelete(e, wf.id, wf.name)}
+                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-error-subtle text-text-tertiary hover:text-error transition-all"
+                    title="Delete workflow"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                  </button>
+                </div>
+                <p className="text-body-sm text-text-secondary mb-4 line-clamp-2">
+                  {wf.description || 'No description'}
+                </p>
+                <div className="flex items-center justify-between text-caption text-text-tertiary">
+                  <span>{(() => { try { return JSON.parse(wf.nodes).length } catch { return 0 } })()} nodes</span>
+                  <span>{formatDate(wf.updated_at)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-16">
+            <div className="text-4xl mb-4">⚡</div>
+            <h3 className="text-h4 font-semibold text-text-primary mb-2">No workflows yet</h3>
+            <p className="text-body text-text-secondary mb-6">Create your first workflow to start automating tasks</p>
+            <button
+              onClick={() => createMutation.mutate()}
+              disabled={createMutation.isPending}
+              className="px-4 py-2 rounded-lg bg-accent text-text-inverse font-medium text-body hover:bg-accent-hover transition-colors"
+            >
+              Create Workflow
+            </button>
+          </div>
+        )}
+      </main>
+    </div>
+  )
+}
+
+function WorkflowEditorPage() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const queryClient = useQueryClient()
+
+  const [nodes, setNodes, onNodesChange] = useNodesState([] as Node[])
+  const [edges, setEdges, onEdgesChange] = useEdgesState([] as any[])
+  const [wfName, setWfName] = useState('Untitled')
+  const [wfDescription, setWfDescription] = useState('')
+  const [selectedNode, setSelectedNode] = useState<Node | null>(null)
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const loadedRef = useRef(false)
+
+  // Load workflow
+  const { data: workflow, isLoading } = useQuery<Workflow>({
+    queryKey: ['workflow', id],
+    queryFn: async () => {
+      const res = await fetch(`/api/workflows/${id}`)
+      if (!res.ok) throw new Error('Failed to fetch workflow')
+      return res.json()
+    },
+    enabled: !!id,
+  })
+
+  // Parse and set nodes/edges when workflow loads
+  useEffect(() => {
+    if (workflow && !loadedRef.current) {
+      loadedRef.current = true
+      setWfName(workflow.name)
+      setWfDescription(workflow.description)
+      try {
+        const parsedNodes = JSON.parse(workflow.nodes)
+        const parsedEdges = JSON.parse(workflow.edges)
+        setNodes(parsedNodes)
+        setEdges(parsedEdges)
+      } catch {
+        setNodes([])
+        setEdges([])
+      }
+    }
+  }, [workflow, setNodes, setEdges])
+
+  // Handle new connections
+  const onConnect = useCallback(
+    (params: Connection) => {
+      setEdges((eds) => addEdge({ ...params, animated: true, style: { stroke: '#94A3B8' } }, eds))
+    },
+    [setEdges]
+  )
+
+  // Track node selection
+  const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
+    setSelectedNode(node)
+  }, [])
+
+  const onPaneClick = useCallback(() => {
+    setSelectedNode(null)
+  }, [])
+
+  // Save mutation
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      setSaveStatus('saving')
+      const res = await fetch(`/api/workflows/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: wfName,
+          description: wfDescription,
+          nodes: nodes,
+          edges: edges,
+        }),
+      })
+      if (!res.ok) throw new Error('Failed to save')
+      return res.json()
+    },
+    onSuccess: () => {
+      setSaveStatus('saved')
+      queryClient.invalidateQueries({ queryKey: ['workflows'] })
+      setTimeout(() => setSaveStatus('idle'), 2000)
+    },
+    onError: () => {
+      setSaveStatus('error')
+      setTimeout(() => setSaveStatus('idle'), 3000)
+    },
+  })
+
+  // Add node to canvas
+  const addNode = useCallback((nodeType: 'trigger' | 'action' | 'condition') => {
+    const id = `${nodeType}-${Date.now()}`
+    const labels: Record<string, string> = {
+      trigger: 'New Trigger',
+      action: 'New Action',
+      condition: 'New Condition',
+    }
+    // Place near center with some randomness so nodes don't stack
+    const x = 250 + Math.random() * 200 - 100
+    const y = 150 + Math.random() * 200 - 100
+    const newNode: Node = {
+      id,
+      type: 'workflowNode',
+      position: { x, y },
+      data: { label: labels[nodeType], nodeType },
+    }
+    setNodes((nds) => [...nds, newNode])
+  }, [setNodes])
+
+  // Update selected node's label
+  const updateNodeLabel = useCallback((label: string) => {
+    if (!selectedNode) return
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === selectedNode.id
+          ? { ...n, data: { ...n.data, label } }
+          : n
+      )
+    )
+    setSelectedNode((prev) => prev ? { ...prev, data: { ...prev.data, label } } : null)
+  }, [selectedNode, setNodes])
+
+  // Delete selected node
+  const deleteSelectedNode = useCallback(() => {
+    if (!selectedNode) return
+    setNodes((nds) => nds.filter((n) => n.id !== selectedNode.id))
+    setEdges((eds) => eds.filter((e) => e.source !== selectedNode.id && e.target !== selectedNode.id))
+    setSelectedNode(null)
+  }, [selectedNode, setNodes, setEdges])
+
+  // Keyboard shortcut: Delete/Backspace to remove selected node
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNode && (e.target as HTMLElement).tagName !== 'INPUT') {
+        deleteSelectedNode()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [selectedNode, deleteSelectedNode])
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen">
+        <NavBar />
+        <div className="flex items-center justify-center h-[calc(100vh-56px)]">
+          <div className="animate-skeleton w-16 h-16 rounded-full" />
+        </div>
+      </div>
+    )
+  }
+
+  const nodeInfo = selectedNode ? (selectedNode.data as unknown as WorkflowNodeData) : null
+  const selectedColors = nodeInfo ? nodeColors[nodeInfo.nodeType] : null
+
+  return (
+    <div className="min-h-screen flex flex-col">
+      {/* Top Toolbar */}
+      <NavBar />
+      <div className="bg-bg-elevated/80 border-b border-border px-4 py-2 flex items-center gap-3">
+        <button
+          onClick={() => navigate('/workflows')}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-body-sm text-text-secondary hover:text-text-primary hover:bg-surface/60 transition"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          Back
+        </button>
+        <div className="h-5 w-px bg-border" />
+        <input
+          type="text"
+          value={wfName}
+          onChange={(e) => setWfName(e.target.value)}
+          className="bg-transparent text-h5 font-semibold text-text-primary border-none outline-none focus:bg-surface/40 rounded px-2 py-1 transition min-w-[200px]"
+          placeholder="Workflow name"
+        />
+        <span className="text-caption text-text-tertiary">/</span>
+        <input
+          type="text"
+          value={wfDescription}
+          onChange={(e) => setWfDescription(e.target.value)}
+          className="bg-transparent text-body-sm text-text-secondary border-none outline-none focus:bg-surface/40 rounded px-2 py-1 transition flex-1 min-w-0"
+          placeholder="Description (optional)"
+        />
+        <div className="flex items-center gap-2 ml-auto">
+          {saveStatus === 'saved' && (
+            <span className="text-caption text-success flex items-center gap-1">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+              Saved
+            </span>
+          )}
+          {saveStatus === 'error' && (
+            <span className="text-caption text-error">Save failed</span>
+          )}
+          <button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveStatus === 'saving'}
+            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-accent text-text-inverse font-medium text-body-sm hover:bg-accent-hover transition-colors disabled:opacity-50"
+          >
+            {saveStatus === 'saving' ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+
+      {/* Main Editor Area */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* Left Sidebar — Node Palette */}
+        <div className="w-56 bg-bg-elevated/60 border-r border-border p-4 flex flex-col gap-3 shrink-0">
+          <h3 className="text-caption font-semibold text-text-tertiary uppercase tracking-wider mb-1">Add Nodes</h3>
+          {(['trigger', 'action', 'condition'] as const).map((nodeType) => {
+            const colors = nodeColors[nodeType]
+            return (
+              <button
+                key={nodeType}
+                onClick={() => addNode(nodeType)}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border ${colors.border} ${colors.bg} hover:brightness-110 transition text-left`}
+              >
+                <span className="text-lg">{colors.icon}</span>
+                <div>
+                  <p className="text-body-sm font-medium text-text-primary capitalize">{nodeType}</p>
+                  <p className="text-caption text-text-tertiary">
+                    {nodeType === 'trigger' ? 'Start workflow' : nodeType === 'action' ? 'Perform task' : 'Branch logic'}
+                  </p>
+                </div>
+              </button>
+            )
+          })}
+
+          <div className="mt-4 p-3 rounded-lg bg-bg-overlay/50 border border-border">
+            <h4 className="text-caption font-semibold text-text-secondary mb-2">Tips</h4>
+            <ul className="text-caption text-text-tertiary space-y-1">
+              <li>• Drag to connect nodes</li>
+              <li>• Click a node to edit it</li>
+              <li>• Press Delete to remove</li>
+              <li>• Scroll to zoom, drag to pan</li>
+            </ul>
+          </div>
+        </div>
+
+        {/* Canvas */}
+        <div className="flex-1">
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onNodeClick={onNodeClick}
+            onPaneClick={onPaneClick}
+            nodeTypes={workflowNodeTypes}
+            fitView
+            className="bg-bg-base"
+          >
+            <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--border)" />
+            <Controls />
+          </ReactFlow>
+        </div>
+
+        {/* Right Panel — Node Properties */}
+        {selectedNode && nodeInfo && (
+          <div className="w-64 bg-bg-elevated/60 border-l border-border p-4 shrink-0 overflow-y-auto">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-h6 font-semibold text-text-primary">Node Properties</h3>
+              <button
+                onClick={() => setSelectedNode(null)}
+                className="p-1 rounded hover:bg-surface/60 text-text-tertiary hover:text-text-primary transition"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+              </button>
+            </div>
+
+            {/* Type badge */}
+            <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${selectedColors?.border} ${selectedColors?.bg} mb-4`}>
+              <span>{selectedColors?.icon}</span>
+              <span className="text-body-sm font-medium capitalize text-text-primary">{nodeInfo.nodeType}</span>
+            </div>
+
+            {/* Label field */}
+            <label className="block mb-3">
+              <span className="text-caption font-semibold text-text-secondary mb-1.5 block">Label</span>
+              <input
+                type="text"
+                value={nodeInfo.label}
+                onChange={(e) => updateNodeLabel(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent focus:ring-1 focus:ring-accent/30 outline-none transition"
+              />
+            </label>
+
+            {/* Node ID (read-only) */}
+            <label className="block mb-4">
+              <span className="text-caption font-semibold text-text-secondary mb-1.5 block">Node ID</span>
+              <div className="px-3 py-2 rounded-lg bg-bg-base border border-border text-mono-sm text-text-tertiary">
+                {selectedNode.id}
+              </div>
+            </label>
+
+            {/* Delete button */}
+            <button
+              onClick={deleteSelectedNode}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-error/30 bg-error-subtle text-error text-body-sm font-medium hover:bg-error/20 transition"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              Delete Node
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /* ── App ───────────────────────────────────────────── */
 
 export default function App() {
@@ -2005,6 +2496,8 @@ export default function App() {
         <Route path="/tasks/:id" element={<TaskDetailPage />} />
         <Route path="/config" element={<ConfigPage />} />
         <Route path="/skills" element={<SkillsHubPage />} />
+        <Route path="/workflows" element={<WorkflowListPage />} />
+        <Route path="/workflows/:id" element={<WorkflowEditorPage />} />
       </Routes>
     </QueryClientProvider>
   )
