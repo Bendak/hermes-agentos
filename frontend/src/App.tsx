@@ -146,6 +146,7 @@ interface Skill {
   has_references: boolean
   has_scripts: boolean
   has_templates: boolean
+  profiles: string[]
 }
 
 interface SkillDetail extends Skill {
@@ -2013,15 +2014,32 @@ export default function App() {
 
 function SkillCard({ skill, onClick }: { skill: Skill; onClick: () => void }) {
   const categoryColors: Record<string, string> = {
+    anthropic: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+    hermes: 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30',
+    autonomous: 'bg-orange-500/20 text-orange-400 border-orange-500/30',
+    creative: 'bg-pink-500/20 text-pink-400 border-pink-500/30',
+    'data science': 'bg-green-500/20 text-green-400 border-green-500/30',
     devops: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-    creative: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-    productivity: 'bg-green-500/20 text-green-400 border-green-500/30',
-    research: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    security: 'bg-red-500/20 text-red-400 border-red-500/30',
-    'mlops/research': 'bg-amber-500/20 text-amber-400 border-amber-500/30',
-    uncategorized: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+    debugging: 'bg-red-500/20 text-red-400 border-red-500/30',
+    documents: 'bg-amber-500/20 text-amber-400 border-amber-500/30',
+    gaming: 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30',
+    github: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
+    kanban: 'bg-teal-500/20 text-teal-400 border-teal-500/30',
+    mcp: 'bg-lime-500/20 text-lime-400 border-lime-500/30',
+    media: 'bg-rose-500/20 text-rose-400 border-rose-500/30',
+    mlops: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30',
+    planning: 'bg-sky-500/20 text-sky-400 border-sky-500/30',
+    productivity: 'bg-violet-500/20 text-violet-400 border-violet-500/30',
+    'red team': 'bg-red-700/20 text-red-500 border-red-700/30',
+    research: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+    'smart home': 'bg-emerald-600/20 text-emerald-500 border-emerald-600/30',
+    social: 'bg-fuchsia-500/20 text-fuchsia-400 border-fuchsia-500/30',
+    software: 'bg-slate-500/20 text-slate-400 border-slate-500/30',
+    'ui/ux': 'bg-fuchsia-600/20 text-fuchsia-500 border-fuchsia-600/30',
+    web: 'bg-sky-600/20 text-sky-500 border-sky-600/30',
+    other: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
   }
-  const colorClass = categoryColors[skill.category?.toLowerCase()] || categoryColors.uncategorized
+  const colorClass = categoryColors[skill.category?.toLowerCase()] || categoryColors.other
 
   return (
     <button
@@ -2031,7 +2049,7 @@ function SkillCard({ skill, onClick }: { skill: Skill; onClick: () => void }) {
       <div className="flex items-start justify-between mb-2">
         <h3 className="text-body font-semibold text-text-primary">{skill.name}</h3>
         <span className={`text-xs px-2 py-0.5 rounded-full border ${colorClass}`}>
-          {skill.category || 'misc'}
+          {skill.category || 'Other'}
         </span>
       </div>
       <p className="text-body-sm text-text-secondary line-clamp-2 mb-3">
@@ -2043,6 +2061,18 @@ function SkillCard({ skill, onClick }: { skill: Skill; onClick: () => void }) {
         {skill.has_scripts && <span title="Has scripts">⚙️</span>}
         {skill.has_templates && <span title="Has templates">📋</span>}
       </div>
+      {skill.profiles && skill.profiles.length > 0 ? (
+        <div className="flex items-center gap-1 mt-2 flex-wrap">
+          <span className="text-text-tertiary text-xs">Used by:</span>
+          {skill.profiles.map(p => (
+            <span key={p} className="text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent border border-accent/20">{p}</span>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-2">
+          <span className="text-xs text-amber-400">Unused</span>
+        </div>
+      )}
     </button>
   )
 }
