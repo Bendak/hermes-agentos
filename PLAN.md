@@ -389,6 +389,7 @@ agentos/
 | 11 | ✅ Done | Workflow execution | Toposort engine, Run Now, run history, node config |
 | 12 | ✅ Done | Polish | Dark/light toggle, ⌘K search, nav shortcuts, responsive |
 | 13 | 🔲 Optional | Auth | — |
+| 14 | ✅ Done | Kanban Integration | Task editor modal, filters/search, comments, stats, bulk ops, notify webhook |
 
 ---
 
