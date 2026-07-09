@@ -1844,7 +1844,7 @@ function TaskDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const [activeTab, setActiveTab] = useState<'overview' | 'runs' | 'comments' | 'children'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'runs' | 'comments' | 'children' | 'artifacts'>('overview')
   const [showEditModal, setShowEditModal] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [commentAuthor, setCommentAuthor] = useState('agentos')
@@ -1885,6 +1885,16 @@ function TaskDetailPage() {
     },
     enabled: childIds.length > 0,
     staleTime: 30000,
+  })
+
+  const { data: artifacts } = useQuery({
+    queryKey: ['task-artifacts', id],
+    queryFn: async () => {
+      const res = await fetch(`/api/tasks/${id}/artifacts`)
+      if (!res.ok) return { files: [], workspace_path: null }
+      return res.json()
+    },
+    enabled: activeTab === 'artifacts',
   })
 
   const addCommentMutation = useMutation({
@@ -2006,6 +2016,7 @@ function TaskDetailPage() {
                 { key: 'runs' as const, label: `Runs (${data.runs.length})` },
                 { key: 'comments' as const, label: `Comments (${data.comments.length})` },
                 { key: 'children' as const, label: `Children (${data.children.length})` },
+                { key: 'artifacts' as const, label: 'Artifacts' },
               ].map((tab) => (
                 <button
                   key={tab.key}
@@ -2238,6 +2249,47 @@ function TaskDetailPage() {
                         </button>
                       )
                     })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Artifacts tab */}
+            {activeTab === 'artifacts' && (
+              <div data-testid="tab-panel-artifacts" className="rounded-lg border border-border bg-surface/30 p-4">
+                {!artifacts?.workspace_path && (
+                  <p className="text-body-sm text-text-tertiary">No workspace configured for this task.</p>
+                )}
+                {artifacts?.workspace_path && artifacts.files.length === 0 && (
+                  <p className="text-body-sm text-text-tertiary">No files in workspace.</p>
+                )}
+                {artifacts?.files.length > 0 && (
+                  <div className="space-y-1">
+                    <p className="text-xs text-text-tertiary mb-2">{artifacts.workspace_path}</p>
+                    {artifacts.files.map((file: any) => (
+                      <div key={file.name} className="flex items-center gap-3 p-2 rounded hover:bg-surface/40 group">
+                        <span className="text-lg">{fileIcon(file.type)}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-text-primary truncate">{file.name}</p>
+                          <p className="text-xs text-text-tertiary">{formatFileSize(file.size)} • {formatTime(file.modified)}</p>
+                        </div>
+                        <a
+                          href={`/api/tasks/${id}/artifacts/${encodeURIComponent(file.name)}`}
+                          download
+                          className="opacity-0 group-hover:opacity-100 text-xs text-accent hover:text-accent-hover transition"
+                        >
+                          ⬇ Download
+                        </a>
+                        {isPreviewable(file.type) && (
+                          <button
+                            onClick={() => window.open(`/api/tasks/${id}/artifacts/${encodeURIComponent(file.name)}`, '_blank')}
+                            className="opacity-0 group-hover:opacity-100 text-xs text-accent hover:text-accent-hover transition"
+                          >
+                            👁 Preview
+                          </button>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -2669,6 +2721,27 @@ function calculateDuration(start: string, end: string): string {
 function formatTime(iso: string): string {
   const d = new Date(iso)
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+}
+
+function fileIcon(type: string): string {
+  if (type.startsWith('image/')) return '🖼️'
+  if (type === 'application/pdf') return '📄'
+  if (type.startsWith('video/')) return '🎬'
+  if (type.startsWith('audio/')) return '🎵'
+  if (type.includes('json') || type.includes('yaml')) return '📋'
+  if (type.includes('python') || type.includes('javascript')) return '💻'
+  if (type.includes('markdown') || type.includes('text')) return '📝'
+  return '📁'
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function isPreviewable(type: string): boolean {
+  return type.startsWith('image/') || type === 'application/pdf' || type.startsWith('text/')
 }
 
 const nodeColors: Record<string, { bg: string; border: string; icon: string }> = {

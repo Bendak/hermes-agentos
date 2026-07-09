@@ -1,5 +1,6 @@
 import os
 from contextlib import suppress
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -194,6 +195,71 @@ async def tasks_add_comment(task_id: str, body: dict):
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found")
     return result
+
+
+def _guess_content_type(filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    types = {
+        '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+        '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp',
+        '.pdf': 'application/pdf', '.md': 'text/markdown', '.txt': 'text/plain',
+        '.json': 'application/json', '.yaml': 'text/yaml', '.yml': 'text/yaml',
+        '.py': 'text/x-python', '.js': 'text/javascript', '.ts': 'text/typescript',
+        '.html': 'text/html', '.css': 'text/css', '.sh': 'text/x-shellscript',
+    }
+    return types.get(ext, 'application/octet-stream')
+
+
+@app.get("/api/tasks/{task_id}/artifacts")
+async def list_task_artifacts(task_id: str):
+    """List files in task workspace."""
+    task = await get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    workspace_path = task.get("workspace_path")
+    if not workspace_path or not os.path.exists(workspace_path):
+        return {"files": [], "workspace_path": None}
+
+    files = []
+    for entry in os.scandir(workspace_path):
+        if entry.is_file():
+            stat = entry.stat()
+            files.append({
+                "name": entry.name,
+                "path": entry.path,
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "type": _guess_content_type(entry.name),
+            })
+
+    files.sort(key=lambda f: f["modified"], reverse=True)
+    return {"files": files, "workspace_path": workspace_path}
+
+
+@app.get("/api/tasks/{task_id}/artifacts/{filename}")
+async def get_task_artifact(task_id: str, filename: str):
+    """Serve a file from task workspace."""
+    task = await get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    workspace_path = task.get("workspace_path")
+    if not workspace_path:
+        raise HTTPException(status_code=404, detail="No workspace")
+
+    file_path = os.path.join(workspace_path, filename)
+    if not os.path.exists(file_path) or not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail="File not found")
+
+    # Security: ensure file is within workspace
+    real_path = os.path.realpath(file_path)
+    real_workspace = os.path.realpath(workspace_path)
+    if not real_path.startswith(real_workspace):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    content_type = _guess_content_type(filename)
+    return FileResponse(file_path, filename=filename, media_type=content_type)
 
 
 @app.post("/api/tasks/bulk")
