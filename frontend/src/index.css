@@ -45,6 +45,8 @@
   --semantic-error-subtle: rgba(239, 68, 68, 0.10);
   --semantic-info: #38BDF8;
   --semantic-info-subtle: rgba(56, 189, 248, 0.10);
+  --semantic-purple: #A78BFA;
+  --semantic-purple-subtle: rgba(167, 139, 250, 0.10);
 }
 
 /* ── Light Theme (Optional Toggle) ───────────────── */
@@ -76,6 +78,8 @@ html.light {
   --semantic-error-subtle: rgba(239, 68, 68, 0.10);
   --semantic-info: #38BDF8;
   --semantic-info-subtle: rgba(56, 189, 248, 0.10);
+  --semantic-purple: #8B5CF6;
+  --semantic-purple-subtle: rgba(139, 92, 246, 0.10);
 }
 
 /* ── Base Styles ──────────────────────────────────── */

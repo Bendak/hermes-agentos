@@ -136,6 +136,8 @@ async def create_task_endpoint(body: dict):
         priority=body.get("priority", 2),
         status=body.get("status", "todo"),
         created_by=body.get("created_by", "agentos"),
+        workspace_kind=body.get("workspace_kind"),
+        workspace_path=body.get("workspace_path"),
     )
     if result is None:
         raise HTTPException(status_code=400, detail="Failed to create task")
