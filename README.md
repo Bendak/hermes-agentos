@@ -41,6 +41,228 @@ cd frontend && npm run build
 # Built assets go to frontend/dist/ — FastAPI serves them at /
 ```
 
+
+## Installation for AI Agents
+
+> **This section is designed for AI agents (Hermes, Claude, GPT, etc.) to install AgentOS automatically.** Follow these steps based on your environment.
+
+### Prerequisites Check
+
+Before starting, verify:
+```bash
+# Check Python version (3.10+ required)
+python3 --version
+
+# Check Node.js (18+ required)
+node --version
+
+# Check if Hermes is running
+ps aux | grep hermes
+
+# Check if s6 is available (Docker container)
+ls /run/s6/services/ 2>/dev/null || echo "Not in s6 container"
+```
+
+### Option 1: s6 Docker Container (Recommended)
+
+If you're running inside a Hermes Docker container with s6-overlay:
+
+```bash
+# 1. Clone or download AgentOS
+cd /opt/data
+git clone https://github.com/Bendak/hermes-agentos.git agentos 2>/dev/null || cd agentos && git pull
+
+# 2. Install Python dependencies
+cd /opt/data/agentos
+pip install fastapi uvicorn[standard] aiosqlite pydantic-settings cachetools httpx
+
+# 3. Build frontend
+cd /opt/data/agentos/frontend
+npm install
+npm run build
+
+# 4. Create s6 service directory
+mkdir -p /opt/data/s6-agentos
+
+# 5. Create s6 run script
+cat > /opt/data/s6-agentos/run << 'EOF'
+#!/command/execlineb -P
+cd /opt/data/agentos
+s6-setuidgid hermes
+python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 9120
+EOF
+chmod +x /opt/data/s6-agentos/run
+
+# 6. Create finish script
+cat > /opt/data/s6-agentos/finish << 'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x /opt/data/s6-agentos/finish
+
+# 7. Link to s6 services (if s6 is available)
+if [ -d "/run/s6/services" ]; then
+    ln -sf /opt/data/s6-agentos /run/s6/services/agentos
+    echo "AgentOS linked to s6 services"
+fi
+
+# 8. Start the service
+cd /opt/data/agentos
+nohup python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 9120 > /tmp/agentos.log 2>&1 &
+echo "AgentOS started on port 9120"
+
+# 9. Verify it's running
+sleep 2
+curl -s http://localhost:9120/health || echo "Health check failed"
+```
+
+### Option 2: Linux Desktop / WSL
+
+```bash
+# 1. Install dependencies
+sudo apt update
+sudo apt install -y python3 python3-pip nodejs npm
+
+# 2. Clone AgentOS
+cd ~
+git clone https://github.com/Bendak/hermes-agentos.git agentos
+cd agentos
+
+# 3. Install Python packages
+pip3 install fastapi uvicorn[standard] aiosqlite pydantic-settings cachetools httpx
+
+# 4. Build frontend
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 5. Create systemd service (optional)
+sudo tee /etc/systemd/system/agentos.service << EOF
+[Unit]
+Description=AgentOS
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$HOME/agentos
+ExecStart=$(which python3) -m uvicorn backend.main:app --host 0.0.0.0 --port 9120
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 6. Enable and start
+sudo systemctl daemon-reload
+sudo systemctl enable agentos
+sudo systemctl start agentos
+
+# 7. Verify
+curl -s http://localhost:9120/health
+echo "AgentOS running at http://localhost:9120"
+```
+
+### Option 3: Windows PowerShell
+
+```powershell
+# 1. Check prerequisites
+python --version
+node --version
+
+# 2. Clone AgentOS
+cd $env:USERPROFILE
+git clone https://github.com/Bendak/hermes-agentos.git agentos
+cd agentos
+
+# 3. Install Python packages
+pip install fastapi uvicorn[standard] aiosqlite pydantic-settings cachetools httpx
+
+# 4. Build frontend
+cd frontend
+npm install
+npm run build
+cd ..
+
+# 5. Create startup script
+@"
+@echo off
+cd /d "%USERPROFILE%\agentos"
+python -m uvicorn backend.main:app --host 0.0.0.0 --port 9120
+pause
+"@ | Out-File -FilePath start-agentos.bat -Encoding ASCII
+
+# 6. Start AgentOS
+Start-Process -FilePath "start-agentos.bat" -WindowStyle Normal
+
+# 7. Verify
+Start-Sleep -Seconds 2
+try {
+    $response = Invoke-WebRequest -Uri "http://localhost:9120/health" -UseBasicParsing
+    Write-Host "AgentOS running at http://localhost:9120"
+} catch {
+    Write-Host "Health check failed - check logs"
+}
+```
+
+### Configuration
+
+After installation, configure AgentOS:
+
+```bash
+# Edit config (if needed)
+nano /opt/data/agentos/backend/config.py
+
+# Key settings:
+# - KANBAN_DB: Path to kanban database (default: /opt/data/kanban.db)
+# - STATE_DB: Path to state database (default: /opt/data/state.db)
+# - ALLOWED_ORIGINS: CORS origins (default: *)
+```
+
+### Verification
+
+After installation, verify everything works:
+
+```bash
+# Health check
+curl http://localhost:9120/health
+
+# List tasks (should return JSON)
+curl http://localhost:9120/api/tasks
+
+# Open in browser
+echo "Open http://localhost:9120 in your browser"
+```
+
+### Troubleshooting
+
+**Port already in use:**
+```bash
+lsof -i :9120
+kill -9 <PID>
+```
+
+**Database not found:**
+```bash
+# Create empty databases if missing
+touch /opt/data/kanban.db /opt/data/state.db
+```
+
+**Frontend not loading:**
+```bash
+# Rebuild frontend
+cd /opt/data/agentos/frontend
+npm run build
+```
+
+**Permission denied:**
+```bash
+# Fix permissions
+chmod -R 755 /opt/data/agentos
+chown -R $(whoami):$(whoami) /opt/data/agentos
+```
+
 ## Configuration
 
 AgentOS auto-detects your Hermes data directory:
