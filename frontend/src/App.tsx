@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DndContext, DragOverlay, useDroppable, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
@@ -107,6 +107,8 @@ interface TaskRun {
   ended_at: string | null
   outcome: string | null
   summary: string | null
+  metadata: string | null
+  error: string | null
 }
 
 interface TaskComment {
@@ -785,6 +787,61 @@ function SessionsPage() {
           </>
         )}
       </main>
+    </div>
+  )
+}
+
+/* ── Run Metadata Display ──────────────────────────── */
+
+function RunMetadata({ meta }: { meta: Record<string, any> }) {
+  return (
+    <div className="space-y-2 text-sm">
+      {meta.artifacts_produced && Array.isArray(meta.artifacts_produced) && (
+        <div>
+          <span className="text-text-tertiary">Artifacts:</span>
+          <ul className="ml-4 mt-1 space-y-1">
+            {meta.artifacts_produced.map((a: string, i: number) => (
+              <li key={i} className="text-text-secondary flex items-center gap-2">
+                <span>📄</span> {a}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {meta.gaps && Array.isArray(meta.gaps) && (
+        <div>
+          <span className="text-warning">Gaps:</span>
+          <ul className="ml-4 mt-1 space-y-1">
+            {meta.gaps.map((g: string, i: number) => (
+              <li key={i} className="text-warning/80">⚠️ {g}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {meta.acceptance_met !== undefined && (
+        <div className="flex items-center gap-2">
+          <span className="text-text-tertiary">Acceptance:</span>
+          <span className={meta.acceptance_met ? 'text-success' : 'text-error'}>
+            {meta.acceptance_met ? '✅ Met' : '❌ Not met'}
+          </span>
+        </div>
+      )}
+      {meta.modules && Array.isArray(meta.modules) && (
+        <div>
+          <span className="text-text-tertiary">Modules:</span>
+          <div className="flex flex-wrap gap-1 mt-1">
+            {meta.modules.map((m: string, i: number) => (
+              <span key={i} className="px-2 py-0.5 rounded bg-accent/10 text-accent text-xs">{m}</span>
+            ))}
+          </div>
+        </div>
+      )}
+      {Object.entries(meta).filter(([k]) => !['artifacts_produced', 'gaps', 'acceptance_met', 'modules'].includes(k)).map(([k, v]) => (
+        <div key={k} className="flex gap-2">
+          <span className="text-text-tertiary">{k}:</span>
+          <span className="text-text-secondary">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+        </div>
+      ))}
     </div>
   )
 }
@@ -1791,6 +1848,16 @@ function TaskDetailPage() {
   const [showEditModal, setShowEditModal] = useState(false)
   const [commentText, setCommentText] = useState('')
   const [commentAuthor, setCommentAuthor] = useState('agentos')
+  const [expandedRuns, setExpandedRuns] = useState<Set<number>>(new Set())
+
+  const toggleRun = (runId: number) => {
+    setExpandedRuns(prev => {
+      const next = new Set(prev)
+      if (next.has(runId)) next.delete(runId)
+      else next.add(runId)
+      return next
+    })
+  }
 
   const { data, isLoading, error } = useQuery<TaskDetail>({
     queryKey: ['task', id],
@@ -2009,23 +2076,31 @@ function TaskDetailPage() {
               <div data-testid="tab-panel-runs" className="rounded-lg border border-border bg-surface/30 p-4">
                 {data.runs.length === 0 && <p className="text-body-sm text-text-tertiary">No runs recorded.</p>}
                 {data.runs.length > 0 && (
-                  <>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead className="bg-bg-elevated text-text-secondary text-left">
-                          <tr>
-                            <th className="px-3 py-2 font-medium">Step</th>
-                            <th className="px-3 py-2 font-medium">Status</th>
-                            <th className="px-3 py-2 font-medium">Profile</th>
-                            <th className="px-3 py-2 font-medium">Started</th>
-                            <th className="px-3 py-2 font-medium">Ended</th>
-                            <th className="px-3 py-2 font-medium">Outcome</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {data.runs.map((run) => (
-                            <tr key={run.id} className="hover:bg-surface/40 transition">
-                              <td className="px-3 py-2 text-text-primary font-mono text-mono-sm">{run.step_key || '-'}</td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="bg-bg-elevated text-text-secondary text-left">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">Step</th>
+                          <th className="px-3 py-2 font-medium">Status</th>
+                          <th className="px-3 py-2 font-medium">Profile</th>
+                          <th className="px-3 py-2 font-medium">Started</th>
+                          <th className="px-3 py-2 font-medium">Ended</th>
+                          <th className="px-3 py-2 font-medium">Outcome</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border">
+                        {data.runs.map((run) => (
+                          <React.Fragment key={run.id}>
+                            <tr
+                              className="hover:bg-surface/40 transition cursor-pointer"
+                              onClick={() => toggleRun(run.id)}
+                            >
+                              <td className="px-3 py-2 text-text-primary font-mono text-mono-sm">
+                                <span className="text-text-tertiary mr-2 select-none">
+                                  {expandedRuns.has(run.id) ? '▼' : '▶'}
+                                </span>
+                                {run.step_key || '-'}
+                              </td>
                               <td className="px-3 py-2 text-text-secondary">
                                 <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${run.status === 'done' ? 'bg-success-subtle text-success border border-success/20' : run.status === 'running' ? 'bg-warning-subtle text-warning border border-warning/20' : 'bg-surface text-text-secondary border border-border'}`}>
                                   {run.status}
@@ -2036,21 +2111,47 @@ function TaskDetailPage() {
                               <td className="px-3 py-2 tabular-nums">{formatIso(run.ended_at)}</td>
                               <td className="px-3 py-2 max-w-xs truncate text-text-secondary">{run.outcome || '-'}</td>
                             </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    {data.runs.some((r) => r.summary) && (
-                      <div className="mt-4 space-y-3">
-                        {data.runs.filter((r) => r.summary).map((run) => (
-                          <div key={`summary-${run.id}`} className="rounded border border-border bg-bg-base/40 p-3">
-                            <p className="text-mono-sm font-mono text-accent mb-1">Run {run.id} — {run.step_key || '?'}</p>
-                            <p className="text-sm text-text-primary whitespace-pre-wrap">{run.summary}</p>
-                          </div>
+                            {expandedRuns.has(run.id) && (
+                              <tr>
+                                <td colSpan={6} className="px-4 py-4 bg-bg-base/40">
+                                  {/* Summary */}
+                                  {run.summary && (
+                                    <div className="mb-3">
+                                      <h4 className="text-sm font-medium text-text-secondary mb-2">Summary</h4>
+                                      <MarkdownRenderer content={run.summary} />
+                                    </div>
+                                  )}
+                                  {/* Metadata */}
+                                  {run.metadata && (() => {
+                                    try {
+                                      const meta = JSON.parse(run.metadata)
+                                      return (
+                                        <div className="mb-3">
+                                          <h4 className="text-sm font-medium text-text-secondary mb-2">Details</h4>
+                                          <RunMetadata meta={meta} />
+                                        </div>
+                                      )
+                                    } catch { return null }
+                                  })()}
+                                  {/* Error */}
+                                  {run.error && (
+                                    <div className="rounded border border-error/30 bg-error-subtle p-3">
+                                      <p className="text-sm font-medium text-error mb-1">Error</p>
+                                      <pre className="text-xs text-error font-mono whitespace-pre-wrap">{run.error}</pre>
+                                    </div>
+                                  )}
+                                  {/* Empty state */}
+                                  {!run.summary && !run.metadata && !run.error && (
+                                    <p className="text-sm text-text-tertiary italic">No additional details for this run.</p>
+                                  )}
+                                </td>
+                              </tr>
+                            )}
+                          </React.Fragment>
                         ))}
-                      </div>
-                    )}
-                  </>
+                      </tbody>
+                    </table>
+                  </div>
                 )}
               </div>
             )}
