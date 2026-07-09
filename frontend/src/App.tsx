@@ -2363,6 +2363,22 @@ function ConfigPage() {
     enabled: viewMode === 'yaml',
   })
 
+  const mergedData = useMemo(() => {
+    if (!data || Object.keys(changes).length === 0) return data
+
+    const result = JSON.parse(JSON.stringify(data)) // Deep clone
+    for (const [pathStr, value] of Object.entries(changes)) {
+      const keys = pathStr.split('.')
+      let obj: any = result
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (obj[keys[i]] === undefined) obj[keys[i]] = {}
+        obj = obj[keys[i]]
+      }
+      obj[keys[keys.length - 1]] = value
+    }
+    return result
+  }, [data, changes])
+
   const saveMutation = useMutation({
     mutationFn: async (patches: { path: string[]; value: any }[]) => {
       const res = await fetch('/api/config', {
@@ -2488,9 +2504,9 @@ function ConfigPage() {
           </div>
         )}
 
-        {viewMode === 'tree' && data && (
+        {viewMode === 'tree' && mergedData && (
           <div className="rounded-lg border border-border bg-surface/30 p-4">
-            {Object.entries(data).map(([k, v]) => (
+            {Object.entries(mergedData).map(([k, v]) => (
               <ConfigNode
                 key={k}
                 name={k}
