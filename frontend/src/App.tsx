@@ -214,7 +214,7 @@ function NavBar() {
         <div className="mx-auto max-w-7xl flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <Link to="/" className="flex items-center gap-2 text-text-primary font-bold text-lg tracking-tight group shrink-0">
-              <img src="/logo.svg" alt="AgentOS" className="h-7 w-auto" />
+              <img src={theme === 'light' ? '/logo-light.svg' : '/logo.svg'} alt="AgentOS" className="h-7 w-auto" />
             </Link>
             {/* Desktop nav links */}
             <div className="hidden sm:flex items-center gap-1 ml-2">
@@ -292,7 +292,7 @@ function AgentCard({ agent }: { agent: AgentProfile }) {
       tabIndex={0}
       role="button"
       aria-label={`${agent.name} agent card. Status: ${isRunning ? 'Running' : 'Stopped'}. Role: ${agent.role}. Sessions: ${agent.sessions}.`}
-      className="card-focus rounded-xl border border-border bg-surface/40 p-5 transition hover:bg-surface-hover/70 hover:shadow-md cursor-pointer"
+      className="card-focus rounded-xl border border-border bg-surface/40 p-5 transition hover:bg-surface-hover/70 hover:shadow-md hover-shadow-enhanced cursor-pointer"
     >
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-h4 font-semibold text-text-primary">{agent.name}</h3>
@@ -1468,7 +1468,7 @@ function TaskCard({ task, isOverlay, onEdit }: { task: TaskItem; isOverlay?: boo
           navigate(`/tasks/${encodeURIComponent(task.id)}`)
         }
       }}
-      className={`card-focus mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-text-tertiary'} ${isOverlay ? 'shadow-lg rotate-1' : ''}`}
+      className={`card-focus mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md hover-shadow-enhanced border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-text-tertiary'} ${isOverlay ? 'shadow-lg rotate-1' : ''}`}
     >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug flex-1 prose-kanban-card">
@@ -2657,7 +2657,7 @@ function WorkflowListPage() {
                 tabIndex={0}
                 role="button"
                 onClick={() => navigate(`/workflows/${wf.id}`)}
-                className="card-focus rounded-xl border border-border bg-surface/40 p-5 transition hover:bg-surface-hover/70 hover:shadow-md cursor-pointer group"
+                className="card-focus rounded-xl border border-border bg-surface/40 p-5 transition hover:bg-surface-hover/70 hover:shadow-md hover-shadow-enhanced cursor-pointer group"
               >
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-h4 font-semibold text-text-primary truncate flex-1 mr-2">{wf.name}</h3>
