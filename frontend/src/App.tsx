@@ -1148,23 +1148,27 @@ function columnForStatus(status: string): string {
 /* ── Task Editor Modal ─────────────────────────────── */
 
 function TaskEditorModal({ task, onClose, onSaved }: {
-  task: TaskItem | TaskDetail
+  task?: TaskItem | TaskDetail
   onClose: () => void
   onSaved: () => void
 }) {
   const queryClient = useQueryClient()
-  const [title, setTitle] = useState(task.title || '')
-  const [body, setBody] = useState(task.body || '')
-  const [assignee, setAssignee] = useState(task.assignee || '')
-  const [priority, setPriority] = useState(task.priority ?? 2)
-  const [status, setStatus] = useState(task.status)
+  const isCreate = !task
+  const [title, setTitle] = useState(task?.title || '')
+  const [body, setBody] = useState(task?.body || '')
+  const [assignee, setAssignee] = useState(task?.assignee || 'coder')
+  const [priority, setPriority] = useState(task?.priority ?? 2)
+  const [status, setStatus] = useState(task?.status || 'todo')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [expanded, setExpanded] = useState(false)
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch(`/api/tasks/${encodeURIComponent(task.id)}`, {
-        method: 'PATCH',
+      const url = isCreate ? '/api/tasks' : `/api/tasks/${encodeURIComponent(task!.id)}`
+      const method = isCreate ? 'POST' : 'PATCH'
+      const res = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, body, assignee: assignee || null, priority, status }),
       })
@@ -1174,7 +1178,7 @@ function TaskEditorModal({ task, onClose, onSaved }: {
     onMutate: () => { setSaving(true); setError(null) },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
-      queryClient.invalidateQueries({ queryKey: ['task', task.id] })
+      if (task) queryClient.invalidateQueries({ queryKey: ['task', task.id] })
       onSaved()
       onClose()
     },
@@ -1189,20 +1193,32 @@ function TaskEditorModal({ task, onClose, onSaved }: {
   }, [onClose])
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className={expanded ? 'fixed inset-0 z-[60] bg-bg-elevated overflow-y-auto' : 'fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm'}
+      onClick={expanded ? undefined : onClose}
+    >
       <div
-        className="w-full max-w-2xl rounded-xl border border-border bg-bg-elevated shadow-2xl max-h-[90vh] overflow-y-auto"
-        onClick={(e) => e.stopPropagation()}
+        className={expanded ? 'min-h-screen p-6' : 'w-full max-w-2xl rounded-xl border border-border bg-bg-elevated shadow-2xl max-h-[90vh] overflow-y-auto'}
+        onClick={e => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Edit task"
+        aria-label={isCreate ? 'Create task' : 'Edit task'}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-bg-elevated z-10">
-          <h2 className="text-h3 font-bold text-text-primary">Edit Task</h2>
-          <button onClick={onClose} className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface/60 transition" aria-label="Close">
-            ✕
-          </button>
+          <h2 className="text-h3 font-bold text-text-primary">{isCreate ? 'New Task' : 'Edit Task'}</h2>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setExpanded(!expanded)}
+              className="p-1 text-text-tertiary hover:text-text-secondary transition-colors"
+              title={expanded ? 'Restore' : 'Maximize'}
+            >
+              {expanded ? '❐' : '⬜'}
+            </button>
+            <button onClick={onClose} className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface/60 transition" aria-label="Close">
+              ✕
+            </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -1271,9 +1287,11 @@ function TaskEditorModal({ task, onClose, onSaved }: {
           </div>
 
           {/* Task ID */}
-          <div className="pt-2">
-            <p className="text-caption text-text-tertiary font-mono">ID: {task.id}</p>
-          </div>
+          {task && (
+            <div className="pt-2">
+              <p className="text-caption text-text-tertiary font-mono">ID: {task.id}</p>
+            </div>
+          )}
 
           {error && (
             <div className="rounded-md border border-error/30 bg-error-subtle px-3 py-2 text-sm text-error">
@@ -1295,7 +1313,7 @@ function TaskEditorModal({ task, onClose, onSaved }: {
             disabled={saving || !title.trim()}
             className="rounded-md bg-accent px-4 py-2 text-sm text-white font-medium hover:bg-accent-hover transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {saving ? 'Saving…' : 'Save changes'}
+            {saving ? 'Saving…' : (isCreate ? 'Create Task' : 'Save changes')}
           </button>
         </div>
       </div>
@@ -1546,6 +1564,7 @@ function KanbanBoardPage() {
   const [showArchived, setShowArchived] = useState(false)
   const [draggedTask, setDraggedTask] = useState<TaskItem | null>(null)
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null)
+  const [createModalOpen, setCreateModalOpen] = useState(false)
   const [filters, setFilters] = useState<FilterState>({ search: '', assignee: '', priority: '', status: '' })
   const queryClient = useQueryClient()
 
@@ -1653,6 +1672,12 @@ function KanbanBoardPage() {
             <p className="text-body-sm text-text-secondary mt-1">Task pipeline</p>
           </div>
           <div className="flex items-center gap-3">
+            <button
+              onClick={() => setCreateModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors text-sm font-medium"
+            >
+              <span>+</span> New Task
+            </button>
             {stats && (
               <div className="hidden sm:flex items-center gap-4 text-caption text-text-tertiary">
                 <span title="Total active tasks">{stats.total} total</span>
@@ -1732,7 +1757,17 @@ function KanbanBoardPage() {
         )}
       </main>
 
-      {/* Task Editor Modal */}
+      {/* Task Editor Modal (create mode) */}
+      {createModalOpen && (
+        <TaskEditorModal
+          onClose={() => setCreateModalOpen(false)}
+          onSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ['kanban', 'stats'] })
+          }}
+        />
+      )}
+
+      {/* Task Editor Modal (edit mode) */}
       {editingTask && (
         <TaskEditorModal
           task={editingTask}

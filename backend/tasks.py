@@ -186,6 +186,110 @@ async def list_tasks(
 
 VALID_STATUSES = {"todo", "ready", "running", "done", "blocked", "archived"}
 
+async def create_task(
+    *,
+    title: str = "",
+    body: str = "",
+    assignee: str | None = None,
+    priority: int = 2,
+    status: str = "todo",
+    created_by: str = "agentos",
+) -> dict | None:
+    """Insert a new task into kanban.db and return the created task dict."""
+    import uuid
+
+    if not title.strip():
+        return None
+
+    # Map common aliases
+    if status == "pending":
+        status = "todo"
+    if status not in VALID_STATUSES:
+        status = "todo"
+
+    try:
+        priority = int(priority)
+    except (TypeError, ValueError):
+        priority = 2
+
+    task_id = uuid.uuid4().hex[:12]
+    now = int(datetime.now(timezone.utc).timestamp())
+
+    # Ensure the database directory exists
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        # Create tables if they don't exist (first run)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                body TEXT,
+                assignee TEXT,
+                status TEXT NOT NULL DEFAULT 'todo',
+                priority INTEGER DEFAULT 2,
+                created_by TEXT,
+                created_at INTEGER,
+                started_at INTEGER,
+                completed_at INTEGER,
+                workspace_kind TEXT,
+                workspace_path TEXT,
+                session_id TEXT,
+                project_id TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS task_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                profile TEXT,
+                step_key TEXT,
+                status TEXT,
+                started_at INTEGER,
+                ended_at INTEGER,
+                outcome TEXT,
+                summary TEXT
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS task_comments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                author TEXT,
+                body TEXT,
+                created_at INTEGER
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS task_links (
+                parent_id TEXT NOT NULL,
+                child_id TEXT NOT NULL,
+                PRIMARY KEY (parent_id, child_id)
+            )
+        """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS task_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT,
+                run_id TEXT,
+                kind TEXT,
+                payload TEXT,
+                created_at INTEGER
+            )
+        """)
+
+        await db.execute(
+            """
+            INSERT INTO tasks (id, title, body, assignee, status, priority, created_by, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (task_id, title.strip(), body or "", assignee, status, priority, created_by, now),
+        )
+        await db.commit()
+
+    return await get_task(task_id)
+
+
 # Columns a PATCH is allowed to write. Anything else is silently ignored to
 # avoid clobbering dispatcher-managed fields (claim_lock, worker_pid, …).
 EDITABLE_FIELDS = {"title", "body", "assignee", "priority", "status", "project_id"}

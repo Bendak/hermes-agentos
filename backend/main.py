@@ -116,11 +116,29 @@ from backend.tasks import (  # noqa: E402
     get_task,
     update_task_status,
     update_task,
+    create_task,
     add_comment,
     bulk_update,
     search_tasks,
     get_kanban_stats,
 )
+
+@app.post("/api/tasks")
+async def create_task_endpoint(body: dict):
+    title = body.get("title", "")
+    if not title.strip():
+        raise HTTPException(status_code=400, detail="'title' is required")
+    result = await create_task(
+        title=title,
+        body=body.get("body", ""),
+        assignee=body.get("assignee"),
+        priority=body.get("priority", 2),
+        status=body.get("status", "todo"),
+        created_by=body.get("created_by", "agentos"),
+    )
+    if result is None:
+        raise HTTPException(status_code=400, detail="Failed to create task")
+    return result
 
 
 @app.patch("/api/tasks/{task_id}")
