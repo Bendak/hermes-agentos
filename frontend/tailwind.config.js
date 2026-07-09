@@ -43,6 +43,8 @@ export default {
         'error-subtle': 'var(--semantic-error-subtle)',
         info: 'var(--semantic-info)',
         'info-subtle': 'var(--semantic-info-subtle)',
+        purple: 'var(--semantic-purple)',
+        'purple-subtle': 'var(--semantic-purple-subtle)',
       },
       fontFamily: {
         sans: [

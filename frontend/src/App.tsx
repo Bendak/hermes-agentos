@@ -1188,6 +1188,7 @@ function SessionDetailPage() {
 /* ── Kanban Board ──────────────────────────────────── */
 
 const COLUMN_META = [
+  { status: 'triage',  label: 'Triage',  accent: 'border-l-purple',        header: 'border-purple/50',        badge: 'bg-purple-subtle text-purple border border-purple/20' },
   { status: 'todo',    label: 'Backlog', accent: 'border-l-text-tertiary', header: 'border-text-tertiary/50', badge: 'bg-surface text-text-tertiary border border-text-tertiary/20' },
   { status: 'ready',   label: 'Ready',   accent: 'border-l-info',           header: 'border-info/50',           badge: 'bg-info-subtle text-info border border-info/20' },
   { status: 'running', label: 'Running', accent: 'border-l-warning',        header: 'border-warning/50',        badge: 'bg-warning-subtle text-warning border border-warning/20' },
@@ -1195,29 +1196,51 @@ const COLUMN_META = [
   { status: 'blocked', label: 'Blocked', accent: 'border-l-error',          header: 'border-error/50',          badge: 'bg-error-subtle text-error border border-error/20' },
 ]
 
-const ALL_STATUSES = ['todo', 'ready', 'running', 'done', 'blocked', 'archived']
-const ALL_ASSIGNEES = ['coder', 'pixel', 'atlas', 'nova', 'nexus']
+const ALL_STATUSES = ['triage', 'todo', 'ready', 'running', 'done', 'blocked', 'archived']
+const ALL_ASSIGNEES = ['coder', 'pixel', 'atlas', 'nova', 'nexus', 'hermes']
 const ALL_PRIORITIES = [0, 1, 2, 3]
 
+const ALL_WORKSPACE_KINDS = ['scratch', 'workspace', 'dir']
+
+const TRIAGE_TEMPLATE = `## Objetivo
+[Descreva o objetivo da task]
+
+## Contexto
+[Forneça contexto relevante - problema, motivação, etc.]
+
+## Critérios de Aceitação
+- [ ] [Critério 1]
+- [ ] [Critério 2]
+
+## Assignee Sugerido
+[Sugira um perfil: coder, pixel, atlas, nova, nexus]
+
+## Notas
+[Informações adicionais]`
+
 function columnForStatus(status: string): string {
-  const known = ['todo', 'ready', 'running', 'done', 'blocked']
+  const known = ['triage', 'todo', 'ready', 'running', 'done', 'blocked']
   return known.includes(status) ? status : 'todo'
 }
 
 /* ── Task Editor Modal ─────────────────────────────── */
 
-function TaskEditorModal({ task, onClose, onSaved }: {
+function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }: {
   task?: TaskItem | TaskDetail
   onClose: () => void
   onSaved: () => void
+  initialStatus?: string
+  initialBody?: string
 }) {
   const queryClient = useQueryClient()
   const isCreate = !task
   const [title, setTitle] = useState(task?.title || '')
-  const [body, setBody] = useState(task?.body || '')
+  const [body, setBody] = useState(initialBody ?? task?.body ?? '')
   const [assignee, setAssignee] = useState(task?.assignee || 'coder')
   const [priority, setPriority] = useState(task?.priority ?? 2)
-  const [status, setStatus] = useState(task?.status || 'todo')
+  const [status, setStatus] = useState(initialStatus ?? task?.status ?? 'todo')
+  const [workspaceKind, setWorkspaceKind] = useState(task?.workspace_kind || 'scratch')
+  const [workspacePath, setWorkspacePath] = useState(task?.workspace_path || '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
@@ -1226,10 +1249,19 @@ function TaskEditorModal({ task, onClose, onSaved }: {
     mutationFn: async () => {
       const url = isCreate ? '/api/tasks' : `/api/tasks/${encodeURIComponent(task!.id)}`
       const method = isCreate ? 'POST' : 'PATCH'
+      const payload: Record<string, unknown> = { title, body, assignee: assignee || null, priority, status }
+      // Only send workspace_kind on create, or on edit if it changed
+      if (isCreate || workspaceKind !== (task?.workspace_kind || 'scratch')) {
+        payload.workspace_kind = workspaceKind
+      }
+      // Send workspace_path if workspace_kind is workspace or dir
+      if (workspaceKind === 'workspace' || workspaceKind === 'dir') {
+        payload.workspace_path = workspacePath || null
+      }
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, body, assignee: assignee || null, priority, status }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) throw new Error(await res.text())
       return res.json()
@@ -1343,6 +1375,59 @@ function TaskEditorModal({ task, onClose, onSaved }: {
                 ))}
               </select>
             </div>
+          </div>
+
+          {/* Workspace kind selector */}
+          <div>
+            <label className="block text-caption text-text-secondary mb-1.5 font-medium">
+              Workspace Kind
+            </label>
+            <div className="flex items-center gap-3">
+              <select
+                value={workspaceKind}
+                onChange={(e) => setWorkspaceKind(e.target.value)}
+                className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
+              >
+                {ALL_WORKSPACE_KINDS.map((k) => (
+                  <option key={k} value={k}>{k}</option>
+                ))}
+              </select>
+              {isCreate && (
+                <button
+                  type="button"
+                  onClick={() => { setStatus('triage'); setBody(TRIAGE_TEMPLATE) }}
+                  className="shrink-0 rounded-md border border-purple/30 bg-purple-subtle px-3 py-2 text-sm text-purple hover:bg-purple/20 transition"
+                  title="Set status to triage and load the specification template"
+                >
+                  Triage template
+                </button>
+              )}
+            </div>
+            <p className="text-caption text-text-tertiary mt-1">
+              <span className="text-text-secondary">scratch</span> = temporary (deleted on completion) ·{' '}
+              <span className="text-text-secondary">workspace</span> = persistent task directory ·{' '}
+              <span className="text-text-secondary">dir</span> = persistent shared directory
+            </p>
+            {/* Workspace path field - only show for workspace or dir */}
+            {(workspaceKind === 'workspace' || workspaceKind === 'dir') && (
+              <div className="mt-3">
+                <label className="block text-sm font-medium text-text-secondary mb-1">
+                  Workspace Path {workspaceKind === 'dir' ? '(shared directory)' : '(auto-generated if empty)'}
+                </label>
+                <input
+                  type="text"
+                  value={workspacePath}
+                  onChange={(e) => setWorkspacePath(e.target.value)}
+                  placeholder={workspaceKind === 'dir' ? '/opt/data/shared/my-project' : '/opt/data/kanban/workspaces/{task_id}'}
+                  className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary font-mono focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
+                />
+                <p className="text-caption text-text-tertiary mt-1">
+                  {workspaceKind === 'dir'
+                    ? 'Shared directory path — persists across tasks'
+                    : 'Leave empty to auto-generate from task ID'}
+                </p>
+              </div>
+            )}
           </div>
 
           {/* Task ID */}
@@ -1502,8 +1587,9 @@ function priorityLabel(priority: number | null): string {
   return map[priority ?? 3] || 'P?'
 }
 
-function TaskCard({ task, isOverlay, onEdit }: { task: TaskItem; isOverlay?: boolean; onEdit?: (task: TaskItem) => void }) {
+function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOverlay?: boolean; onEdit?: (task: TaskItem) => void; onArchive?: (task: TaskItem) => void }) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const {
     attributes,
     listeners,
@@ -1529,6 +1615,22 @@ function TaskCard({ task, isOverlay, onEdit }: { task: TaskItem; isOverlay?: boo
     onEdit?.(task)
   }
 
+  const handleArchiveClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (onArchive) {
+      onArchive(task)
+    } else {
+      // Direct API call fallback
+      fetch(`/api/tasks/${encodeURIComponent(task.id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'archived' }),
+      }).then(() => queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] }))
+    }
+  }
+
+  const isArchived = task.status === 'archived'
+
   return (
     <div
       ref={setNodeRef}
@@ -1552,14 +1654,36 @@ function TaskCard({ task, isOverlay, onEdit }: { task: TaskItem; isOverlay?: boo
           <MarkdownRenderer content={task.title || 'Untitled'} />
         </div>
         {onEdit && !isOverlay && (
-          <button
-            onClick={handleEditClick}
-            className="shrink-0 p-1 rounded text-text-tertiary hover:text-accent hover:bg-surface/60 transition opacity-0 group-hover:opacity-100"
-            aria-label="Edit task"
-            title="Edit task"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-          </button>
+          <div className="flex items-center gap-0.5 shrink-0">
+            <button
+              onClick={handleEditClick}
+              className="p-1 rounded text-text-tertiary hover:text-accent hover:bg-surface/60 transition opacity-0 group-hover:opacity-100"
+              aria-label="Edit task"
+              title="Edit task"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            </button>
+            {!isArchived && (
+              <button
+                onClick={handleArchiveClick}
+                className="p-1 rounded text-text-tertiary hover:text-warning hover:bg-surface/60 transition opacity-0 group-hover:opacity-100"
+                aria-label="Archive task"
+                title="Archive task"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+              </button>
+            )}
+            {isArchived && (
+              <button
+                onClick={handleArchiveClick}
+                className="p-1 rounded text-text-tertiary hover:text-success hover:bg-surface/60 transition opacity-0 group-hover:opacity-100"
+                aria-label="Unarchive task"
+                title="Unarchive task"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="12" y1="12" x2="12" y2="12"/></svg>
+              </button>
+            )}
+          </div>
         )}
       </div>
       <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -1590,7 +1714,16 @@ function TaskCard({ task, isOverlay, onEdit }: { task: TaskItem; isOverlay?: boo
   )
 }
 
-function KanbanColumn({ label, status, tasks, onEdit }: { label: string; status: string; tasks: TaskItem[]; onEdit?: (task: TaskItem) => void }) {
+function KanbanColumn({ label, status, tasks, onEdit, onArchive, bulkSelectMode, selectedIds, onToggleSelect }: {
+  label: string
+  status: string
+  tasks: TaskItem[]
+  onEdit?: (task: TaskItem) => void
+  onArchive?: (task: TaskItem) => void
+  bulkSelectMode?: boolean
+  selectedIds?: Set<string>
+  onToggleSelect?: (id: string) => void
+}) {
   const meta = COLUMN_META.find((c) => c.status === status) || COLUMN_META[0]
   const { setNodeRef, isOver } = useDroppable({ id: status })
 
@@ -1607,8 +1740,19 @@ function KanbanColumn({ label, status, tasks, onEdit }: { label: string; status:
         className={`flex-1 overflow-y-auto max-h-[calc(100vh-12rem)] pr-1 rounded-lg transition ${isOver ? 'bg-accent/10 ring-1 ring-accent/30' : ''}`}
       >
         {tasks.map((task) => (
-          <div key={task.id} className="group">
-            <TaskCard task={task} onEdit={onEdit} />
+          <div key={task.id} className="group flex items-start gap-1.5">
+            {bulkSelectMode && (
+              <input
+                type="checkbox"
+                checked={selectedIds?.has(task.id) || false}
+                onChange={() => onToggleSelect?.(task.id)}
+                className="mt-3 shrink-0 cursor-pointer accent-accent"
+                aria-label={`Select task ${task.title}`}
+              />
+            )}
+            <div className="flex-1">
+              <TaskCard task={task} onEdit={onEdit} onArchive={onArchive} />
+            </div>
           </div>
         ))}
         {tasks.length === 0 && (
@@ -1624,7 +1768,10 @@ function KanbanBoardPage() {
   const [draggedTask, setDraggedTask] = useState<TaskItem | null>(null)
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null)
   const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [createTriageModalOpen, setCreateTriageModalOpen] = useState(false)
   const [filters, setFilters] = useState<FilterState>({ search: '', assignee: '', priority: '', status: '' })
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkSelectMode, setBulkSelectMode] = useState(false)
   const queryClient = useQueryClient()
 
   const sensors = useSensors(
@@ -1683,6 +1830,41 @@ function KanbanBoardPage() {
     },
   })
 
+  const archiveMutation = useMutation({
+    mutationFn: async ({ taskId, archive }: { taskId: string; archive: boolean }) => {
+      const status = archive ? 'archived' : 'todo'
+      const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      return res.json()
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+      queryClient.invalidateQueries({ queryKey: ['kanban', 'stats'] })
+    },
+  })
+
+  const bulkArchiveMutation = useMutation({
+    mutationFn: async ({ taskIds, archive }: { taskIds: string[]; archive: boolean }) => {
+      const status = archive ? 'archived' : 'todo'
+      const res = await fetch('/api/tasks/bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: taskIds, updates: { status } }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      return res.json()
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+      queryClient.invalidateQueries({ queryKey: ['kanban', 'stats'] })
+      setSelectedIds(new Set())
+    },
+  })
+
   const handleDragStart = (event: DragStartEvent) => {
     const { active } = event
     const task = data?.find((t) => t.id === active.id)
@@ -1737,11 +1919,36 @@ function KanbanBoardPage() {
             >
               <span>+</span> New Task
             </button>
+            <button
+              onClick={() => setCreateTriageModalOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 bg-purple-subtle text-purple border border-purple/30 rounded-lg hover:bg-purple/20 transition-colors text-sm font-medium"
+              title="Create a new task in triage with the specification template"
+            >
+              <span>+</span> New Triage Task
+            </button>
             {stats && (
               <div className="hidden sm:flex items-center gap-4 text-caption text-text-tertiary">
                 <span title="Total active tasks">{stats.total} total</span>
                 <span title="Completed in last 7 days" className="text-success">{stats.recent_done_7d} done/7d</span>
               </div>
+            )}
+            <button
+              onClick={() => { setBulkSelectMode(!bulkSelectMode); if (bulkSelectMode) setSelectedIds(new Set()) }}
+              className={`rounded-md border px-3 py-1.5 text-sm transition ${bulkSelectMode ? 'bg-accent text-white border-accent' : 'bg-surface border-border text-text-primary hover:bg-surface-hover/80'}`}
+            >
+              {bulkSelectMode ? '✕ Cancel bulk' : 'Bulk select'}
+            </button>
+            {bulkSelectMode && selectedIds.size > 0 && (
+              <>
+                <span className="text-caption text-text-secondary">{selectedIds.size} selected</span>
+                <button
+                  onClick={() => bulkArchiveMutation.mutate({ taskIds: [...selectedIds], archive: true })}
+                  disabled={bulkArchiveMutation.isPending}
+                  className="rounded-md bg-warning/20 border border-warning/30 px-3 py-1.5 text-sm text-warning hover:bg-warning/30 transition"
+                >
+                  Archive {selectedIds.size}
+                </button>
+              </>
             )}
             <button
               onClick={() => setShowArchived((v) => !v)}
@@ -1782,6 +1989,15 @@ function KanbanBoardPage() {
                     status={col.status}
                     tasks={col.tasks}
                     onEdit={setEditingTask}
+                    onArchive={(t) => archiveMutation.mutate({ taskId: t.id, archive: true })}
+                    bulkSelectMode={bulkSelectMode}
+                    selectedIds={selectedIds}
+                    onToggleSelect={(id) => setSelectedIds(prev => {
+                      const next = new Set(prev)
+                      if (next.has(id)) next.delete(id)
+                      else next.add(id)
+                      return next
+                    })}
                   />
                 ))}
               </div>
@@ -1798,13 +2014,42 @@ function KanbanBoardPage() {
               <div className="mt-8">
                 <div className="flex items-center justify-between mb-3 pb-2 border-b border-text-tertiary/30">
                   <h3 className="text-body-sm font-semibold text-text-tertiary">Archived</h3>
-                  <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-surface text-text-tertiary border border-text-tertiary/20">
-                    {archivedTasks.length}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {bulkSelectMode && archivedTasks.length > 0 && selectedIds.size > 0 && (
+                      <button
+                        onClick={() => bulkArchiveMutation.mutate({ taskIds: [...selectedIds], archive: false })}
+                        disabled={bulkArchiveMutation.isPending}
+                        className="rounded-md bg-success/20 border border-success/30 px-3 py-1.5 text-sm text-success hover:bg-success/30 transition"
+                      >
+                        Unarchive {selectedIds.size}
+                      </button>
+                    )}
+                    <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-surface text-text-tertiary border border-text-tertiary/20">
+                      {archivedTasks.length}
+                    </span>
+                  </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                   {archivedTasks.map((task) => (
-                    <TaskCard key={task.id} task={task} />
+                    <div key={task.id} className="flex items-start gap-1.5">
+                      {bulkSelectMode && (
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(task.id)}
+                          onChange={() => setSelectedIds(prev => {
+                            const next = new Set(prev)
+                            if (next.has(task.id)) next.delete(task.id)
+                            else next.add(task.id)
+                            return next
+                          })}
+                          className="mt-3 shrink-0 cursor-pointer accent-accent"
+                          aria-label={`Select task ${task.title}`}
+                        />
+                      )}
+                      <div className="flex-1">
+                        <TaskCard task={task} onArchive={(t) => archiveMutation.mutate({ taskId: t.id, archive: false })} />
+                      </div>
+                    </div>
                   ))}
                 </div>
                 {archivedTasks.length === 0 && (
@@ -1823,6 +2068,18 @@ function KanbanBoardPage() {
           onSaved={() => {
             queryClient.invalidateQueries({ queryKey: ['kanban', 'stats'] })
           }}
+        />
+      )}
+
+      {/* Task Editor Modal (create triage mode) */}
+      {createTriageModalOpen && (
+        <TaskEditorModal
+          onClose={() => setCreateTriageModalOpen(false)}
+          onSaved={() => {
+            queryClient.invalidateQueries({ queryKey: ['kanban', 'stats'] })
+          }}
+          initialStatus="triage"
+          initialBody={TRIAGE_TEMPLATE}
         />
       )}
 
@@ -1934,13 +2191,30 @@ function TaskDetailPage() {
             ← Back to tasks
           </button>
           {data && (
-            <button
-              onClick={() => setShowEditModal(true)}
-              className="rounded-md bg-accent px-3 py-1.5 text-sm text-white font-medium hover:bg-accent-hover transition flex items-center gap-1.5"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-              Edit
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const newStatus = data.status === 'archived' ? 'todo' : 'archived'
+                  fetch(`/api/tasks/${encodeURIComponent(id!)}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus }),
+                  }).then(() => queryClient.invalidateQueries({ queryKey: ['task', id] }))
+                }}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition flex items-center gap-1.5 ${data.status === 'archived' ? 'bg-success/20 border border-success/30 text-success hover:bg-success/30' : 'bg-surface border border-border text-text-secondary hover:bg-surface-hover/80'}`}
+                title={data.status === 'archived' ? 'Unarchive task' : 'Archive task'}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                {data.status === 'archived' ? 'Unarchive' : 'Archive'}
+              </button>
+              <button
+                onClick={() => setShowEditModal(true)}
+                className="rounded-md bg-accent px-3 py-1.5 text-sm text-white font-medium hover:bg-accent-hover transition flex items-center gap-1.5"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                Edit
+              </button>
+            </div>
           )}
         </div>
 

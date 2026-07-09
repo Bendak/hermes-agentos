@@ -184,7 +184,9 @@ async def list_tasks(
         return tasks
 
 
-VALID_STATUSES = {"todo", "ready", "running", "done", "blocked", "archived"}
+VALID_STATUSES = {"todo", "ready", "running", "done", "blocked", "archived", "triage"}
+
+VALID_WORKSPACE_KINDS = {"scratch", "workspace", "dir"}
 
 async def create_task(
     *,
@@ -194,6 +196,8 @@ async def create_task(
     priority: int = 2,
     status: str = "todo",
     created_by: str = "agentos",
+    workspace_kind: str | None = None,
+    workspace_path: str | None = None,
 ) -> dict | None:
     """Insert a new task into kanban.db and return the created task dict."""
     import uuid
@@ -211,6 +215,14 @@ async def create_task(
         priority = int(priority)
     except (TypeError, ValueError):
         priority = 2
+
+    # Validate workspace_kind — default to scratch (Hermes kanban DB has
+    # workspace_kind TEXT NOT NULL DEFAULT 'scratch', so None would violate
+    # the constraint on existing tables).
+    if workspace_kind and workspace_kind not in VALID_WORKSPACE_KINDS:
+        workspace_kind = "scratch"
+    if not workspace_kind:
+        workspace_kind = "scratch"
 
     task_id = uuid.uuid4().hex[:12]
     now = int(datetime.now(timezone.utc).timestamp())
@@ -280,10 +292,10 @@ async def create_task(
 
         await db.execute(
             """
-            INSERT INTO tasks (id, title, body, assignee, status, priority, created_by, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO tasks (id, title, body, assignee, status, priority, created_by, created_at, workspace_kind, workspace_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (task_id, title.strip(), body or "", assignee, status, priority, created_by, now),
+            (task_id, title.strip(), body or "", assignee, status, priority, created_by, now, workspace_kind, workspace_path),
         )
         await db.commit()
 
@@ -292,7 +304,7 @@ async def create_task(
 
 # Columns a PATCH is allowed to write. Anything else is silently ignored to
 # avoid clobbering dispatcher-managed fields (claim_lock, worker_pid, …).
-EDITABLE_FIELDS = {"title", "body", "assignee", "priority", "status", "project_id"}
+EDITABLE_FIELDS = {"title", "body", "assignee", "priority", "status", "project_id", "workspace_kind", "workspace_path"}
 
 
 async def update_task_status(task_id: str, new_status: str) -> dict | None:
@@ -370,6 +382,9 @@ async def update_task(task_id: str, updates: dict) -> dict | None:
             try:
                 v = int(v)
             except (TypeError, ValueError):
+                return None
+        if k == "workspace_kind" and v is not None:
+            if v not in VALID_WORKSPACE_KINDS:
                 return None
         filtered[k] = v
 
