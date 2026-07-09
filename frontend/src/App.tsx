@@ -3182,6 +3182,7 @@ function WorkflowEditorPage() {
             onNodeClick={onNodeClick}
             onPaneClick={onPaneClick}
             nodeTypes={workflowNodeTypes}
+            deleteKeyCode={['Backspace', 'Delete']}
             fitView
             className="bg-bg-base"
           >
