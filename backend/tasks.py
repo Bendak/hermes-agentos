@@ -608,7 +608,9 @@ async def get_task(task_id: str) -> dict | None:
                 started_at,
                 ended_at,
                 outcome,
-                summary
+                summary,
+                metadata,
+                error
             FROM task_runs
             WHERE task_id = ?
             ORDER BY started_at DESC
@@ -625,6 +627,8 @@ async def get_task(task_id: str) -> dict | None:
                     "ended_at": _ts_to_iso(r["ended_at"]),
                     "outcome": r["outcome"],
                     "summary": r["summary"],
+                    "metadata": r["metadata"],
+                    "error": r["error"],
                 })
 
         # comments
