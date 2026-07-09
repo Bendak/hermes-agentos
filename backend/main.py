@@ -374,6 +374,90 @@ from backend.workflows import list_workflows, get_workflow, create_workflow, upd
 from backend.workflow_engine import run_workflow, get_workflow_runs, get_run_detail  # noqa: E402
 
 
+# ── Cron endpoints ────────────────────────────────────────────────
+
+CRON_JOBS_PATH = "/opt/data/cron/jobs.json"
+
+
+def _read_cron_jobs() -> list[dict]:
+    """Read cron jobs from Hermes cron jobs.json."""
+    import json
+    if not os.path.exists(CRON_JOBS_PATH):
+        return []
+    try:
+        with open(CRON_JOBS_PATH) as f:
+            data = json.load(f)
+        return data.get("jobs", [])
+    except (json.JSONDecodeError, OSError):
+        return []
+
+
+def _write_cron_jobs(jobs: list[dict]) -> None:
+    """Write cron jobs back to Hermes cron jobs.json."""
+    import json
+    os.makedirs(os.path.dirname(CRON_JOBS_PATH), exist_ok=True)
+    with open(CRON_JOBS_PATH, "w") as f:
+        json.dump({"jobs": jobs}, f, indent=2, ensure_ascii=False)
+
+
+@app.get("/api/cron")
+async def list_cron():
+    """List all cron jobs."""
+    jobs = _read_cron_jobs()
+    return {"jobs": jobs}
+
+
+@app.get("/api/cron/{job_id}")
+async def get_cron_job(job_id: str):
+    """Get a single cron job by ID."""
+    jobs = _read_cron_jobs()
+    job = next((j for j in jobs if j["id"] == job_id), None)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
+
+
+@app.post("/api/cron/{job_id}/pause")
+async def pause_cron_job(job_id: str):
+    """Pause a cron job."""
+    from datetime import datetime, timezone
+    jobs = _read_cron_jobs()
+    job = next((j for j in jobs if j["id"] == job_id), None)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job["enabled"] = False
+    job["state"] = "paused"
+    job["paused_at"] = datetime.now(timezone.utc).isoformat()
+    _write_cron_jobs(jobs)
+    return {"status": "paused", "job_id": job_id}
+
+
+@app.post("/api/cron/{job_id}/resume")
+async def resume_cron_job(job_id: str):
+    """Resume a cron job."""
+    jobs = _read_cron_jobs()
+    job = next((j for j in jobs if j["id"] == job_id), None)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job["enabled"] = True
+    job["state"] = "scheduled"
+    job["paused_at"] = None
+    job["paused_reason"] = None
+    _write_cron_jobs(jobs)
+    return {"status": "resumed", "job_id": job_id}
+
+
+@app.delete("/api/cron/{job_id}")
+async def delete_cron_job(job_id: str):
+    """Delete a cron job."""
+    jobs = _read_cron_jobs()
+    new_jobs = [j for j in jobs if j["id"] != job_id]
+    if len(new_jobs) == len(jobs):
+        raise HTTPException(status_code=404, detail="Job not found")
+    _write_cron_jobs(new_jobs)
+    return {"status": "deleted", "job_id": job_id}
+
+
 @app.get("/api/workflows")
 async def workflows_list():
     return await list_workflows()

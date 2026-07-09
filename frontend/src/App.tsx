@@ -226,6 +226,7 @@ function NavBar() {
               {navLink('/config', 'Config')}
               {navLink('/skills', 'Skills')}
               {navLink('/workflows', 'Workflows')}
+              {navLink('/cron', 'Cron')}
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -270,6 +271,7 @@ function NavBar() {
             {navLink('/config', 'Config')}
             {navLink('/skills', 'Skills')}
             {navLink('/workflows', 'Workflows')}
+            {navLink('/cron', 'Cron')}
             {onOpenSearch && (
               <button
                 onClick={() => { setMobileMenuOpen(false); onOpenSearch() }}
@@ -3845,11 +3847,265 @@ export default function App() {
           <Route path="/skills" element={<SkillsHubPage />} />
           <Route path="/workflows" element={<WorkflowListPage />} />
           <Route path="/workflows/:id" element={<WorkflowEditorPage />} />
+          <Route path="/cron" element={<CronPage />} />
         </Routes>
         <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
         <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
       </SearchContext.Provider>
     </QueryClientProvider>
+  )
+}
+
+/* ── Cron Jobs ─────────────────────────────────────── */
+
+interface CronJob {
+  id: string
+  name: string
+  prompt: string
+  schedule: { kind: string; expr: string; display: string }
+  schedule_display: string
+  repeat: { times: number | null; completed: number }
+  enabled: boolean
+  state: string
+  paused_at: string | null
+  paused_reason: string | null
+  created_at: string
+  next_run_at: string | null
+  last_run_at: string | null
+  last_status: string | null
+  last_error: string | null
+  deliver: string | null
+  origin: { platform: string; chat_id: string; chat_name: string } | null
+  skills: string[]
+  model: string | null
+  provider: string | null
+}
+
+function formatRelativeTime(iso: string | null): string {
+  if (!iso) return '-'
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return '-'
+  const now = Date.now()
+  const diff = d.getTime() - now
+  const absDiff = Math.abs(diff)
+  const minutes = Math.floor(absDiff / 60000)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+
+  if (absDiff < 60000) return 'just now'
+  if (minutes < 60) return diff > 0 ? `in ${minutes}m` : `${minutes}m ago`
+  if (hours < 24) return diff > 0 ? `in ${hours}h` : `${hours}h ago`
+  return diff > 0 ? `in ${days}d` : `${days}d ago`
+}
+
+function CronJobCard({
+  job,
+  onPause,
+  onResume,
+  onDelete,
+  isPausing,
+  isResuming,
+  isDeleting,
+}: {
+  job: CronJob
+  onPause: () => void
+  onResume: () => void
+  onDelete: () => void
+  isPausing: boolean
+  isResuming: boolean
+  isDeleting: boolean
+}) {
+  const isPaused = !job.enabled || job.state === 'paused'
+  const statusColor = isPaused ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success'
+  const statusLabel = isPaused ? 'Paused' : 'Active'
+  const schedule = job.schedule?.display || job.schedule_display || '-'
+  const deliverLabel = job.deliver === 'origin' ? (job.origin?.chat_name || 'origin') : job.deliver || '-'
+
+  return (
+    <div className="rounded-lg border border-border bg-surface/30 p-4 hover:bg-surface/50 transition-colors">
+      <div className="flex items-start justify-between mb-2">
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-medium text-text-primary truncate">{job.name || job.id}</h3>
+          <p className="text-xs text-text-tertiary font-mono mt-0.5">{schedule}</p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0 ml-3">
+          <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColor}`}>
+            {statusLabel}
+          </span>
+          {job.last_status && (
+            <span className={`px-2 py-0.5 rounded text-xs ${
+              job.last_status === 'ok' ? 'bg-success-subtle text-success' : 'bg-error-subtle text-error'
+            }`}>
+              {job.last_status === 'ok' ? '✓ OK' : '✗ Error'}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {job.prompt && (
+        <p className="text-xs text-text-secondary mb-3 line-clamp-2 whitespace-pre-wrap">{job.prompt}</p>
+      )}
+
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-tertiary mb-3">
+        {job.last_run_at && (
+          <span>Last run: <span className="text-text-secondary">{formatRelativeTime(job.last_run_at)}</span></span>
+        )}
+        {job.next_run_at && (
+          <span>Next run: <span className="text-text-secondary">{formatRelativeTime(job.next_run_at)}</span></span>
+        )}
+        <span>Deliver: <span className="text-text-secondary">{deliverLabel}</span></span>
+        {job.repeat?.completed != null && (
+          <span>Runs: <span className="text-text-secondary">{job.repeat.completed}</span></span>
+        )}
+        {job.skills && job.skills.length > 0 && (
+          <span>Skills: <span className="text-text-secondary">{job.skills.join(', ')}</span></span>
+        )}
+        {job.model && (
+          <span>Model: <span className="text-text-secondary">{job.model}</span></span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-2">
+        {isPaused ? (
+          <button
+            onClick={onResume}
+            disabled={isResuming}
+            className="px-3 py-1 text-xs rounded bg-success-subtle text-success hover:bg-success/20 disabled:opacity-50 transition-colors"
+          >
+            {isResuming ? 'Resuming…' : '▶ Resume'}
+          </button>
+        ) : (
+          <button
+            onClick={onPause}
+            disabled={isPausing}
+            className="px-3 py-1 text-xs rounded bg-warning-subtle text-warning hover:bg-warning/20 disabled:opacity-50 transition-colors"
+          >
+            {isPausing ? 'Pausing…' : '⏸ Pause'}
+          </button>
+        )}
+        <button
+          onClick={onDelete}
+          disabled={isDeleting}
+          className="px-3 py-1 text-xs rounded bg-error-subtle text-error hover:bg-error/20 disabled:opacity-50 transition-colors"
+        >
+          {isDeleting ? 'Deleting…' : '🗑 Delete'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function CronPage() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['cron-jobs'],
+    queryFn: async () => {
+      const res = await fetch('/api/cron')
+      if (!res.ok) throw new Error('Failed to load cron jobs')
+      return res.json() as Promise<{ jobs: CronJob[] }>
+    },
+    refetchInterval: 10000,
+  })
+
+  const pauseMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await fetch(`/api/cron/${jobId}/pause`, { method: 'POST' })
+      return res.json()
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
+  })
+
+  const resumeMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await fetch(`/api/cron/${jobId}/resume`, { method: 'POST' })
+      return res.json()
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await fetch(`/api/cron/${jobId}`, { method: 'DELETE' })
+      return res.json()
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
+  })
+
+  const jobs = data?.jobs || []
+  const activeCount = jobs.filter(j => j.enabled && j.state !== 'paused').length
+  const pausedCount = jobs.filter(j => !j.enabled || j.state === 'paused').length
+
+  return (
+    <div className="min-h-screen bg-bg-base">
+      <NavBar />
+      <header className="px-6 pt-8 pb-4">
+        <div className="mx-auto max-w-5xl">
+          <div className="flex items-end justify-between">
+            <div>
+              <h1 className="text-h2 font-bold text-text-primary">Cron Jobs</h1>
+              <p className="text-body-sm text-text-secondary mt-1">
+                Manage scheduled tasks and automations
+              </p>
+            </div>
+            {!isLoading && !error && (
+              <div className="flex items-center gap-4 text-sm">
+                <span className="text-text-tertiary">
+                  <span className="text-success font-medium">{activeCount}</span> active
+                </span>
+                {pausedCount > 0 && (
+                  <span className="text-text-tertiary">
+                    <span className="text-warning font-medium">{pausedCount}</span> paused
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+      <main className="mx-auto max-w-5xl px-6 pb-12">
+        {isLoading && (
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <div key={i} className="rounded-lg border border-border bg-surface/20 p-4 animate-skeleton">
+                <div className="h-4 w-40 rounded bg-surface/60 mb-2" />
+                <div className="h-3 w-64 rounded bg-surface/60 mb-3" />
+                <div className="h-8 w-32 rounded bg-surface/60" />
+              </div>
+            ))}
+          </div>
+        )}
+        {error && (
+          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error">
+            Error: {(error as Error).message}
+          </div>
+        )}
+        {!isLoading && !error && jobs.length === 0 && (
+          <div className="rounded-lg border border-border bg-surface/30 p-8 text-center">
+            <p className="text-text-tertiary text-sm">No cron jobs configured.</p>
+            <p className="text-text-tertiary text-xs mt-1">Cron jobs can be created via the Hermes CLI or chat interface.</p>
+          </div>
+        )}
+        {jobs.length > 0 && (
+          <div className="space-y-3">
+            {jobs.map((job) => (
+              <CronJobCard
+                key={job.id}
+                job={job}
+                onPause={() => pauseMutation.mutate(job.id)}
+                onResume={() => resumeMutation.mutate(job.id)}
+                onDelete={() => {
+                  if (window.confirm(`Delete cron job "${job.name || job.id}"? This cannot be undone.`)) {
+                    deleteMutation.mutate(job.id)
+                  }
+                }}
+                isPausing={pauseMutation.isPending && pauseMutation.variables === job.id}
+                isResuming={resumeMutation.isPending && resumeMutation.variables === job.id}
+                isDeleting={deleteMutation.isPending && deleteMutation.variables === job.id}
+              />
+            ))}
+          </div>
+        )}
+      </main>
+    </div>
   )
 }
 
