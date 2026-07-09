@@ -2282,7 +2282,7 @@ function TaskDetailPage() {
                         </a>
                         {isPreviewable(file.type) && (
                           <button
-                            onClick={() => window.open(`/api/tasks/${id}/artifacts/${encodeURIComponent(file.name)}`, '_blank')}
+                            onClick={() => window.open(`/api/tasks/${id}/artifacts/${encodeURIComponent(file.name)}?preview=true`, '_blank')}
                             className="opacity-0 group-hover:opacity-100 text-xs text-accent hover:text-accent-hover transition"
                           >
                             👁 Preview
