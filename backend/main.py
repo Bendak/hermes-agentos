@@ -238,7 +238,7 @@ async def list_task_artifacts(task_id: str):
 
 
 @app.get("/api/tasks/{task_id}/artifacts/{filename}")
-async def get_task_artifact(task_id: str, filename: str):
+async def get_task_artifact(task_id: str, filename: str, preview: bool = False):
     """Serve a file from task workspace."""
     task = await get_task(task_id)
     if not task:
@@ -259,7 +259,13 @@ async def get_task_artifact(task_id: str, filename: str):
         raise HTTPException(status_code=403, detail="Access denied")
 
     content_type = _guess_content_type(filename)
-    return FileResponse(file_path, filename=filename, media_type=content_type)
+    disposition = "inline" if preview else "attachment"
+    return FileResponse(
+        file_path,
+        filename=filename,
+        media_type=content_type,
+        content_disposition_type=disposition,
+    )
 
 
 @app.post("/api/tasks/bulk")
