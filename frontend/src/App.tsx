@@ -2863,6 +2863,30 @@ function WorkflowEditorPage() {
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [runResults, setRunResults] = useState<Record<string, string>>({})
   const loadedRef = useRef(false)
+  const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set())
+  const [runDetails, setRunDetails] = useState<Record<string, any>>({})
+
+  const fetchRunDetail = async (runId: string) => {
+    if (runDetails[runId]) return
+    const res = await fetch(`/api/runs/${runId}`)
+    if (res.ok) {
+      const data = await res.json()
+      setRunDetails(prev => ({ ...prev, [runId]: data }))
+    }
+  }
+
+  const toggleRun = (runId: string) => {
+    setExpandedRuns(prev => {
+      const next = new Set(prev)
+      if (next.has(runId)) {
+        next.delete(runId)
+      } else {
+        next.add(runId)
+        fetchRunDetail(runId)
+      }
+      return next
+    })
+  }
 
   // Load workflow
   const { data: workflow, isLoading } = useQuery<Workflow>({
@@ -3392,16 +3416,80 @@ function WorkflowEditorPage() {
       {runs && runs.length > 0 && (
         <div className="border-t border-border p-4 bg-bg-elevated/60">
           <h3 className="text-sm font-semibold text-text-secondary mb-2">Run History</h3>
-          <div className="space-y-1">
-            {runs.slice(0, 10).map((run: any) => (
-              <div key={run.id} className="flex items-center gap-2 text-xs">
-                <span className={run.status === 'completed' ? 'text-emerald-400' : 'text-red-400'}>
-                  {run.status === 'completed' ? '✅' : '❌'}
-                </span>
-                <span className="text-text-secondary font-mono">{run.id}</span>
-                <span className="text-text-tertiary">{formatTime(run.started_at)}</span>
-              </div>
-            ))}
+          <div className="space-y-2">
+            {runs.slice(0, 10).map((run: any) => {
+              const isExpanded = expandedRuns.has(run.id)
+              const detail = runDetails[run.id]
+              const duration = run.finished_at ? calculateDuration(run.started_at, run.finished_at) : null
+
+              return (
+                <div key={run.id} className="rounded border border-border">
+                  {/* Header - clickable */}
+                  <div
+                    className="flex items-center gap-2 text-xs p-2 cursor-pointer hover:bg-surface/40"
+                    onClick={() => toggleRun(run.id)}
+                  >
+                    <span className="text-text-tertiary">{isExpanded ? '▼' : '▶'}</span>
+                    <span className={run.status === 'completed' ? 'text-emerald-400' : 'text-red-400'}>
+                      {run.status === 'completed' ? '✅' : '❌'}
+                    </span>
+                    <span className="text-text-secondary font-mono flex-1">{run.id}</span>
+                    <span className="text-text-tertiary">{formatTime(run.started_at)}</span>
+                    {duration && <span className="text-text-tertiary">{duration}</span>}
+                  </div>
+
+                  {/* Expanded detail */}
+                  {isExpanded && detail && (
+                    <div className="p-3 bg-bg-base/40 border-t border-border">
+                      {/* Summary stats */}
+                      <div className="flex gap-4 text-xs mb-3">
+                        <span className="text-emerald-400">✅ {detail.result?.executed_nodes || 0} executed</span>
+                        <span className="text-text-tertiary">⏭️ {detail.result?.skipped_nodes || 0} skipped</span>
+                        <span className="text-text-secondary">📊 {detail.result?.total_nodes || 0} total</span>
+                      </div>
+
+                      {/* Node results */}
+                      {detail.result?.node_results && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium text-text-secondary">Node Execution:</p>
+                          {detail.result.node_results.map((node: any) => (
+                            <div key={node.node_id} className="flex items-start gap-2 pl-2">
+                              <span className={node.status === 'completed' ? 'text-emerald-400' : node.status === 'skipped' ? 'text-text-tertiary' : 'text-red-400'}>
+                                {node.status === 'completed' ? '✅' : node.status === 'skipped' ? '⏭️' : '❌'}
+                              </span>
+                              <div className="flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-medium text-text-primary">{node.label}</span>
+                                  <span className="text-xs text-text-tertiary capitalize px-1 rounded bg-surface">{node.node_type}</span>
+                                </div>
+                                {node.output && (
+                                  <pre className="text-xs text-text-secondary mt-1 font-mono bg-bg-base p-2 rounded overflow-x-auto">
+                                    {JSON.stringify(node.output, null, 2)}
+                                  </pre>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Context variables */}
+                      {detail.result?.context && Object.keys(detail.result.context).length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-border">
+                          <p className="text-xs font-medium text-text-secondary mb-1">Context Variables:</p>
+                          {Object.entries(detail.result.context).map(([k, v]) => (
+                            <div key={k} className="flex gap-2 text-xs">
+                              <span className="text-accent font-mono">{k}:</span>
+                              <span className="text-text-secondary">{String(v)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
