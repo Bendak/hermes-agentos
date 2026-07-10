@@ -8,6 +8,40 @@ import { CSS } from '@dnd-kit/utilities'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
+import { Light as SyntaxHighlighter } from 'react-syntax-highlighter'
+import monokai from 'react-syntax-highlighter/dist/esm/styles/hljs/monokai'
+import typescriptLang from 'react-syntax-highlighter/dist/esm/languages/hljs/typescript'
+import pythonLang from 'react-syntax-highlighter/dist/esm/languages/hljs/python'
+import javascriptLang from 'react-syntax-highlighter/dist/esm/languages/hljs/javascript'
+import yamlLang from 'react-syntax-highlighter/dist/esm/languages/hljs/yaml'
+import jsonLang from 'react-syntax-highlighter/dist/esm/languages/hljs/json'
+import bashLang from 'react-syntax-highlighter/dist/esm/languages/hljs/bash'
+import cssLang from 'react-syntax-highlighter/dist/esm/languages/hljs/css'
+import xmlLang from 'react-syntax-highlighter/dist/esm/languages/hljs/xml'
+import goLang from 'react-syntax-highlighter/dist/esm/languages/hljs/go'
+import rustLang from 'react-syntax-highlighter/dist/esm/languages/hljs/rust'
+import rubyLang from 'react-syntax-highlighter/dist/esm/languages/hljs/ruby'
+import sqlLang from 'react-syntax-highlighter/dist/esm/languages/hljs/sql'
+import dockerfileLang from 'react-syntax-highlighter/dist/esm/languages/hljs/dockerfile'
+import shellLang from 'react-syntax-highlighter/dist/esm/languages/hljs/shell'
+
+SyntaxHighlighter.registerLanguage('typescript', typescriptLang)
+SyntaxHighlighter.registerLanguage('tsx', typescriptLang)
+SyntaxHighlighter.registerLanguage('jsx', javascriptLang)
+SyntaxHighlighter.registerLanguage('python', pythonLang)
+SyntaxHighlighter.registerLanguage('javascript', javascriptLang)
+SyntaxHighlighter.registerLanguage('yaml', yamlLang)
+SyntaxHighlighter.registerLanguage('json', jsonLang)
+SyntaxHighlighter.registerLanguage('bash', bashLang)
+SyntaxHighlighter.registerLanguage('sh', shellLang)
+SyntaxHighlighter.registerLanguage('css', cssLang)
+SyntaxHighlighter.registerLanguage('html', xmlLang)
+SyntaxHighlighter.registerLanguage('xml', xmlLang)
+SyntaxHighlighter.registerLanguage('go', goLang)
+SyntaxHighlighter.registerLanguage('rust', rustLang)
+SyntaxHighlighter.registerLanguage('ruby', rubyLang)
+SyntaxHighlighter.registerLanguage('sql', sqlLang)
+SyntaxHighlighter.registerLanguage('dockerfile', dockerfileLang)
 import '@xyflow/react/dist/style.css'
 import { ReactFlow, Handle, Position, Controls, Background, type NodeProps, type Node, type Connection, addEdge, useNodesState, useEdgesState, BackgroundVariant } from '@xyflow/react'
 
@@ -1099,6 +1133,175 @@ function MarkdownRenderer({ content }: { content: string }) {
     >
       {content}
     </ReactMarkdown>
+    </div>
+  )
+}
+
+/* ── Artifact Preview ──────────────────────────────── */
+
+const CODE_EXTENSIONS = new Set([
+  '.py', '.js', '.ts', '.tsx', '.jsx', '.yaml', '.yml', '.json',
+  '.sh', '.bash', '.css', '.html', '.xml', '.toml', '.ini', '.cfg',
+  '.sql', '.go', '.rs', '.java', '.c', '.cpp', '.h', '.hpp', '.rb',
+  '.php', '.swift', '.kt', '.scala', '.r', '.lua', '.pl', '.dockerfile',
+  '.makefile', '.vue', '.svelte',
+])
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.webm', '.mov'])
+const AUDIO_EXTENSIONS = new Set(['.mp3', '.wav', '.ogg', '.m4a'])
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'])
+const MARKDOWN_EXTENSIONS = new Set(['.md', '.markdown'])
+
+function getFileExtension(filename: string): string {
+  const dot = filename.lastIndexOf('.')
+  return dot >= 0 ? filename.slice(dot).toLowerCase() : ''
+}
+
+function getLanguageFromExt(ext: string): string {
+  const map: Record<string, string> = {
+    '.py': 'python', '.js': 'javascript', '.ts': 'typescript',
+    '.tsx': 'tsx', '.jsx': 'jsx', '.yaml': 'yaml', '.yml': 'yaml',
+    '.json': 'json', '.sh': 'bash', '.bash': 'bash', '.css': 'css',
+    '.html': 'html', '.xml': 'xml', '.toml': 'toml', '.sql': 'sql',
+    '.go': 'go', '.rs': 'rust', '.java': 'java', '.c': 'c',
+    '.cpp': 'cpp', '.rb': 'ruby', '.php': 'php', '.swift': 'swift',
+    '.kt': 'kotlin', '.scala': 'scala', '.r': 'r', '.lua': 'lua',
+    '.pl': 'perl', '.vue': 'vue', '.svelte': 'svelte',
+  }
+  return map[ext] || 'text'
+}
+
+function ArtifactPreview({ filename, taskId }: { filename: string; taskId: string }) {
+  const [mode, setMode] = useState<'preview' | 'raw'>('preview')
+  const ext = getFileExtension(filename)
+  const isCode = CODE_EXTENSIONS.has(ext)
+  const isVideo = VIDEO_EXTENSIONS.has(ext)
+  const isAudio = AUDIO_EXTENSIONS.has(ext)
+  const isImage = IMAGE_EXTENSIONS.has(ext)
+  const isMarkdown = MARKDOWN_EXTENSIONS.has(ext)
+  const isPdf = ext === '.pdf'
+  // Binary formats that can't be fetched as text
+  const isBinary = isVideo || isAudio || isImage || isPdf
+  const previewUrl = `/api/tasks/${taskId}/artifacts/${encodeURIComponent(filename)}?preview=true`
+
+  const { data: content, isLoading } = useQuery({
+    queryKey: ['artifact-content', taskId, filename],
+    queryFn: async () => {
+      const res = await fetch(previewUrl)
+      if (!res.ok) throw new Error('Failed to fetch artifact')
+      return res.text()
+    },
+    enabled: !isBinary,
+    staleTime: 60000,
+  })
+
+  const showToggle = isCode || isMarkdown || (!isBinary && !isCode && !isMarkdown)
+
+  return (
+    <div className="mt-2 rounded-lg border border-border bg-surface/20 overflow-hidden">
+      {/* Toggle header */}
+      {showToggle && (
+        <div className="flex items-center gap-1 px-3 py-1.5 border-b border-border bg-bg-base/50">
+          <button
+            onClick={() => setMode('preview')}
+            className={`px-2 py-0.5 text-xs rounded transition ${mode === 'preview' ? 'bg-accent/20 text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
+          >
+            Preview
+          </button>
+          <button
+            onClick={() => setMode('raw')}
+            className={`px-2 py-0.5 text-xs rounded transition ${mode === 'raw' ? 'bg-accent/20 text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
+          >
+            Raw
+          </button>
+          <span className="ml-auto text-xs text-text-tertiary">{filename}</span>
+        </div>
+      )}
+
+      {/* Preview content */}
+      <div className="p-0">
+        {isLoading && (
+          <p className="text-xs text-text-tertiary p-3">Loading preview…</p>
+        )}
+
+        {/* Raw mode */}
+        {mode === 'raw' && content && (
+          <pre className="bg-bg-base p-3 text-xs text-text-secondary overflow-auto max-h-[32rem] font-mono whitespace-pre-wrap break-all">
+            {content}
+          </pre>
+        )}
+
+        {/* Markdown preview */}
+        {mode === 'preview' && isMarkdown && content && (
+          <div className="p-3">
+            <MarkdownRenderer content={content} />
+          </div>
+        )}
+
+        {/* Code preview */}
+        {mode === 'preview' && isCode && content && (
+          <div className="bg-bg-base">
+            <SyntaxHighlighter
+              language={getLanguageFromExt(ext)}
+              style={monokai}
+              customStyle={{
+                margin: 0,
+                background: '#0B1120',
+                fontSize: '0.75rem',
+                maxHeight: '32rem',
+              }}
+              showLineNumbers
+              wrapLongLines
+            >
+              {content}
+            </SyntaxHighlighter>
+          </div>
+        )}
+
+        {/* Video preview */}
+        {isVideo && (
+          <div className="p-3">
+            <video
+              controls
+              src={previewUrl}
+              className="max-w-full max-h-96 rounded border border-border"
+            />
+          </div>
+        )}
+
+        {/* Audio preview */}
+        {isAudio && (
+          <div className="p-3">
+            <audio controls src={previewUrl} className="w-full" />
+          </div>
+        )}
+
+        {/* Image preview */}
+        {isImage && (
+          <div className="p-3">
+            <img
+              src={previewUrl}
+              alt={filename}
+              className="max-w-full rounded border border-border"
+            />
+          </div>
+        )}
+
+        {/* PDF preview */}
+        {isPdf && (
+          <iframe
+            src={previewUrl}
+            title={filename}
+            className="w-full h-[32rem] border-0"
+          />
+        )}
+
+        {/* Fallback: plain text for unknown types in preview mode */}
+        {mode === 'preview' && !isCode && !isMarkdown && !isBinary && content && (
+          <pre className="bg-bg-base p-3 text-xs text-text-secondary overflow-auto max-h-[32rem] font-mono whitespace-pre-wrap break-all">
+            {content}
+          </pre>
+        )}
+      </div>
     </div>
   )
 }
@@ -2295,6 +2498,7 @@ function TaskDetailPage() {
   const [commentText, setCommentText] = useState('')
   const [commentAuthor, setCommentAuthor] = useState('agentos')
   const [expandedRuns, setExpandedRuns] = useState<Set<number>>(new Set())
+  const [previewFile, setPreviewFile] = useState<string | null>(null)
 
   const toggleRun = (runId: number) => {
     setExpandedRuns(prev => {
@@ -2732,26 +2936,29 @@ function TaskDetailPage() {
                   <div className="space-y-1">
                     <p className="text-xs text-text-tertiary mb-2">{artifacts.workspace_path}</p>
                     {artifacts.files.map((file: any) => (
-                      <div key={file.name} className="flex items-center gap-3 p-2 rounded hover:bg-surface/40 group">
-                        <span className="text-lg">{fileIcon(file.type)}</span>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm text-text-primary truncate">{file.name}</p>
-                          <p className="text-xs text-text-tertiary">{formatFileSize(file.size)} • {formatTime(file.modified)}</p>
-                        </div>
-                        <a
-                          href={`/api/tasks/${id}/artifacts/${encodeURIComponent(file.name)}`}
-                          download
-                          className="opacity-0 group-hover:opacity-100 text-xs text-accent hover:text-accent-hover transition"
-                        >
-                          ⬇ Download
-                        </a>
-                        {isPreviewable(file.type) && (
-                          <button
-                            onClick={() => window.open(`/api/tasks/${id}/artifacts/${encodeURIComponent(file.name)}?preview=true`, '_blank')}
+                      <div key={file.name}>
+                        <div className="flex items-center gap-3 p-2 rounded hover:bg-surface/40 group">
+                          <span className="text-lg">{fileIcon(file.type)}</span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm text-text-primary truncate">{file.name}</p>
+                            <p className="text-xs text-text-tertiary">{formatFileSize(file.size)} • {formatTime(file.modified)}</p>
+                          </div>
+                          <a
+                            href={`/api/tasks/${id}/artifacts/${encodeURIComponent(file.name)}`}
+                            download
                             className="opacity-0 group-hover:opacity-100 text-xs text-accent hover:text-accent-hover transition"
                           >
-                            👁 Preview
+                            ⬇ Download
+                          </a>
+                          <button
+                            onClick={() => setPreviewFile(previewFile === file.name ? null : file.name)}
+                            className="opacity-0 group-hover:opacity-100 text-xs text-accent hover:text-accent-hover transition"
+                          >
+                            {previewFile === file.name ? '✕ Close' : '👁 Preview'}
                           </button>
+                        </div>
+                        {previewFile === file.name && id && (
+                          <ArtifactPreview filename={file.name} taskId={id} />
                         )}
                       </div>
                     ))}
@@ -3203,10 +3410,6 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-function isPreviewable(type: string): boolean {
-  return type.startsWith('image/') || type === 'application/pdf' || type.startsWith('text/')
 }
 
 const nodeColors: Record<string, { bg: string; border: string; icon: string }> = {
