@@ -793,6 +793,193 @@ function SessionsPage() {
   )
 }
 
+/* ── Task Session Log Viewer ─────────────────────── */
+
+function TaskSessionLog({ taskId }: { taskId: string }) {
+  const [isOpen, setIsOpen] = useState(false)
+  const { data, isLoading } = useQuery({
+    queryKey: ['task-logs', taskId],
+    queryFn: () => fetch(`/api/tasks/${taskId}/logs`).then(r => r.json()),
+    enabled: isOpen,
+    refetchInterval: isOpen ? 10000 : false,
+  })
+
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="text-xs text-accent hover:text-accent/80 transition flex items-center gap-1"
+      >
+        <span>📋</span> Show session log
+      </button>
+    )
+  }
+
+  const logContent = data?.content as string | null
+  const truncated = data?.truncated as boolean
+
+  return (
+    <div className="mt-3">
+      <div className="flex items-center justify-between mb-2">
+        <h4 className="text-sm font-medium text-text-secondary">Session Log</h4>
+        <button
+          onClick={() => setIsOpen(false)}
+          className="text-xs text-text-tertiary hover:text-text-secondary transition"
+        >
+          Hide log
+        </button>
+      </div>
+      {isLoading ? (
+        <p className="text-xs text-text-tertiary italic">Loading log…</p>
+      ) : !logContent ? (
+        <p className="text-xs text-text-tertiary italic">No log available for this task.</p>
+      ) : (
+        <>
+          {truncated && (
+            <p className="text-xs text-warning mb-2">⚠ Log truncated (showing last ~100KB)</p>
+          )}
+          <LogRenderer content={logContent} />
+        </>
+      )}
+    </div>
+  )
+}
+
+function LogRenderer({ content }: { content: string }) {
+  const lines = content.split('\n')
+  const elements: React.ReactNode[] = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Reasoning block: ┌─ Reasoning ─┐ ... └───┘
+    if (/^┌─.*─┐/.test(line)) {
+      const reasoningLines: string[] = []
+      i++
+      while (i < lines.length && !/^└─.*─┘/.test(lines[i])) {
+        reasoningLines.push(lines[i])
+        i++
+      }
+      if (i < lines.length) i++ // skip closing └───┘
+      elements.push(
+        <div key={elements.length} className="border-l-2 border-accent pl-3 py-2 bg-surface/30 rounded-r my-1">
+          <pre className="text-xs text-text-secondary whitespace-pre-wrap">{reasoningLines.join('\n')}</pre>
+        </div>
+      )
+      continue
+    }
+
+    // Hermes message block: ╭─ ... ╮ ... ╰─...─╯
+    if (/^╭─/.test(line)) {
+      const msgLines: string[] = []
+      i++
+      while (i < lines.length && !/^╰─/.test(lines[i])) {
+        msgLines.push(lines[i])
+        i++
+      }
+      if (i < lines.length) i++ // skip closing ╰───╯
+      elements.push(
+        <div key={elements.length} className="border-l-2 border-accent pl-3 py-2 bg-accent-subtle/20 rounded-r my-1">
+          <pre className="text-xs text-text-primary whitespace-pre-wrap">{msgLines.join('\n')}</pre>
+        </div>
+      )
+      continue
+    }
+
+    // Tool call: ┊ 📋 preparing ... or ┊ ⚡ ...
+    if (/^\s*┊\s*📋/.test(line)) {
+      const match = line.match(/┊\s*📋\s*preparing\s+(\S+)/)
+      elements.push(
+        <div key={elements.length} className="flex items-center gap-1.5 my-0.5">
+          <span className="inline-flex items-center px-2 py-0.5 rounded bg-surface text-text-secondary text-xs border border-border">
+            📋 {match?.[1] || 'preparing'}
+          </span>
+        </div>
+      )
+      i++
+      continue
+    }
+
+    // Tool result: ┊ ⚡ tool_name ... 0.0s
+    if (/^\s*┊\s*⚡/.test(line)) {
+      const match = line.match(/┊\s*⚡\s*(\S+)\s+(.*)/)
+      elements.push(
+        <div key={elements.length} className="flex items-center gap-1.5 my-0.5 ml-4">
+          <span className="inline-flex items-center px-2 py-0.5 rounded bg-accent-subtle text-accent text-xs font-medium">
+            ⚡ {match?.[1] || 'tool'}
+          </span>
+          {match?.[2] && <span className="text-xs text-text-tertiary">{match[2].trim()}</span>}
+        </div>
+      )
+      i++
+      continue
+    }
+
+    // Terminal command: ┊ 💻 $ command ... 0.0s
+    if (/^\s*┊\s*💻\s*\$/.test(line)) {
+      const match = line.match(/┊\s*💻\s*\$\s+(.*)/)
+      elements.push(
+        <div key={elements.length} className="font-mono text-xs bg-bg-base p-1.5 rounded border border-border my-0.5 ml-4">
+          <span className="text-success">$</span> <span className="text-text-primary">{match?.[1]?.trim() || ''}</span>
+        </div>
+      )
+      i++
+      continue
+    }
+
+    // Terminal preparing: ┊ 💻 preparing terminal…
+    if (/^\s*┊\s*💻\s*preparing/.test(line)) {
+      elements.push(
+        <div key={elements.length} className="flex items-center gap-1.5 my-0.5">
+          <span className="inline-flex items-center px-2 py-0.5 rounded bg-surface text-text-tertiary text-xs border border-border">
+            💻 preparing terminal…
+          </span>
+        </div>
+      )
+      i++
+      continue
+    }
+
+    // Kanban success: ┊ ✔ ...
+    if (/^\s*┊\s*✔/.test(line)) {
+      elements.push(
+        <div key={elements.length} className="flex items-center gap-1.5 my-0.5">
+          <span className="inline-flex items-center px-2 py-0.5 rounded bg-success-subtle text-success text-xs">
+            ✔ {line.replace(/^\s*┊\s*✔\s*/, '')}
+          </span>
+        </div>
+      )
+      i++
+      continue
+    }
+
+    // Session summary lines (skip noise)
+    if (/^(Resume this session|Session:|Duration:|Messages:)/.test(line.trim())) {
+      elements.push(
+        <div key={elements.length} className="text-xs text-text-tertiary my-0.5">{line.trim()}</div>
+      )
+      i++
+      continue
+    }
+
+    // Regular text (skip empty lines and warnings)
+    const trimmed = line.trim()
+    if (trimmed && !trimmed.startsWith('Warning:')) {
+      elements.push(
+        <div key={elements.length} className="text-xs text-text-secondary my-0.5">{trimmed}</div>
+      )
+    }
+    i++
+  }
+
+  return (
+    <div className="max-h-96 overflow-y-auto rounded border border-border bg-bg-base/60 p-3 space-y-0.5">
+      {elements}
+    </div>
+  )
+}
+
 /* ── Run Metadata Display ──────────────────────────── */
 
 function RunMetadata({ meta }: { meta: Record<string, any> }) {
@@ -2427,6 +2614,8 @@ function TaskDetailPage() {
                                       <pre className="text-xs text-error font-mono whitespace-pre-wrap">{run.error}</pre>
                                     </div>
                                   )}
+                                  {/* Session Log */}
+                                  <TaskSessionLog taskId={data.id} />
                                   {/* Empty state */}
                                   {!run.summary && !run.metadata && !run.error && (
                                     <p className="text-sm text-text-tertiary italic">No additional details for this run.</p>
