@@ -270,6 +270,26 @@ async def get_task_artifact(task_id: str, filename: str, preview: bool = False):
     )
 
 
+@app.get("/api/tasks/{task_id}/logs")
+async def get_task_logs(task_id: str):
+    """Return worker session log for a task."""
+    log_path = f"/opt/data/kanban/logs/{task_id}.log"
+    if not os.path.exists(log_path):
+        return {"content": None, "size": 0}
+    size = os.path.getsize(log_path)
+    # Read last 100KB max (like Hermes kanban UI)
+    max_bytes = 100 * 1024
+    with open(log_path, "r", errors="replace") as f:
+        if size > max_bytes:
+            f.seek(size - max_bytes)
+            content = f.read()
+            truncated = True
+        else:
+            content = f.read()
+            truncated = False
+    return {"content": content, "size": size, "truncated": truncated}
+
+
 @app.post("/api/tasks/bulk")
 async def tasks_bulk(body: dict):
     ids = body.get("ids")
