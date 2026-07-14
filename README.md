@@ -31,13 +31,57 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 
 ## Screenshots
 
-> Dashboard with 6 agent cards (Hermes + 5 sub-profiles)
-> Session detail with chat bubbles, tool call expansion, and reasoning blocks
-> Kanban board with 5 columns and task detail
-> Config editor with inline editing and secret field protection
-> Workflow editor with React Flow canvas
-> Cron job editor with run/pause/resume controls
-> Profile editor with 6 tabs (Model, Agent, Toolsets, Description, Memory, Preview)
+### Login
+
+![Login](screenshots/00-login.png)
+
+### Dashboard — Agent Health Cards
+
+![Dashboard](screenshots/01-dashboard.png)
+
+### Session History
+
+![Sessions](screenshots/02-sessions.png)
+
+### Kanban Board
+
+![Kanban](screenshots/03-kanban.png)
+
+### Config Viewer (with secret redaction)
+
+![Config](screenshots/04-config.png)
+
+### Skills Hub
+
+![Skills Hub](screenshots/05-skills.png)
+
+### Workflow Editor
+
+![Workflows](screenshots/06-workflows.png)
+
+### Cron Job Editor
+
+![Cron Jobs](screenshots/07-cron.png)
+
+### Profile Editor — Grid
+
+![Profiles](screenshots/08-profiles.png)
+
+### User Management
+
+![User Management](screenshots/09-settings.png)
+
+### Profile Editor — Model Tab
+
+![Profile Editor - Model](screenshots/10-profile-editor-model.png)
+
+### Profile Editor — Toolsets Tab
+
+![Profile Editor - Toolsets](screenshots/11-profile-editor-toolsets.png)
+
+### Profile Editor — YAML Preview Tab
+
+![Profile Editor - Preview](screenshots/12-profile-editor-preview.png)
 
 ## Quick Start (Dev Mode)
 

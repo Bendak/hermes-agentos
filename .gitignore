@@ -14,7 +14,9 @@ dist/
 /tmp/playwright-screenshots/
 *.pyc
 .venv/
-screenshots/
+
+# Only ignore temp screenshots, keep README screenshots
+/screenshots/temp/
 
 # Temp/backup files
 *.tmp
