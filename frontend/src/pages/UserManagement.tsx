@@ -10,6 +10,13 @@ interface UserRecord {
   created_at: string
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const token = localStorage.getItem('agentos_access_token')
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  return headers
+}
+
 export default function UserManagement() {
   const { user } = useAuth()
   const queryClient = useQueryClient()
@@ -19,7 +26,7 @@ export default function UserManagement() {
   const { data: usersData, isLoading } = useQuery({
     queryKey: ['users'],
     queryFn: async () => {
-      const res = await fetch('/api/auth/users')
+      const res = await fetch('/api/auth/users', { headers: getAuthHeaders() })
       if (!res.ok) throw new Error('Failed to fetch users')
       return res.json() as Promise<{ users: UserRecord[] }>
     },
@@ -38,7 +45,7 @@ export default function UserManagement() {
 
   const deleteMutation = useMutation({
     mutationFn: async (userId: number) => {
-      const res = await fetch(`/api/auth/users/${userId}`, { method: 'DELETE' })
+      const res = await fetch(`/api/auth/users/${userId}`, { method: 'DELETE', headers: getAuthHeaders() })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: 'Delete failed' }))
         throw new Error(err.detail || 'Delete failed')
@@ -213,7 +220,7 @@ function ChangePasswordDialog({
       if (isSelf) body.current_password = currentPw
       const res = await fetch(url, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify(body),
       })
       if (!res.ok) {
@@ -313,7 +320,7 @@ function CreateUserDialog({
     try {
       const res = await fetch('/api/auth/register', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
         body: JSON.stringify({ username, password, role }),
       })
       if (!res.ok) {
