@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '../auth/AuthContext'
+import { NavBar } from '../App'
 
 interface UserRecord {
   id: number
@@ -58,7 +59,9 @@ export default function UserManagement() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6">
+    <div className="min-h-screen bg-bg-base text-text-secondary">
+      <NavBar />
+      <div className="mx-auto max-w-7xl px-4 sm:px-6 py-6">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -155,6 +158,7 @@ export default function UserManagement() {
           error={deleteMutation.error?.message}
         />
       )}
+      </div>
     </div>
   )
 }
