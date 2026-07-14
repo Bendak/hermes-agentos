@@ -2,7 +2,7 @@ import os
 from contextlib import suppress
 from datetime import datetime
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -11,8 +11,28 @@ from backend.agents import get_profiles, get_profile_detail, check_process_alive
 from backend.config import settings
 from backend.config_viewer import get_config, update_config
 from backend.skills_hub import list_skills, get_skill_detail, list_profiles_summary
+from backend.profiles import router as profiles_router
+from backend.auth import (
+    require_auth,
+    require_admin,
+    create_access_token,
+    create_refresh_token,
+    verify_token,
+    get_user_by_username,
+    get_user_by_id,
+    create_user,
+    users_exist,
+    hash_password,
+    verify_password,
+    list_all_users,
+    update_user_password,
+    delete_user,
+)
 
 app = FastAPI(title="AgentOS", version="0.1.0")
+
+# Register profile editor router
+app.include_router(profiles_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -23,13 +43,163 @@ app.add_middleware(
 )
 
 
+# ── Auth routes (public) ────────────────────────────────────────────
+
+@app.post("/api/auth/login")
+async def auth_login(body: dict):
+    """Authenticate user and return tokens."""
+    username = body.get("username", "")
+    password = body.get("password", "")
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Username and password required")
+
+    user = get_user_by_username(username)
+    if not user or not verify_password(password, user["password_hash"]):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+
+    access_token = create_access_token(user["id"], user["role"])
+    refresh_token = create_refresh_token(user["id"])
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "user": {
+            "id": user["id"],
+            "username": user["username"],
+            "role": user["role"],
+        },
+    }
+
+
+@app.post("/api/auth/refresh")
+async def auth_refresh(body: dict):
+    """Refresh an access token using a refresh token."""
+    refresh_token = body.get("refresh_token", "")
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="Refresh token required")
+
+    try:
+        payload = verify_token(refresh_token)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+    if payload.get("type") != "refresh":
+        raise HTTPException(status_code=401, detail="Invalid token type")
+
+    user = get_user_by_id(int(payload["sub"]))
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    access_token = create_access_token(user["id"], user["role"])
+    return {"access_token": access_token}
+
+
+@app.post("/api/auth/register")
+async def auth_register(body: dict, request: Request):
+    """Register a new user. Admin only, or no-auth on first run."""
+    # First-run bootstrap: if no users exist, skip auth
+    if not users_exist():
+        pass  # proceed without requiring admin
+    else:
+        # Verify admin auth
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Authentication required")
+        try:
+            payload = verify_token(auth_header[7:])
+            if payload.get("type") != "access":
+                raise HTTPException(status_code=401, detail="Invalid token type")
+            admin_user = get_user_by_id(int(payload["sub"]))
+            if not admin_user or admin_user["role"] != "admin":
+                raise HTTPException(status_code=403, detail="Admin access required")
+        except ValueError as e:
+            raise HTTPException(status_code=401, detail=str(e))
+
+    username = body.get("username", "")
+    password = body.get("password", "")
+    role = body.get("role", "admin")
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Username and password required")
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    if role not in ("admin", "viewer"):
+        raise HTTPException(status_code=400, detail="Role must be 'admin' or 'viewer'")
+
+    try:
+        new_user = create_user(username, password, role)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    return {
+        "user": {
+            "id": new_user["id"],
+            "username": new_user["username"],
+            "role": new_user["role"],
+        },
+        "message": "User created successfully",
+    }
+
+
+# First-run register endpoint (no auth required)
+@app.post("/api/auth/register-first")
+async def auth_register_first(body: dict):
+    """Create the first admin user. Only works when no users exist."""
+    if users_exist():
+        raise HTTPException(status_code=403, detail="Users already exist. Use /api/auth/register with admin auth.")
+
+    username = body.get("username", "")
+    password = body.get("password", "")
+
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Username and password required")
+    if len(password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+
+    try:
+        new_user = create_user(username, password, "admin")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+    # Auto-login: return tokens immediately
+    access_token = create_access_token(new_user["id"], new_user["role"])
+    refresh_token = create_refresh_token(new_user["id"])
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "user": {
+            "id": new_user["id"],
+            "username": new_user["username"],
+            "role": new_user["role"],
+        },
+        "message": "First admin user created successfully",
+    }
+
+
+@app.get("/api/auth/me")
+async def auth_me(user: dict = Depends(require_auth)):
+    """Return current user info."""
+    return {"user": user}
+
+
+@app.get("/api/auth/check")
+async def auth_check():
+    """Check if any users exist (for first-run detection). No auth required."""
+    return {"users_exist": users_exist()}
+
+
+# ── Health endpoint (public) ────────────────────────────────────────
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok", "version": "0.1.0"}
 
 
+# ── Protected API routes ────────────────────────────────────────────
+
 @app.get("/api/agents")
-async def list_agents() -> list[dict]:
+async def list_agents(user: dict = Depends(require_auth)) -> list[dict]:
     profiles = get_profiles()
     from backend.sessions import count_sessions_by_profile  # noqa: PLC0415
     session_counts = await count_sessions_by_profile()
@@ -39,7 +209,7 @@ async def list_agents() -> list[dict]:
 
 
 @app.get("/api/agents/{profile_id}")
-async def get_agent(profile_id: str) -> dict:
+async def get_agent(profile_id: str, user: dict = Depends(require_auth)) -> dict:
     detail = await get_profile_detail(profile_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -47,7 +217,7 @@ async def get_agent(profile_id: str) -> dict:
 
 
 @app.get("/api/agents/{profile_id}/health")
-async def get_agent_health(profile_id: str) -> dict:
+async def get_agent_health(profile_id: str, user: dict = Depends(require_auth)) -> dict:
     # Basic process-level health
     profiles = get_profiles()
     profile = next((p for p in profiles if p["id"] == profile_id), None)
@@ -72,6 +242,7 @@ from backend.sessions import list_sessions, get_session, search_sessions_fts, ge
 
 @app.get("/api/sessions")
 async def sessions_list(
+    user: dict = Depends(require_auth),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     search: str | None = Query(default=None),
@@ -83,6 +254,7 @@ async def sessions_list(
 
 @app.get("/api/sessions/search")
 async def sessions_search(
+    user: dict = Depends(require_auth),
     q: str = Query(min_length=1),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[dict]:
@@ -90,7 +262,7 @@ async def sessions_search(
 
 
 @app.get("/api/sessions/{session_id}")
-async def sessions_detail(session_id: str) -> dict:
+async def sessions_detail(session_id: str, user: dict = Depends(require_auth)) -> dict:
     detail = await get_session(session_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -100,6 +272,7 @@ async def sessions_detail(session_id: str) -> dict:
 @app.get("/api/sessions/{session_id}/messages")
 async def session_messages(
     session_id: str,
+    user: dict = Depends(require_auth),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
@@ -125,7 +298,7 @@ from backend.tasks import (  # noqa: E402
 )
 
 @app.post("/api/tasks")
-async def create_task_endpoint(body: dict):
+async def create_task_endpoint(body: dict, user: dict = Depends(require_auth)):
     title = body.get("title", "")
     if not title.strip():
         raise HTTPException(status_code=400, detail="'title' is required")
@@ -145,7 +318,7 @@ async def create_task_endpoint(body: dict):
 
 
 @app.patch("/api/tasks/{task_id}")
-async def update_task_endpoint(task_id: str, body: dict):
+async def update_task_endpoint(task_id: str, body: dict, user: dict = Depends(require_auth)):
     # Accept both the legacy {status: "..."} shape and the full partial-update
     # shape ({title, body, assignee, priority, status, project_id, …}).
     # If the only field present is "status" we route through the legacy helper
@@ -161,6 +334,7 @@ async def update_task_endpoint(task_id: str, body: dict):
 
 @app.get("/api/tasks")
 async def tasks_list(
+    user: dict = Depends(require_auth),
     status: str | None = Query(default=None),
     assignee: str | None = Query(default=None),
     include_archived: bool = Query(default=False),
@@ -173,6 +347,7 @@ async def tasks_list(
 
 @app.get("/api/tasks/search")
 async def tasks_search(
+    user: dict = Depends(require_auth),
     q: str = Query(min_length=1),
     limit: int = Query(default=50, ge=1, le=200),
 ) -> list[dict]:
@@ -180,7 +355,7 @@ async def tasks_search(
 
 
 @app.get("/api/tasks/{task_id}")
-async def tasks_detail(task_id: str) -> dict:
+async def tasks_detail(task_id: str, user: dict = Depends(require_auth)) -> dict:
     detail = await get_task(task_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -188,7 +363,7 @@ async def tasks_detail(task_id: str) -> dict:
 
 
 @app.post("/api/tasks/{task_id}/comments")
-async def tasks_add_comment(task_id: str, body: dict):
+async def tasks_add_comment(task_id: str, body: dict, user: dict = Depends(require_auth)):
     text = (body.get("body") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Comment body is required")
@@ -213,7 +388,7 @@ def _guess_content_type(filename: str) -> str:
 
 
 @app.get("/api/tasks/{task_id}/artifacts")
-async def list_task_artifacts(task_id: str):
+async def list_task_artifacts(task_id: str, user: dict = Depends(require_auth)):
     """List files in task workspace."""
     task = await get_task(task_id)
     if not task:
@@ -240,7 +415,7 @@ async def list_task_artifacts(task_id: str):
 
 
 @app.get("/api/tasks/{task_id}/artifacts/{filename}")
-async def get_task_artifact(task_id: str, filename: str, preview: bool = False):
+async def get_task_artifact(task_id: str, filename: str, user: dict = Depends(require_auth), preview: bool = False):
     """Serve a file from task workspace."""
     task = await get_task(task_id)
     if not task:
@@ -271,7 +446,7 @@ async def get_task_artifact(task_id: str, filename: str, preview: bool = False):
 
 
 @app.get("/api/tasks/{task_id}/logs")
-async def get_task_logs(task_id: str):
+async def get_task_logs(task_id: str, user: dict = Depends(require_auth)):
     """Return worker session log for a task."""
     log_path = f"/opt/data/kanban/logs/{task_id}.log"
     if not os.path.exists(log_path):
@@ -291,7 +466,7 @@ async def get_task_logs(task_id: str):
 
 
 @app.post("/api/tasks/bulk")
-async def tasks_bulk(body: dict):
+async def tasks_bulk(body: dict, user: dict = Depends(require_auth)):
     ids = body.get("ids")
     updates = body.get("updates")
     if not isinstance(ids, list) or not ids:
@@ -302,12 +477,12 @@ async def tasks_bulk(body: dict):
 
 
 @app.get("/api/kanban/stats")
-async def kanban_stats() -> dict:
+async def kanban_stats(user: dict = Depends(require_auth)) -> dict:
     return await get_kanban_stats()
 
 
 @app.post("/api/kanban/notify")
-async def kanban_notify(body: dict):
+async def kanban_notify(body: dict, user: dict = Depends(require_auth)):
     """Webhook receiver for dispatcher completion notifications.
 
     The body is stored as a row in ``task_events`` (kind='notify') so it can be
@@ -339,7 +514,7 @@ async def kanban_notify(body: dict):
 # ── Config viewer endpoints ──────────────────────────────────────
 
 @app.get("/api/config")
-async def config_view():
+async def config_view(user: dict = Depends(require_auth)):
     config = await get_config()
     if config is None:
         raise HTTPException(status_code=404, detail="Configuration file not found")
@@ -347,7 +522,7 @@ async def config_view():
 
 
 @app.get("/api/config/raw")
-async def config_raw():
+async def config_raw(user: dict = Depends(require_auth)):
     import yaml as yaml_lib
 
     config = await get_config()
@@ -359,7 +534,7 @@ async def config_raw():
 
 
 @app.patch("/api/config")
-async def config_edit(body: dict):
+async def config_edit(body: dict, user: dict = Depends(require_auth)):
     patches = body.get("patches")
     if not patches or not isinstance(patches, list):
         raise HTTPException(status_code=400, detail="Missing or invalid 'patches' list")
@@ -373,12 +548,12 @@ async def config_edit(body: dict):
 
 
 @app.get("/api/skills")
-async def skills_list():
+async def skills_list(user: dict = Depends(require_auth)):
     return await list_skills()
 
 
 @app.get("/api/skills/{slug}")
-async def skill_detail(slug: str):
+async def skill_detail(slug: str, user: dict = Depends(require_auth)):
     result = await get_skill_detail(slug)
     if result is None:
         raise HTTPException(status_code=404, detail="Skill not found")
@@ -386,7 +561,7 @@ async def skill_detail(slug: str):
 
 
 @app.get("/api/profiles")
-async def profiles_list():
+async def profiles_list(user: dict = Depends(require_auth)):
     return await list_profiles_summary()
 
 
@@ -395,98 +570,19 @@ async def profiles_list():
 from backend.workflows import list_workflows, get_workflow, create_workflow, update_workflow, delete_workflow  # noqa: E402
 from backend.workflow_engine import run_workflow, get_workflow_runs, get_run_detail  # noqa: E402
 
-
 # ── Cron endpoints ────────────────────────────────────────────────
 
-CRON_JOBS_PATH = "/opt/data/cron/jobs.json"
-
-
-def _read_cron_jobs() -> list[dict]:
-    """Read cron jobs from Hermes cron jobs.json."""
-    import json
-    if not os.path.exists(CRON_JOBS_PATH):
-        return []
-    try:
-        with open(CRON_JOBS_PATH) as f:
-            data = json.load(f)
-        return data.get("jobs", [])
-    except (json.JSONDecodeError, OSError):
-        return []
-
-
-def _write_cron_jobs(jobs: list[dict]) -> None:
-    """Write cron jobs back to Hermes cron jobs.json."""
-    import json
-    os.makedirs(os.path.dirname(CRON_JOBS_PATH), exist_ok=True)
-    with open(CRON_JOBS_PATH, "w") as f:
-        json.dump({"jobs": jobs}, f, indent=2, ensure_ascii=False)
-
-
-@app.get("/api/cron")
-async def list_cron():
-    """List all cron jobs."""
-    jobs = _read_cron_jobs()
-    return {"jobs": jobs}
-
-
-@app.get("/api/cron/{job_id}")
-async def get_cron_job(job_id: str):
-    """Get a single cron job by ID."""
-    jobs = _read_cron_jobs()
-    job = next((j for j in jobs if j["id"] == job_id), None)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    return job
-
-
-@app.post("/api/cron/{job_id}/pause")
-async def pause_cron_job(job_id: str):
-    """Pause a cron job."""
-    from datetime import datetime, timezone
-    jobs = _read_cron_jobs()
-    job = next((j for j in jobs if j["id"] == job_id), None)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job["enabled"] = False
-    job["state"] = "paused"
-    job["paused_at"] = datetime.now(timezone.utc).isoformat()
-    _write_cron_jobs(jobs)
-    return {"status": "paused", "job_id": job_id}
-
-
-@app.post("/api/cron/{job_id}/resume")
-async def resume_cron_job(job_id: str):
-    """Resume a cron job."""
-    jobs = _read_cron_jobs()
-    job = next((j for j in jobs if j["id"] == job_id), None)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-    job["enabled"] = True
-    job["state"] = "scheduled"
-    job["paused_at"] = None
-    job["paused_reason"] = None
-    _write_cron_jobs(jobs)
-    return {"status": "resumed", "job_id": job_id}
-
-
-@app.delete("/api/cron/{job_id}")
-async def delete_cron_job(job_id: str):
-    """Delete a cron job."""
-    jobs = _read_cron_jobs()
-    new_jobs = [j for j in jobs if j["id"] != job_id]
-    if len(new_jobs) == len(jobs):
-        raise HTTPException(status_code=404, detail="Job not found")
-    _write_cron_jobs(new_jobs)
-    return {"status": "deleted", "job_id": job_id}
+from backend.cron import router as cron_router  # noqa: E402
+app.include_router(cron_router)
 
 
 @app.get("/api/workflows")
-async def workflows_list():
+async def workflows_list(user: dict = Depends(require_auth)):
     return await list_workflows()
 
 
 @app.get("/api/workflows/{workflow_id}")
-async def workflow_detail(workflow_id: str):
+async def workflow_detail(workflow_id: str, user: dict = Depends(require_auth)):
     result = await get_workflow(workflow_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -494,12 +590,12 @@ async def workflow_detail(workflow_id: str):
 
 
 @app.post("/api/workflows")
-async def workflow_create(body: dict):
+async def workflow_create(body: dict, user: dict = Depends(require_auth)):
     return await create_workflow(body)
 
 
 @app.put("/api/workflows/{workflow_id}")
-async def workflow_update(workflow_id: str, body: dict):
+async def workflow_update(workflow_id: str, body: dict, user: dict = Depends(require_auth)):
     result = await update_workflow(workflow_id, body)
     if result is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -507,7 +603,7 @@ async def workflow_update(workflow_id: str, body: dict):
 
 
 @app.delete("/api/workflows/{workflow_id}")
-async def workflow_delete(workflow_id: str):
+async def workflow_delete(workflow_id: str, user: dict = Depends(require_auth)):
     success = await delete_workflow(workflow_id)
     if not success:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -515,7 +611,7 @@ async def workflow_delete(workflow_id: str):
 
 
 @app.post("/api/workflows/{workflow_id}/run")
-async def workflow_run(workflow_id: str):
+async def workflow_run(workflow_id: str, user: dict = Depends(require_auth)):
     try:
         result = await run_workflow(workflow_id)
     except ValueError as e:
@@ -524,16 +620,66 @@ async def workflow_run(workflow_id: str):
 
 
 @app.get("/api/workflows/{workflow_id}/runs")
-async def workflow_runs_list(workflow_id: str):
+async def workflow_runs_list(workflow_id: str, user: dict = Depends(require_auth)):
     return await get_workflow_runs(workflow_id)
 
 
 @app.get("/api/runs/{run_id}")
-async def run_detail(run_id: str):
+async def run_detail(run_id: str, user: dict = Depends(require_auth)):
     result = await get_run_detail(run_id)
     if result is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return result
+
+
+@app.get("/api/auth/users")
+async def list_users(user: dict = Depends(require_admin)):
+    """List all users. Admin only."""
+    return {"users": list_all_users()}
+
+
+@app.put("/api/auth/password")
+async def change_own_password(body: dict, user: dict = Depends(require_auth)):
+    """Change current user's password."""
+    current_password = body.get("current_password", "")
+    new_password = body.get("new_password", "")
+    if not current_password or not new_password:
+        raise HTTPException(status_code=400, detail="Current and new password required")
+    if len(new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    full_user = get_user_by_id(user["user_id"])
+    if not full_user or not verify_password(current_password, full_user["password_hash"]):
+        raise HTTPException(status_code=403, detail="Current password is incorrect")
+    update_user_password(user["user_id"], new_password)
+    return {"message": "Password updated successfully"}
+
+
+@app.put("/api/auth/users/{target_user_id}/password")
+async def admin_change_password(target_user_id: int, body: dict, user: dict = Depends(require_admin)):
+    """Admin: change another user's password."""
+    new_password = body.get("new_password", "")
+    if not new_password:
+        raise HTTPException(status_code=400, detail="New password required")
+    if len(new_password) < 4:
+        raise HTTPException(status_code=400, detail="Password must be at least 4 characters")
+    target = get_user_by_id(target_user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if not update_user_password(target_user_id, new_password):
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"message": f"Password updated for user {target['username']}"}
+
+
+@app.delete("/api/auth/users/{target_user_id}")
+async def delete_user_endpoint(target_user_id: int, user: dict = Depends(require_admin)):
+    """Admin: delete a user. Cannot delete self."""
+    if target_user_id == user["user_id"]:
+        raise HTTPException(status_code=400, detail="Cannot delete your own account")
+    target = get_user_by_id(target_user_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    delete_user(target_user_id)
+    return {"message": f"User {target['username']} deleted"}
 
 
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
