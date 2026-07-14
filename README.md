@@ -1,6 +1,8 @@
 # AgentOS
 
-A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com) — dashboard, session history, kanban board, and more. Runs as an s6 service inside the Hermes container, or standalone alongside any Hermes installation.
+A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com) — dashboard, session history, kanban board, cron editor, profile editor, and more. Runs as an s6 service inside the Hermes container, or standalone alongside any Hermes installation.
+
+**Version:** 1.0.0
 
 ## Features
 
@@ -8,7 +10,23 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 - **Session History** — Browse, search, and filter all conversation sessions with FTS5 full-text search
 - **Session Detail** — Read-only chat thread viewer with reasoning blocks, tool call expansion, and message timeline
 - **Kanban Board** — Interactive task board with drag-and-drop between 5 columns (backlog, ready, running, done, blocked), markdown rendering in cards, task detail view, and archived toggle
-- **Visual Identity** — Dark mission-control aesthetic with teal/gold accents, Inter + JetBrains Mono typography, ambient glow effects, sticky blur navbar
+- **Task Editor** — Edit title, body, assignee, priority, and status in a modal dialog
+- **Filters & Search** — Filter kanban tasks by assignee, priority, status; search by title
+- **Bulk Operations** — Multi-select tasks for batch status changes
+- **Config Viewer** — Collapsible tree + YAML toggle with secret redaction and search/filter
+- **Config Editor** — Inline editors (text, number, boolean, list) with atomic write and secret field protection
+- **Skills Hub** — Grid view of installed skills with category colors, search, filter, sort, and detail modal
+- **Workflow Editor** — React Flow canvas with custom nodes (trigger/action/condition), full CRUD
+- **Workflow Execution** — Toposort engine with cycle detection, Run Now, run history, and node config
+- **Authentication** — JWT-based auth with login page, protected routes, and multi-user support. Password hashing via `hashlib.pbkdf2_hmac` (bcrypt-free, stdlib only)
+- **User Management** — Admin settings page to list, create, and delete users, and change passwords
+- **Cron Job Editor** — CRUD operations on cron jobs with run now, pause/resume, and inline schedule/prompt editing
+- **Advanced Profile Editor** — 6-tab editor: Model, Agent, Toolsets, Description, Memory (SOUL.md), and Preview
+- **Dark/Light Mode** — Toggle in navbar with localStorage persistence
+- **Keyboard Shortcuts** — ⌘K quick search, `g+{d,s,t,c,k,w}` navigation, `?` help modal
+- **Responsive Design** — Hamburger menu on mobile, adaptive layout
+- **Markdown Everywhere** — react-markdown + remark-gfm + rehype-highlight in chat, cards, comments, and tasks
+- **Visual Identity** — Dark mission-control aesthetic with teal/gold accents, Inter + JetBrains Mono typography
 - **Cross-Platform** — Works in Docker containers, Linux/macOS pip installs, and Windows
 
 ## Screenshots
@@ -16,6 +34,10 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 > Dashboard with 6 agent cards (Hermes + 5 sub-profiles)
 > Session detail with chat bubbles, tool call expansion, and reasoning blocks
 > Kanban board with 5 columns and task detail
+> Config editor with inline editing and secret field protection
+> Workflow editor with React Flow canvas
+> Cron job editor with run/pause/resume controls
+> Profile editor with 6 tabs (Model, Agent, Toolsets, Description, Memory, Preview)
 
 ## Quick Start (Dev Mode)
 
@@ -23,7 +45,7 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 cd agentos
 
 # Backend
-pip install fastapi uvicorn[standard] aiosqlite pydantic-settings cachetools httpx
+pip install fastapi uvicorn[standard] aiosqlite pydantic-settings cachetools httpx pyjwt
 python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 9120
 
 # Frontend (another terminal)
@@ -33,6 +55,17 @@ npm run dev
 ```
 
 Backend runs on http://localhost:9120, frontend dev server on http://localhost:5173.
+
+### First-Run Authentication
+
+On first launch, AgentOS auto-creates an admin user from environment variables:
+
+```bash
+export AGENTOS_ADMIN_USER=admin
+export AGENTOS_ADMIN_PASS=your-secure-password
+```
+
+If not set, defaults to `admin` / `admin` (change immediately). After login, visit `/settings` to manage users.
 
 For production, build the frontend and serve via FastAPI:
 
@@ -339,6 +372,13 @@ AgentOS reads Hermes state directly from:
 | `GET /api/skills` | List all installed skills (metadata only) |
 | `GET /api/skills/{slug}` | Get skill detail (full SKILL.md + file list) |
 | `GET /api/profiles` | List profiles with model, skill counts, external dirs |
+| `POST /api/auth/login` | Login (returns JWT token) |
+| `GET /api/auth/me` | Current user info |
+| `POST /api/auth/logout` | Logout (invalidate token) |
+| `GET /api/users` | List all users (admin) |
+| `POST /api/users` | Create user (admin) |
+| `DELETE /api/users/{id}` | Delete user (admin) |
+| `PATCH /api/users/{id}/password` | Change user password (admin) |
 | `GET /api/workflows` | List all workflows |
 | `GET /api/workflows/{id}` | Get workflow detail (nodes + edges) |
 | `POST /api/workflows` | Create new workflow |
@@ -347,11 +387,21 @@ AgentOS reads Hermes state directly from:
 | `POST /api/workflows/{id}/run` | Execute workflow (toposort engine) |
 | `GET /api/workflows/{id}/runs` | Get workflow run history |
 | `GET /api/runs/{id}` | Get run detail with node results |
+| `GET /api/cron/jobs` | List all cron jobs |
+| `POST /api/cron/jobs` | Create cron job |
+| `PUT /api/cron/jobs/{id}` | Update cron job |
+| `DELETE /api/cron/jobs/{id}` | Delete cron job |
+| `POST /api/cron/jobs/{id}/run` | Run cron job now |
+| `POST /api/cron/jobs/{id}/pause` | Pause cron job |
+| `POST /api/cron/jobs/{id}/resume` | Resume cron job |
+| `GET /api/profiles/{name}` | Get profile detail with config + soul |
+| `PUT /api/profiles/{name}/soul` | Write SOUL.md content |
 
 ## Tech Stack
 
 - **Backend** — FastAPI (Python 3.13+), SQLite, uvicorn, aiosqlite
-- **Frontend** — React 18, Vite 5, Tailwind CSS, TanStack Query, React Router, @dnd-kit (drag-and-drop), react-markdown + remark-gfm + rehype-highlight
+- **Frontend** — React 18, Vite 5, Tailwind CSS, TanStack Query, React Router, @dnd-kit (drag-and-drop), React Flow (workflow canvas), react-markdown + remark-gfm + rehype-highlight
+- **Auth** — JWT (stdlib hmac), bcrypt-free password hashing (`hashlib.pbkdf2_hmac`), no C dependencies
 - **Fonts** — Inter (UI), JetBrains Mono (code/data)
 - **Design** — Dark theme (`#0B1120` base), teal accent (`#00E5B9`), gold secondary (`#F5B800`)
 
@@ -373,7 +423,11 @@ AgentOS reads Hermes state directly from:
 - [x] Phase 10 — Workflow Editor (React Flow canvas, CRUD, node palette, dark theme)
 - [x] Phase 11 — Workflow Execution (toposort engine, Run Now, run history, node config)
 - [x] Phase 12 — Polish (dark/light toggle, ⌘K search, nav shortcuts, responsive)
-- [ ] Phase 13 — Auth (optional, JWT + RBAC)
+- [x] Phase 13 — Auth (JWT, login page, ProtectedRoute, AuthContext, multi-user)
+- [x] Phase 14 — Kanban Integration (task editor, filters/search, comments, bulk ops, webhook)
+- [x] Phase 15 — User Management (Settings page, create/delete users, change passwords)
+- [x] Phase 16 — Cron Job Editor (CRUD, run now, pause/resume, edit schedule/prompt)
+- [x] Phase 17 — Profile Editor (6 tabs: Model, Agent, Toolsets, Description, Memory, Preview)
 
 See [PLAN.md](PLAN.md) for the full roadmap and [DESIGN.md](DESIGN.md) for the visual identity spec.
 

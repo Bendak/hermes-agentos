@@ -257,18 +257,62 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 - [x] HelpModal — lista todas as shortcuts disponíveis
 - **Entrega:** App polido com dark/light mode, shortcuts e responsive
 
-### Phase 13 — Auth (Opcional, Semana 15)
-- [ ] JWT auth (apenas se precisar multi-user)
-- [ ] RBAC (admin/operator/viewer)
+### Phase 13 — Auth (Semana 15) ✅ DONE
+- [x] JWT authentication — token-based auth using Python stdlib hmac (no external JWT library)
+- [x] Login page — `/login` route with username/password form
+- [x] ProtectedRoute — frontend route guard redirects unauthenticated users to login
+- [x] AuthContext — React context provides `user`, `token`, `login()`, `logout()` across the app
+- [x] `backend/auth.py` — bcrypt-free password hashing via `hashlib.pbkdf2_hmac` (no C dependencies)
+- [x] `backend/routers/auth.py` — `/api/auth/login`, `/api/auth/me`, `/api/auth/logout` endpoints
+- [x] Multi-user ready — first run auto-creates `admin` user from env vars `AGENTOS_ADMIN_USER` / `AGENTOS_ADMIN_PASS`
+- [x] All API routes protected with `require_auth` middleware (except `/health`, `/login`, static assets)
+- **Entrega:** JWT auth completo, login page, protected routes, multi-user ready
 
-### Phase 14 — Kanban Integration (Semana 16)
-- [ ] Task Editor Modal — editar title, body, assignee, priority, status
-- [ ] Enhanced Kanban Board — 5 colunas, DnD melhorado, cards com badges
-- [ ] Filters & Search — por assignee, priority, status, busca por título
-- [ ] Notificações — cron job monitora conclusão, notifica no Discord
-- [ ] Bulk Operations — seleção múltipla, mudanças em batch
-- **Entrega:** Kanban board completo integrado com Hermes dispatcher
-- [ ] Só adicionar se o homelab efetivamente precisar
+### Phase 14 — Kanban Integration (Semana 16) ✅ DONE
+- [x] Task Editor Modal — edit title, body, assignee, priority, status
+- [x] Enhanced Kanban Board — 5 columns, improved DnD, cards with badges
+- [x] Filters & Search — by assignee, priority, status, title search
+- [x] Bulk Operations — multi-select, batch status changes
+- [x] Comments & Stats — task comments, completion stats
+- [x] Notify webhook — Discord webhook on task completion
+- **Entrega:** Kanban board completo com task editor, filtros, bulk ops, notificações
+
+### Phase 15 — User Management (Semana 17) ✅ DONE
+- [x] Settings page (`/settings`) — admin-only user management panel
+- [x] List users — table with username, role, created date
+- [x] Create users — form with username, password, role (admin/user)
+- [x] Delete users — confirmation dialog, cannot delete self
+- [x] Change passwords — admin can reset any user's password
+- [x] `backend/routers/users.py` — CRUD endpoints for user management
+- [x] Role-based access — admin sees Settings, regular users do not
+- **Entrega:** Multi-user management UI com create, delete, password reset
+
+### Phase 16 — Cron Job Editor (Semana 18) ✅ DONE
+- [x] `GET /api/cron/jobs` — list all cron jobs from `jobs.json`
+- [x] `POST /api/cron/jobs` — create new cron job
+- [x] `PUT /api/cron/jobs/{id}` — update job (schedule, prompt, enabled)
+- [x] `DELETE /api/cron/jobs/{id}` — delete cron job
+- [x] `POST /api/cron/jobs/{id}/run` — trigger immediate execution
+- [x] `POST /api/cron/jobs/{id}/pause` — pause job (sets enabled=false)
+- [x] `POST /api/cron/jobs/{id}/resume` — resume job (sets enabled=true)
+- [x] `backend/routers/cron.py` — CRUD + run/pause/resume endpoints
+- [x] Frontend CronJobsPage — table with job name, schedule, status, actions
+- [x] Inline editor — edit schedule expression and prompt text
+- **Entrega:** Cron job editor completo com CRUD, run now, pause/resume
+
+### Phase 17 — Profile Editor (Advanced) (Semana 19) ✅ DONE
+- [x] 6-tab profile editor:
+  - **Model** — select model provider and model name
+  - **Agent** — configure agent behavior (temperature, max tokens, etc.)
+  - **Toolsets** — enable/disable MCP servers and toolsets
+  - **Description** — edit agent role description
+  - **Memory / SOUL.md** — edit the agent's SOUL.md persona file
+  - **Preview** — live preview of the full profile configuration
+- [x] `backend/routers/profiles.py` — profile detail, soul read/write endpoints
+- [x] `GET /api/profiles/{name}` — full profile detail with config + soul
+- [x] `PUT /api/profiles/{name}/soul` — write SOUL.md content
+- [x] Frontend ProfileEditorPage — tabbed editor with save/load
+- **Entrega:** Advanced profile editor com 6 tabs, SOUL.md editing, live preview
 
 ---
 
@@ -325,14 +369,18 @@ agentos/
 ├── backend/
 │   ├── main.py                   # FastAPI app
 │   ├── config.py                 # Settings from env
-│   ├── auth.py                   # Auth (deferred)
+│   ├── auth.py                   # JWT auth + pbkdf2_hmac password hashing
 │   ├── routers/
 │   │   ├── agents.py
 │   │   ├── sessions.py
 │   │   ├── tasks.py
 │   │   ├── config.py
 │   │   ├── skills.py
-│   │   └── workflows.py
+│   │   ├── workflows.py
+│   │   ├── auth.py               # Auth endpoints (login, me, logout)
+│   │   ├── users.py              # User CRUD (admin only)
+│   │   ├── cron.py               # Cron job CRUD + run/pause/resume
+│   │   └── profiles.py           # Profile detail + SOUL.md endpoints
 │   ├── integrations/
 │   │   ├── hermes_api.py         # REST API client
 │   │   ├── kanban_db.py          # Read-only SQLite
@@ -348,7 +396,19 @@ agentos/
 │   │   │   ├── Sessions.tsx
 │   │   │   ├── Tasks.tsx
 │   │   │   ├── Config.tsx
-│   │   │   └── Skills.tsx
+│   │   │   ├── Skills.tsx
+│   │   │   ├── Workflows.tsx
+│   │   │   ├── WorkflowEditor.tsx
+│   │   │   ├── Settings.tsx       # User management (admin)
+│   │   │   ├── CronJobs.tsx       # Cron job editor
+│   │   │   ├── ProfileEditor.tsx  # Advanced profile editor (6 tabs)
+│   │   │   ├── Login.tsx          # Login page
+│   │   │   └── Profile.tsx        # Profile view
+│   │   ├── components/
+│   │   │   ├── auth/
+│   │   │   │   ├── AuthContext.tsx
+│   │   │   │   └── ProtectedRoute.tsx
+│   │   │   └── ...                # Shared UI components
 │   │   ├── components/
 │   │   └── lib/
 │   ├── package.json
@@ -388,8 +448,11 @@ agentos/
 | 10 | ✅ Done | Workflow editor | React Flow canvas, CRUD, node palette, dark theme |
 | 11 | ✅ Done | Workflow execution | Toposort engine, Run Now, run history, node config |
 | 12 | ✅ Done | Polish | Dark/light toggle, ⌘K search, nav shortcuts, responsive |
-| 13 | 🔲 Optional | Auth | — |
+| 13 | ✅ Done | Auth | JWT, login page, ProtectedRoute, AuthContext, multi-user |
 | 14 | ✅ Done | Kanban Integration | Task editor modal, filters/search, comments, stats, bulk ops, notify webhook |
+| 15 | ✅ Done | User Management | Settings page, list/create/delete users, change passwords |
+| 16 | ✅ Done | Cron Job Editor | CRUD jobs.json, run now, pause/resume, edit schedule/prompt |
+| 17 | ✅ Done | Profile Editor (Advanced) | 6 tabs: Model, Agent, Toolsets, Description, Memory, Preview |
 
 ---
 
@@ -420,5 +483,49 @@ prompt: |
 ```
 
 ---
+
+## 10. Completed Features Summary
+
+### Core Platform
+- **FastAPI + Vite SPA** — s6 service on port 9120, ~80MB RAM footprint
+- **Agent Dashboard** — live status cards for all Hermes profiles (model, provider, gateway state, sessions)
+- **Session History** — FTS5 full-text search, pagination, profile/date filters
+- **Session Detail** — chat thread with markdown rendering, syntax highlighting, tool call expansion, reasoning blocks
+
+### Kanban
+- **Kanban Board** — 5-column drag-and-drop (@dnd-kit), markdown in cards
+- **Task Detail** — tabbed interface (Overview, Runs, Comments, Children), markdown everywhere
+- **Task Editor** — edit title, body, assignee, priority, status in modal
+- **Filters & Search** — by assignee, priority, status, title search
+- **Bulk Operations** — multi-select, batch status changes
+- **Notify Webhook** — Discord webhook on task completion
+
+### Configuration & Skills
+- **Config Viewer** — collapsible tree + YAML toggle, secret redaction, search/filter
+- **Config Editor** — inline editors (text/number/bool/list), atomic write, secret field protection
+- **Skills Hub** — grid view, category colors, search/filter/sort, detail modal
+
+### Workflows
+- **Workflow Editor** — React Flow canvas, custom nodes (trigger/action/condition), CRUD
+- **Workflow Execution** — toposort engine, cycle detection, Run Now, run history, node config
+
+### Authentication & Users
+- **JWT Authentication** — stdlib hmac-based tokens, login page, ProtectedRoute, AuthContext
+- **Password Hashing** — pbkdf2_hmac (bcrypt-free, no C dependencies, stdlib only)
+- **User Management** — Settings page, list/create/delete users, change passwords (admin)
+- **Multi-user Ready** — first-run auto-creates admin, role-based access (admin/user)
+
+### Cron & Scheduling
+- **Cron Job Editor** — CRUD jobs.json, run now, pause/resume, edit schedule/prompt
+
+### Profile Management
+- **Advanced Profile Editor** — 6 tabs: Model, Agent, Toolsets, Description, Memory (SOUL.md), Preview
+- **SOUL.md Editing** — read/write agent persona file via API
+
+### UX Polish
+- **Dark/Light Mode** — toggle in navbar, localStorage persistence
+- **Keyboard Shortcuts** — ⌘K quick search, `g+{d,s,t,c,k,w}` navigation, `?` help modal
+- **Responsive Design** — hamburger menu on mobile, adaptive layout
+- **Markdown Everywhere** — react-markdown + remark-gfm + rehype-highlight in chat, cards, comments, tasks
 
 *Documento vivo — atualizar a cada increment completado.*
