@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { NavBar } from '../App'
 
 interface ProfileSummary {
   id: string
@@ -70,8 +71,10 @@ export default function ProfilesPage() {
   })
 
   return (
-    <div className="p-6 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-6">
+    <div className="min-h-screen bg-bg-base text-text-secondary">
+      <NavBar />
+      <div className="p-6 max-w-6xl mx-auto">
+        <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-text-primary">Agent Profiles</h1>
         <button
           onClick={() => setCreating(true)}
@@ -161,6 +164,7 @@ export default function ProfilesPage() {
           </div>
         </div>
       )}
+      </div>
     </div>
   )
 }

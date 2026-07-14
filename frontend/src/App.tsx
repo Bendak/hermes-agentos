@@ -216,7 +216,7 @@ interface WorkflowNodeData {
 
 /* ── NavBar ────────────────────────────────────────── */
 
-function NavBar() {
+export function NavBar() {
   const onOpenSearch = useOpenSearch()
   const { user, logout } = useAuth()
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
