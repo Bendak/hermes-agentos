@@ -642,6 +642,7 @@ export default function ProfilesPage() {
   const updateMut = useMutation({
     mutationFn: (data: any) => apiFetch(`/api/profiles/${editing}`, { method: 'PUT', body: JSON.stringify(data) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['profiles'] }); setEditing(null) },
+    onError: (e: any) => { alert(`Failed to save profile: ${e.message || e}`) },
   })
 
   const createMut = useMutation({
