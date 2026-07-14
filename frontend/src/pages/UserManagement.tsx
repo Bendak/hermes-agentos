@@ -48,11 +48,29 @@ export default function UserManagement() {
     onSuccess: () => { invalidate(); setDeleteTarget(null) },
   })
 
+  // Non-admin users can still change their own password
   if (!isAdmin) {
     return (
-      <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8">
-        <div className="rounded-xl border border-border bg-surface/40 p-8 text-center">
-          <p className="text-text-secondary">Admin access required to manage users.</p>
+      <div className="min-h-screen bg-bg-base text-text-secondary">
+        <NavBar />
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 py-8">
+          <div className="rounded-xl border border-border bg-surface/40 p-8 text-center">
+            <p className="text-text-secondary mb-4">You can change your own password below.</p>
+            <button
+              onClick={() => setChangePwTarget({ id: user?.id ?? 0, username: user?.username ?? '', role: user?.role ?? '', created_at: '' })}
+              className="px-4 py-2 text-sm font-medium rounded-md border border-border text-text-secondary hover:text-text-primary hover:bg-surface/80 transition-colors"
+            >
+              Change My Password
+            </button>
+          </div>
+          {changePwTarget && (
+            <ChangePasswordDialog
+              target={changePwTarget}
+              isSelf={true}
+              onClose={() => setChangePwTarget(null)}
+              onSuccess={() => { setChangePwTarget(null) }}
+            />
+          )}
         </div>
       </div>
     )

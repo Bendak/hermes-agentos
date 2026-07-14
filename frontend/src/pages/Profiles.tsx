@@ -25,7 +25,7 @@ interface ProfileDetail {
 const API = (import.meta as any).env?.VITE_API_URL || ''
 
 async function apiFetch(path: string, opts?: RequestInit) {
-  const token = localStorage.getItem('agentos_token')
+  const token = localStorage.getItem('agentos_token') || localStorage.getItem('agentos_access_token')
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await fetch(`${API}${path}`, { ...opts, headers })
@@ -35,7 +35,7 @@ async function apiFetch(path: string, opts?: RequestInit) {
 
 export default function ProfilesPage() {
   const qc = useQueryClient()
-  const [editing, setEditing] = useState<ProfileDetail | null>(null)
+  const [editing, setEditing] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
@@ -45,13 +45,13 @@ export default function ProfilesPage() {
   })
 
   const { data: detail } = useQuery({
-    queryKey: ['profile', editing?.id],
-    queryFn: () => apiFetch(`/api/profiles/${editing!.id}`) as Promise<ProfileDetail>,
+    queryKey: ['profile', editing],
+    queryFn: () => apiFetch(`/api/profiles/${editing}`) as Promise<ProfileDetail>,
     enabled: !!editing,
   })
 
   const updateMut = useMutation({
-    mutationFn: (data: any) => apiFetch(`/api/profiles/${editing!.id}`, { method: 'PUT', body: JSON.stringify(data) }),
+    mutationFn: (data: any) => apiFetch(`/api/profiles/${editing}`, { method: 'PUT', body: JSON.stringify(data) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['profiles'] }); setEditing(null) },
   })
 
@@ -73,57 +73,81 @@ export default function ProfilesPage() {
   return (
     <div className="min-h-screen bg-bg-base text-text-secondary">
       <NavBar />
-      <div className="p-6 max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-text-primary">Agent Profiles</h1>
-        <button
-          onClick={() => setCreating(true)}
-          className="px-4 py-2 bg-accent text-black rounded-lg font-medium hover:opacity-90 transition"
-        >
-          + New Profile
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {profiles.map((p) => (
-          <div
-            key={p.id}
-            className="bg-surface border border-border rounded-xl p-5 hover:border-accent/50 transition cursor-pointer"
-            onClick={() => setEditing({ id: p.id, model: { default: '', provider: '', base_url: '' }, fallback_providers: [], toolsets: [], agent: { max_turns: 0, gateway_timeout: 0 } })}
-          >
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-lg font-semibold text-text-primary">{p.name}</h3>
-              <span className="text-xs px-2 py-1 rounded bg-accent/10 text-accent font-mono">{p.id}</span>
+      <header className="px-6 pt-10 pb-6">
+        <div className="mx-auto max-w-7xl">
+          <div className="flex items-end justify-between">
+            <div>
+              <h1 className="text-display font-bold text-text-primary tracking-tight">Agent Profiles</h1>
+              <p className="mt-2 text-body text-text-secondary max-w-lg">
+                Manage agent configurations, models, and toolsets
+              </p>
             </div>
-            <div className="space-y-1 text-sm text-text-secondary">
-              <p><span className="text-text-tertiary">Model:</span> {p.model}</p>
-              <p><span className="text-text-tertiary">Provider:</span> {p.provider}</p>
-              <p><span className="text-text-tertiary">Toolsets:</span> {p.toolsets_count}</p>
-              <p><span className="text-text-tertiary">Fallbacks:</span> {p.fallback_count}</p>
-            </div>
-            <div className="flex gap-2 mt-4">
-              <button
-                onClick={(e) => { e.stopPropagation(); setEditing({ id: p.id, model: { default: '', provider: '', base_url: '' }, fallback_providers: [], toolsets: [], agent: { max_turns: 0, gateway_timeout: 0 } }) }}
-                className="px-3 py-1 text-xs rounded bg-accent/10 text-accent hover:bg-accent/20"
-              >
-                Edit
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); dupMut.mutate(p.id) }}
-                className="px-3 py-1 text-xs rounded bg-surface text-text-secondary border border-border hover:border-accent/30"
-              >
-                Duplicate
-              </button>
-              <button
-                onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.id) }}
-                className="px-3 py-1 text-xs rounded bg-red-500/10 text-red-400 hover:bg-red-500/20"
-              >
-                Delete
-              </button>
-            </div>
+            <button
+              onClick={() => setCreating(true)}
+              className="bg-accent text-text-inverse px-4 py-1.5 rounded-md text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+            >
+              + New Profile
+            </button>
           </div>
-        ))}
-      </div>
+        </div>
+      </header>
+
+      <main className="px-6 pb-12">
+        <div className="mx-auto max-w-7xl">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {profiles.map((p) => (
+              <div
+                key={p.id}
+                className="bg-bg-elevated border border-border rounded-xl p-5 hover:border-accent/50 transition cursor-pointer"
+                onClick={() => setEditing(p.id)}
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-h5 font-semibold text-text-primary">{p.name}</h3>
+                  <span className="text-caption px-2 py-1 rounded bg-accent-subtle text-accent font-mono">{p.id}</span>
+                </div>
+                <div className="space-y-1.5 text-body-sm text-text-secondary">
+                  <div className="flex justify-between">
+                    <span className="text-text-tertiary">Model</span>
+                    <span className="text-text-primary font-mono text-xs">{p.model}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-tertiary">Provider</span>
+                    <span className="text-text-primary">{p.provider}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-tertiary">Toolsets</span>
+                    <span className="text-text-primary">{p.toolsets_count}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-text-tertiary">Fallbacks</span>
+                    <span className="text-text-primary">{p.fallback_count}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4 pt-4 border-t border-border">
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setEditing(p.id) }}
+                    className="px-3 py-1 text-xs rounded bg-accent/10 text-accent hover:bg-accent/20 transition-colors"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); dupMut.mutate(p.id) }}
+                    className="px-3 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary hover:bg-surface/60 transition-colors"
+                  >
+                    Duplicate
+                  </button>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.id) }}
+                    className="px-3 py-1 text-xs rounded border border-error/30 text-error hover:bg-error-subtle/50 transition-colors ml-auto"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </main>
 
       {/* Edit Dialog */}
       {(editing && detail) && (
@@ -146,17 +170,17 @@ export default function ProfilesPage() {
 
       {/* Delete Confirmation */}
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-surface border border-border rounded-xl p-6 max-w-sm w-full">
-            <h3 className="text-lg font-bold text-text-primary mb-2">Delete Profile?</h3>
-            <p className="text-sm text-text-secondary mb-4">
+        <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-bg-elevated border border-border rounded-xl p-6 max-w-sm w-full">
+            <h3 className="text-h5 font-bold text-text-primary mb-2">Delete Profile?</h3>
+            <p className="text-body-sm text-text-secondary mb-4">
               This will permanently delete <span className="font-mono text-accent">{deleteTarget}</span> and its config.yaml.
             </p>
             <div className="flex gap-3 justify-end">
-              <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 text-sm rounded border border-border text-text-secondary hover:bg-background">Cancel</button>
+              <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 text-sm rounded border border-border text-text-secondary hover:bg-surface/60 transition-colors">Cancel</button>
               <button
                 onClick={() => deleteMut.mutate(deleteTarget)}
-                className="px-4 py-2 text-sm rounded bg-red-500 text-white hover:bg-red-600"
+                className="px-4 py-2 text-sm rounded bg-error text-white hover:bg-error/90 transition-colors"
               >
                 Delete
               </button>
@@ -164,10 +188,21 @@ export default function ProfilesPage() {
           </div>
         </div>
       )}
-      </div>
     </div>
   )
 }
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <label className="block text-caption text-text-tertiary uppercase tracking-wider mb-1.5">{label}</label>
+      {children}
+    </div>
+  )
+}
+
+const inputClass = "w-full px-3 py-2 bg-bg-base border border-border rounded-md text-text-primary text-sm focus:outline-none focus:ring-2 focus:ring-accent/40 transition-all"
+const selectClass = inputClass
 
 function ProfileEditDialog({ profile, onSave, onClose, saving }: {
   profile: ProfileDetail
@@ -188,28 +223,18 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
   const upd = (k: string, v: any) => setForm({ ...form, [k]: v })
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-surface border border-border rounded-xl p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto">
-        <h3 className="text-lg font-bold text-text-primary mb-4">Edit Profile: {profile.id}</h3>
+    <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-bg-elevated border border-border rounded-xl max-w-xl w-full max-h-[85vh] overflow-y-auto p-6">
+        <h3 className="text-h5 font-bold text-text-primary mb-1">Edit Profile</h3>
+        <p className="text-body-sm text-text-tertiary mb-6 font-mono">{profile.id}</p>
 
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-text-tertiary mb-1">Model</label>
-            <input
-              value={form.model}
-              onChange={(e) => upd('model', e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm"
-              placeholder="e.g. mimo-v2.5"
-            />
-          </div>
+          <Field label="Model">
+            <input value={form.model} onChange={(e) => upd('model', e.target.value)} className={inputClass} placeholder="e.g. mimo-v2.5" />
+          </Field>
 
-          <div>
-            <label className="block text-sm text-text-tertiary mb-1">Provider</label>
-            <select
-              value={form.provider}
-              onChange={(e) => upd('provider', e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm"
-            >
+          <Field label="Provider">
+            <select value={form.provider} onChange={(e) => upd('provider', e.target.value)} className={selectClass}>
               <option value="xiaomi">xiaomi</option>
               <option value="ollama-cloud">ollama-cloud</option>
               <option value="openai">openai</option>
@@ -218,62 +243,32 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
               <option value="nvidia">nvidia</option>
               <option value="">(custom)</option>
             </select>
-          </div>
+          </Field>
 
-          <div>
-            <label className="block text-sm text-text-tertiary mb-1">Base URL (optional)</label>
-            <input
-              value={form.base_url}
-              onChange={(e) => upd('base_url', e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm"
-              placeholder="https://api.example.com/v1"
-            />
-          </div>
+          <Field label="Base URL (optional)">
+            <input value={form.base_url} onChange={(e) => upd('base_url', e.target.value)} className={inputClass} placeholder="https://api.example.com/v1" />
+          </Field>
 
-          <div>
-            <label className="block text-sm text-text-tertiary mb-1">Toolsets (comma-separated)</label>
-            <input
-              value={form.toolsets}
-              onChange={(e) => upd('toolsets', e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm"
-              placeholder="hermes-cli, web, terminal"
-            />
-          </div>
+          <Field label="Toolsets (comma-separated)">
+            <input value={form.toolsets} onChange={(e) => upd('toolsets', e.target.value)} className={inputClass} placeholder="hermes-cli, web, terminal" />
+          </Field>
 
-          <div>
-            <label className="block text-sm text-text-tertiary mb-1">Fallback Providers (comma-separated)</label>
-            <input
-              value={form.fallback_providers}
-              onChange={(e) => upd('fallback_providers', e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm"
-              placeholder="ollama-cloud"
-            />
-          </div>
+          <Field label="Fallback Providers (comma-separated)">
+            <input value={form.fallback_providers} onChange={(e) => upd('fallback_providers', e.target.value)} className={inputClass} placeholder="ollama-cloud" />
+          </Field>
 
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-text-tertiary mb-1">Max Turns</label>
-              <input
-                type="number"
-                value={form.max_turns}
-                onChange={(e) => upd('max_turns', parseInt(e.target.value) || 150)}
-                className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-sm text-text-tertiary mb-1">Gateway Timeout (s)</label>
-              <input
-                type="number"
-                value={form.gateway_timeout}
-                onChange={(e) => upd('gateway_timeout', parseInt(e.target.value) || 1800)}
-                className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm"
-              />
-            </div>
+            <Field label="Max Turns">
+              <input type="number" value={form.max_turns} onChange={(e) => upd('max_turns', parseInt(e.target.value) || 150)} className={inputClass} />
+            </Field>
+            <Field label="Gateway Timeout (s)">
+              <input type="number" value={form.gateway_timeout} onChange={(e) => upd('gateway_timeout', parseInt(e.target.value) || 1800)} className={inputClass} />
+            </Field>
           </div>
         </div>
 
-        <div className="flex gap-3 justify-end mt-6">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded border border-border text-text-secondary hover:bg-background">Cancel</button>
+        <div className="flex gap-3 justify-end mt-6 pt-4 border-t border-border">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-border text-text-secondary hover:bg-surface/60 transition-colors">Cancel</button>
           <button
             onClick={() => onSave({
               model: { default: form.model, provider: form.provider, base_url: form.base_url },
@@ -282,7 +277,7 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
               agent: { max_turns: form.max_turns, gateway_timeout: form.gateway_timeout },
             })}
             disabled={saving}
-            className="px-4 py-2 text-sm rounded bg-accent text-black font-medium hover:opacity-90 disabled:opacity-50"
+            className="bg-accent text-text-inverse px-4 py-2 text-sm rounded-md font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {saving ? 'Saving...' : 'Save Changes'}
           </button>
@@ -310,37 +305,27 @@ function ProfileCreateDialog({ onSave, onClose, saving }: {
   const upd = (k: string, v: any) => setForm({ ...form, [k]: v })
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-      <div className="bg-surface border border-border rounded-xl p-6 max-w-lg w-full">
-        <h3 className="text-lg font-bold text-text-primary mb-4">Create New Profile</h3>
+    <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-bg-elevated border border-border rounded-xl max-w-xl w-full p-6">
+        <h3 className="text-h5 font-bold text-text-primary mb-1">Create New Profile</h3>
+        <p className="text-body-sm text-text-tertiary mb-6">Configure a new agent profile</p>
 
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm text-text-tertiary mb-1">Profile ID (lowercase, no spaces)</label>
+          <Field label="Profile ID (lowercase, no spaces)">
             <input
               value={form.id}
               onChange={(e) => upd('id', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'))}
-              className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm font-mono"
+              className={inputClass + ' font-mono'}
               placeholder="e.g. researcher"
             />
-          </div>
+          </Field>
 
-          <div>
-            <label className="block text-sm text-text-tertiary mb-1">Model</label>
-            <input
-              value={form.model}
-              onChange={(e) => upd('model', e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm"
-            />
-          </div>
+          <Field label="Model">
+            <input value={form.model} onChange={(e) => upd('model', e.target.value)} className={inputClass} />
+          </Field>
 
-          <div>
-            <label className="block text-sm text-text-tertiary mb-1">Provider</label>
-            <select
-              value={form.provider}
-              onChange={(e) => upd('provider', e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm"
-            >
+          <Field label="Provider">
+            <select value={form.provider} onChange={(e) => upd('provider', e.target.value)} className={selectClass}>
               <option value="xiaomi">xiaomi</option>
               <option value="ollama-cloud">ollama-cloud</option>
               <option value="openai">openai</option>
@@ -348,31 +333,24 @@ function ProfileCreateDialog({ onSave, onClose, saving }: {
               <option value="google">google</option>
               <option value="nvidia">nvidia</option>
             </select>
-          </div>
+          </Field>
 
-          <div>
-            <label className="block text-sm text-text-tertiary mb-1">Toolsets (comma-separated)</label>
-            <input
-              value={form.toolsets}
-              onChange={(e) => upd('toolsets', e.target.value)}
-              className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm"
-            />
-          </div>
+          <Field label="Toolsets (comma-separated)">
+            <input value={form.toolsets} onChange={(e) => upd('toolsets', e.target.value)} className={inputClass} />
+          </Field>
 
           <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm text-text-tertiary mb-1">Max Turns</label>
-              <input type="number" value={form.max_turns} onChange={(e) => upd('max_turns', parseInt(e.target.value) || 150)} className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm" />
-            </div>
-            <div>
-              <label className="block text-sm text-text-tertiary mb-1">Gateway Timeout (s)</label>
-              <input type="number" value={form.gateway_timeout} onChange={(e) => upd('gateway_timeout', parseInt(e.target.value) || 1800)} className="w-full px-3 py-2 bg-background border border-border rounded text-text-primary text-sm" />
-            </div>
+            <Field label="Max Turns">
+              <input type="number" value={form.max_turns} onChange={(e) => upd('max_turns', parseInt(e.target.value) || 150)} className={inputClass} />
+            </Field>
+            <Field label="Gateway Timeout (s)">
+              <input type="number" value={form.gateway_timeout} onChange={(e) => upd('gateway_timeout', parseInt(e.target.value) || 1800)} className={inputClass} />
+            </Field>
           </div>
         </div>
 
-        <div className="flex gap-3 justify-end mt-6">
-          <button onClick={onClose} className="px-4 py-2 text-sm rounded border border-border text-text-secondary hover:bg-background">Cancel</button>
+        <div className="flex gap-3 justify-end mt-6 pt-4 border-t border-border">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-border text-text-secondary hover:bg-surface/60 transition-colors">Cancel</button>
           <button
             onClick={() => onSave({
               id: form.id,
@@ -381,7 +359,7 @@ function ProfileCreateDialog({ onSave, onClose, saving }: {
               agent: { max_turns: form.max_turns, gateway_timeout: form.gateway_timeout },
             })}
             disabled={saving || !form.id}
-            className="px-4 py-2 text-sm rounded bg-accent text-black font-medium hover:opacity-90 disabled:opacity-50"
+            className="bg-accent text-text-inverse px-4 py-2 text-sm rounded-md font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
           >
             {saving ? 'Creating...' : 'Create Profile'}
           </button>
