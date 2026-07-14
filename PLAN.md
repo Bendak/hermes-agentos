@@ -1,13 +1,13 @@
-# AgentOS — Plano de Desenvolvimento Executável
+# AgentOS — Executable Development Plan
 
-**Versão:** 2.0.0 (revisada por Hermes + Coder)
-**Data:** 2026-07-05
-**Status:** Aprovado para implementação incremental
-**Repo:** GitHub público (sem secrets no código)
+**Version:** 2.0.0 (revised by Hermes + Coder)
+**Date:** 2026-07-05
+**Status:** Approved for incremental implementation
+**Repo:** Public GitHub (no secrets in code)
 
 ---
 
-## 1. Arquitetura Final
+## 1. Final Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -26,23 +26,23 @@
 │  └─────────────────────────────────────────────────┘ │
 │                                                      │
 │  ┌──────────┐                                        │
-│  │ ha-mcp   │  :8086 (separado)                     │
+│  │ ha-mcp   │  :8086 (separate)                     │
 │  └──────────┘                                        │
 └─────────────────────────────────────────────────────┘
 ```
 
-### Decisões-chave (revisadas vs spec original)
+### Key Decisions (revised vs original spec)
 
-| Aspecto | Spec original (Nexus) | Revisado (Hermes+Coder) | Razão |
+| Aspect | Original Spec (Nexus) | Revised (Hermes+Coder) | Reason |
 |---------|----------------------|------------------------|-------|
-| **Deploy** | Container Docker separado | **s6 service no container Hermes** | Evita UID mismatch (lição do Hermes Workspace) |
-| **Porta** | :3000 | **:9120** | Próxima porta livre após dashboard :9119 |
-| **Frontend** | Next.js (SSR) | **Vite SPA** | Sem SSR pra admin dashboard. 80MB vs 500MB RAM |
-| **Backend** | FastAPI + Redis | **FastAPI standalone** | Redis é overkill pra 1 usuário |
-| **DB** | PostgreSQL + SQLite | **SQLite only** | AgentOS.db próprio + read-only no kanban/state |
-| **Auth** | JWT + RBAC desde o dia 1 | **Auth via reverse proxy** (defer JWT pra fase 13) | Single-user homelab não precisa de JWT no MVP |
-| **Testes** | "Testes automatizados" | **Playwright E2E + vision (Pixel)** | Valida UI visualmente, não só DOM |
-| **Entrega** | 5 fases em 16 semanas | **13 incrementos de 1 semana** | Feature por semana, testável, cron-automatizável |
+| **Deploy** | Separate Docker container | **s6 service in Hermes container** | Avoids UID mismatch (lesson from Hermes Workspace) |
+| **Port** | :3000 | **:9120** | Next available port after dashboard :9119 |
+| **Frontend** | Next.js (SSR) | **Vite SPA** | No SSR for admin dashboard. 80MB vs 500MB RAM |
+| **Backend** | FastAPI + Redis | **FastAPI standalone** | Redis is overkill for 1 user |
+| **DB** | PostgreSQL + SQLite | **SQLite only** | Own AgentOS.db + read-only on kanban/state |
+| **Auth** | JWT + RBAC from day 1 | **Auth via reverse proxy** (defer JWT to phase 13) | Single-user homelab doesn't need JWT in MVP |
+| **Tests** | "Automated tests" | **Playwright E2E + vision (Pixel)** | Validates UI visually, not just DOM |
+| **Deliverable** | 5 phases in 16 weeks | **13 one-week increments** | Feature per week, testable, cron-automatable |
 
 ---
 
@@ -59,15 +59,15 @@ Tests:     Playwright + pytest + Pixel vision
 Deploy:    s6 service (uvicorn :9120)
 ```
 
-**Footprint estimado:** ~80MB RAM, 1 processo Python.
+**Estimated footprint:** ~80MB RAM, 1 Python process.
 
 ---
 
-## 3. Segurança (GitHub Público)
+## 3. Security (Public GitHub)
 
-### Regras obrigatórias
+### Mandatory rules
 
-1. **Nenhum secret no código** — todas as configs via env vars
+1. **No secrets in code** — all configs via env vars
 2. `.gitignore` bulletproof:
    ```
    .env
@@ -80,57 +80,57 @@ Deploy:    s6 service (uvicorn :9120)
    .pytest_cache/
    /tmp/playwright-screenshots/
    ```
-4. CI GitHub Action que rejeita commits com arquivos `.*env*` ou `*.key`
-5. SQLite Hermes DBs abertos **read-only** (`mode=ro` na URI)
-6. Escritas no config.yaml via **Pydantic validation** + atomic write (temp+rename)
-7. Path traversal guard em todos os endpoints de arquivo
-8. `SECURITY.md` no repo com política de disclosure
+4. CI GitHub Action that rejects commits with `.*env*` or `*.key` files
+5. SQLite Hermes DBs opened **read-only** (`mode=ro` in URI)
+6. Writes to config.yaml via **Pydantic validation** + atomic write (temp+rename)
+7. Path traversal guard on all file endpoints
+8. `SECURITY.md` in repo with disclosure policy
 
-### Variáveis de ambiente necessárias
+### Required Environment Variables
 
 ```bash
-# example.env — copiar para .env e preencher
+# example.env — copy to .env and fill in
 AGENTOS_DATA_DIR=/opt/data                    # Hermes data volume
 AGENTOS_DB_PATH=/opt/data/agentos.db          # AgentOS own DB
 HERMES_API_URL=http://localhost:8642           # Gateway API
-HERMES_API_KEY=                               # API_SERVER_KEY do Hermes
+HERMES_API_KEY=                               # API_SERVER_KEY from Hermes
 AGENTOS_PORT=9120                             # AgentOS port
 AGENTOS_HOST=0.0.0.0                          # Bind address
 ```
 
 ---
 
-## 4. SDLC — Fluxo de Desenvolvimento por Feature
+## 4. SDLC — Feature Development Workflow
 
-### Roles dos profiles
+### Profile Roles
 
-| Profile | Role no SDLC | Quando |
+| Profile | Role in SDLC | When |
 |---------|-------------|--------|
-| **Hermes (default)** | Orquestra o fluxo, cria task no Kanban | Início de cada increment |
-| **Coder** | Implementa a feature (backend + frontend) | Durante a sprint |
-| **Pixel** | Valida UI/UX com Playwright + screenshot vision | Após implementação |
-| **Nexus** | Integra, roda testes de regressão, commit | Após validação |
-| **Atlas** | Documenta a feature no README | Após integração |
+| **Hermes (default)** | Orchestrates the workflow, creates Kanban task | Start of each increment |
+| **Coder** | Implements the feature (backend + frontend) | During the sprint |
+| **Pixel** | Validates UI/UX with Playwright + screenshot vision | After implementation |
+| **Nexus** | Integrates, runs regression tests, commits | After validation |
+| **Atlas** | Documents the feature in README | After integration |
 
-### Fluxo por feature
+### Workflow per feature
 
 ```
-1. Hermes cria task no Kanban (assignee=coder, workspace=dir:/opt/data/agentos)
-2. Coder implementa:
+1. Hermes creates Kanban task (assignee=coder, workspace=dir:/opt/data/agentos)
+2. Coder implements:
    a. Backend (FastAPI endpoint)
    b. Frontend (React component)
    c. E2E test (Playwright)
-3. Pixel valida:
-   a. Roda playwright + tira screenshot
-   b. vision_analyze no screenshot
-   c. Reporta: PASS/FAIL + observações de UI
-4. Nexus integra:
-   a. Roda todos os testes E2E (regressão)
-   b. Se PASS: git commit + push
-   c. Se FAIL: reporta o que quebrou, volta pro Coder
-5. Atlas documenta:
-   a. Atualiza README com a nova feature
-   b. Atualiza PLAN.md marcando o increment como done
+3. Pixel validates:
+   a. Runs playwright + takes screenshot
+   b. vision_analyze on screenshot
+   c. Reports: PASS/FAIL + UI observations
+4. Nexus integrates:
+   a. Runs all E2E tests (regression)
+   b. If PASS: git commit + push
+   c. If FAIL: reports what broke, returns to Coder
+5. Atlas documents:
+   a. Updates README with the new feature
+   b. Updates PLAN.md marking the increment as done
 ```
 
 ### Testing (future)
@@ -139,82 +139,82 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 
 ---
 
-## 5. Roadmap Incremental (1 feature por semana)
+## 5. Incremental Roadmap (1 feature per week)
 
-### Phase 0 — Bootstrap (Semana 1) ✅ DONE
-- [x] Scaffold FastAPI app com `GET /health`
-- [x] Scaffold Vite + React com landing page
-- [x] `GET /health` retorna `{"status": "ok", "version": "0.1.0"}`
-- [x] Landing page mostra "AgentOS"
-- [x] Repo GitHub criado, `.gitignore`, `SECURITY.md`
-- **Entrega:** App rodando em `:9120` com página inicial
+### Phase 0 — Bootstrap (Week 1) ✅ DONE
+- [x] Scaffold FastAPI app with `GET /health`
+- [x] Scaffold Vite + React with landing page
+- [x] `GET /health` returns `{"status": "ok", "version": "0.1.0"}`
+- [x] Landing page shows "AgentOS"
+- [x] GitHub repo created, `.gitignore`, `SECURITY.md`
+- **Deliverable:** App running on `:9120` with initial page
 
-### Phase 1 — Agent Health Cards (Semana 2) ✅ DONE
-- [x] Backend: `GET /api/agents` — descoberta dinâmica de profiles (default + sub-profiles)
-- [x] Frontend: Dashboard com cards (nome, modelo, status, sessões)
-- [x] Pixel: Validação visual com Playwright + design refinement
-- **Entrega:** Dashboard funcional mostrando o time (6 agentes)
+### Phase 1 — Agent Health Cards (Week 2) ✅ DONE
+- [x] Backend: `GET /api/agents` — dynamic profile discovery (default + sub-profiles)
+- [x] Frontend: Dashboard with cards (name, model, status, sessions)
+- [x] Pixel: Visual validation with Playwright + design refinement
+- **Deliverable:** Functional dashboard showing the team (6 agents)
 
-### Phase 2 — Session List (Semana 3) ✅ DONE
-- [x] Backend: `GET /api/sessions` — query read-only no `state.db`
-- [x] Frontend: Tabela com filtros (profile, search, date)
-- [x] Frontend: Busca FTS5 na lista de sessions
+### Phase 2 — Session List (Week 3) ✅ DONE
+- [x] Backend: `GET /api/sessions` — read-only query on `state.db`
+- [x] Frontend: Table with filters (profile, search, date)
+- [x] Frontend: FTS5 search in session list
 - [x] Frontend: Pagination
-- **Entrega:** Lista de sessões com busca e filtros
+- **Deliverable:** Session list with search and filters
 
-### Phase 3 — Session Detail + Chat (Semana 4-5) ✅ DONE
+### Phase 3 — Session Detail + Chat (Week 4-5) ✅ DONE
 - [x] Backend: `GET /api/sessions/:id/messages` — read from `state.db`
 - [x] Frontend: Chat thread with message bubbles (user/assistant/tool)
 - [x] Frontend: Tool call expand/collapse cards
 - [x] Frontend: Reasoning blocks
 - [x] Bug fix: Message overflow (overflowWrap: anywhere for long content)
 - [x] Bug fix: Default profile (Hermes) missing from dashboard
-- **Entrega:** Chat thread com tool calls e reasoning blocks (read-only)
+- **Deliverable:** Chat thread with tool calls and reasoning blocks (read-only)
 
-### Phase 3.5 — Chat Detail Improvements (Semana 5.5) ✅ DONE
+### Phase 3.5 — Chat Detail Improvements (Week 5.5) ✅ DONE
 - [x] **Markdown rendering** — react-markdown + remark-gfm renders headings, lists, code blocks, bold/italic, links, tables, blockquotes
 - [x] **Line break handling** — remark-gfm preserves line breaks properly
 - [x] **Code block syntax highlighting** — rehype-highlight with github-dark theme
 - [x] **Message content sanitization** — react-markdown default (no raw HTML allowed)
 - [x] **Tool call content formatting** — markdown in scrollable container
-- **Entrega:** Mensagens renderizadas com formatação Markdown, quebras de linha, e code blocks legíveis
+- **Deliverable:** Messages rendered with Markdown formatting, line breaks, and readable code blocks
 
-### Phase 4 — Kanban Board Read-Only (Semana 6) ✅ DONE
-- [x] Backend: `GET /api/tasks` — query read-only no `kanban.db`
-- [x] Frontend: 5 colunas (backlog, todo, in_progress, review, done)
-- [x] Frontend: Cards com título, assignee, prioridade
+### Phase 4 — Kanban Board Read-Only (Week 6) ✅ DONE
+- [x] Backend: `GET /api/tasks` — read-only query on `kanban.db`
+- [x] Frontend: 5 columns (backlog, todo, in_progress, review, done)
+- [x] Frontend: Cards with title, assignee, priority
 - [x] Frontend: Task detail view + archived toggle
-- **Entrega:** Kanban board visual (só leitura)
+- **Deliverable:** Visual Kanban board (read-only)
 
-### Phase 5 — Kanban Drag & Drop (Semana 7) ✅ DONE
-- [x] Backend: `PATCH /api/tasks/{id}` — valida status, escreve no `kanban.db`, auto-set started_at/completed_at
-- [x] Frontend: @dnd-kit/core + @dnd-kit/sortable — drag cards entre 5 colunas com closestCorners
-- [x] Frontend: Optimistic update via useMutation com rollback on error
-- [x] Frontend: DragOverlay com rotação + sombra, column drop highlight (ring-accent)
-- [x] Frontend: PointerSensor distance:5 (click vs drag sem conflito)
-- [x] Frontend: MarkdownRenderer nos cards (task.title) e task detail (task.body) com prose-kanban-card CSS
-- **Entrega:** Kanban funcional com drag-and-drop + markdown rendering
+### Phase 5 — Kanban Drag & Drop (Week 7) ✅ DONE
+- [x] Backend: `PATCH /api/tasks/{id}` — validates status, writes to `kanban.db`, auto-set started_at/completed_at
+- [x] Frontend: @dnd-kit/core + @dnd-kit/sortable — drag cards between 5 columns with closestCorners
+- [x] Frontend: Optimistic update via useMutation with rollback on error
+- [x] Frontend: DragOverlay with rotation + shadow, column drop highlight (ring-accent)
+- [x] Frontend: PointerSensor distance:5 (click vs drag no conflict)
+- [x] Frontend: MarkdownRenderer in cards (task.title) and task detail (task.body) with prose-kanban-card CSS
+- **Deliverable:** Functional Kanban with drag-and-drop + markdown rendering
 
-### Phase 6 — Task Detail Panel (Semana 8) ✅ DONE
+### Phase 6 — Task Detail Panel (Week 8) ✅ DONE
 - [x] Frontend: Tabbed interface (Overview, Runs, Comments, Children) with state-based tabs
 - [x] Frontend: MarkdownRenderer in task title, comments, and body
 - [x] Frontend: Count badges on tabs (Runs (N), Comments (N))
 - [x] Frontend: data-testid attributes for testability
 - [x] Frontend: Children tab with clickable cards
-- **Entrega:** Task detail com tabs organizadas e markdown em todo conteúdo
+- **Deliverable:** Task detail with organized tabs and markdown in all content
 
-### Phase 7 — Config Viewer (Semana 9) ✅ DONE
-- [x] Backend: `GET /api/config` — parse seguro do `config.yaml` (safe_load) com redação de secrets
-- [x] Backend: `GET /api/config/raw` — YAML redacted como texto
-- [x] Frontend: Tree view colapsável (ConfigNode recursivo, auto-expand 2 níveis)
-- [x] Frontend: YAML view com toggle (tree ↔ yaml)
-- [x] Frontend: Search/filter por key name
-- [x] Frontend: Secret indicators (🔒 + amber text para valores redacted)
+### Phase 7 — Config Viewer (Week 9) ✅ DONE
+- [x] Backend: `GET /api/config` — safe parse of `config.yaml` (safe_load) with secret redaction
+- [x] Backend: `GET /api/config/raw` — YAML redacted as text
+- [x] Frontend: Collapsible tree view (recursive ConfigNode, auto-expand 2 levels)
+- [x] Frontend: YAML view with toggle (tree ↔ yaml)
+- [x] Frontend: Search/filter by key name
+- [x] Frontend: Secret indicators (🔒 + amber text for redacted values)
 - [x] Frontend: Warning banner "Read-only — changes require container restart"
 - [x] Frontend: Navbar link "Config"
-- **Entrega:** Visualizador de config read-only com redação de secrets
+- **Deliverable:** Read-only config viewer with secret redaction
 
-### Phase 8 — Config Editor (Semana 10) ✅ DONE
+### Phase 8 — Config Editor (Week 10) ✅ DONE
 - [x] Backend: `PATCH /api/config` — atomic write (temp + rename), yaml.safe_dump
 - [x] Backend: Secret field validation (NEVER_EDITABLE list, rejects api_key/token/password/etc)
 - [x] Backend: Suffix-based matching (avoids false positives like max_tokens)
@@ -223,41 +223,41 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 - [x] Frontend: Change tracking with modified indicator + count badge
 - [x] Frontend: Sticky save bar (Save Changes (N) / Cancel)
 - [x] Frontend: useMutation with cache invalidation
-- **Entrega:** Editor de config seguro com validação e atomic write
+- **Deliverable:** Safe config editor with validation and atomic write
 
-### Phase 9 — Skills Hub Browser (Semana 11) ✅ DONE
+### Phase 9 — Skills Hub Browser (Week 11) ✅ DONE
 - [x] Backend: `GET /api/skills` — parse SKILL.md YAML frontmatter
 - [x] Backend: `GET /api/skills/{slug}` — full detail + file list
-- [x] Frontend: Grid de skills com category colors, search, filtros, sort
-- [x] Frontend: Detail modal com MarkdownRenderer
+- [x] Frontend: Skills grid with category colors, search, filters, sort
+- [x] Frontend: Detail modal with MarkdownRenderer
 - [x] Cleanup: remove example.env, fix SECURITY.md, clean PLAN.md tests, improve .gitignore
-- **Entrega:** Browser de skills funcional
-### Phase 10 — Workflow Editor Visual (Semana 12) ✅ DONE
-- [x] Backend: CRUD completo — `backend/workflows.py` (SQLite table, 5 endpoints)
-- [x] Frontend: React Flow canvas com nodes customizados (trigger/action/condition)
+- **Deliverable:** Functional skills browser
+### Phase 10 — Workflow Editor Visual (Week 12) ✅ DONE
+- [x] Backend: Complete CRUD — `backend/workflows.py` (SQLite table, 5 endpoints)
+- [x] Frontend: React Flow canvas with custom nodes (trigger/action/condition)
 - [x] Frontend: WorkflowListPage + WorkflowEditorPage + node palette + properties panel
-- [x] Styling: Dark theme CSS overrides pra React Flow
-- **Entrega:** Editor visual de workflows (estático)
+- [x] Styling: Dark theme CSS overrides for React Flow
+- **Deliverable:** Visual workflow editor (static)
 
-### Phase 11 — Workflow Execution (Semana 13) ✅ DONE
+### Phase 11 — Workflow Execution (Week 13) ✅ DONE
 - [x] Backend: `backend/workflow_engine.py` — topological sort, node executor, cycle detection
 - [x] Backend: `POST /api/workflows/{id}/run`, `GET /runs`, `GET /runs/{id}`
-- [x] Backend: `workflow_runs` table com histórico + result JSON
-- [x] Frontend: ▶ Run Now button, toast de resultado, Run History panel
+- [x] Backend: `workflow_runs` table with history + result JSON
+- [x] Frontend: ▶ Run Now button, result toast, Run History panel
 - [x] Frontend: Node config panel (action types, condition fields, trigger types)
-- [x] Frontend: runResults state pra indicadores visuais nos nodes
-- **Entrega:** Workflows executáveis com engine de execução
+- [x] Frontend: runResults state for visual indicators on nodes
+- **Deliverable:** Executable workflows with execution engine
 
-### Phase 12 — Polish (Semana 14) ✅ DONE
-- [x] Dark/Light mode toggle — ☀️/🌙 no navbar, localStorage persistence
-- [x] Light theme CSS variables — `.light` class com todas as variáveis
+### Phase 12 — Polish (Week 14) ✅ DONE
+- [x] Dark/Light mode toggle — ☀️/🌙 in navbar, localStorage persistence
+- [x] Light theme CSS variables — `.light` class with all variables
 - [x] Keyboard shortcuts — ⌘K quick search, `g+{d,s,t,c,k,w}` navigation, `?` help modal
-- [x] Responsive navbar — hamburger menu no mobile, `sm:hidden`/`sm:flex`
-- [x] SearchModal — busca across sessions, tasks, skills, workflows
-- [x] HelpModal — lista todas as shortcuts disponíveis
-- **Entrega:** App polido com dark/light mode, shortcuts e responsive
+- [x] Responsive navbar — hamburger menu on mobile, `sm:hidden`/`sm:flex`
+- [x] SearchModal — search across sessions, tasks, skills, workflows
+- [x] HelpModal — lists all available shortcuts
+- **Deliverable:** Polished app with dark/light mode, shortcuts and responsive
 
-### Phase 13 — Auth (Semana 15) ✅ DONE
+### Phase 13 — Auth (Week 15) ✅ DONE
 - [x] JWT authentication — token-based auth using Python stdlib hmac (no external JWT library)
 - [x] Login page — `/login` route with username/password form
 - [x] ProtectedRoute — frontend route guard redirects unauthenticated users to login
@@ -266,18 +266,18 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 - [x] `backend/routers/auth.py` — `/api/auth/login`, `/api/auth/me`, `/api/auth/logout` endpoints
 - [x] Multi-user ready — first run auto-creates `admin` user from env vars `AGENTOS_ADMIN_USER` / `AGENTOS_ADMIN_PASS`
 - [x] All API routes protected with `require_auth` middleware (except `/health`, `/login`, static assets)
-- **Entrega:** JWT auth completo, login page, protected routes, multi-user ready
+- **Deliverable:** Complete JWT auth, login page, protected routes, multi-user ready
 
-### Phase 14 — Kanban Integration (Semana 16) ✅ DONE
+### Phase 14 — Kanban Integration (Week 16) ✅ DONE
 - [x] Task Editor Modal — edit title, body, assignee, priority, status
 - [x] Enhanced Kanban Board — 5 columns, improved DnD, cards with badges
 - [x] Filters & Search — by assignee, priority, status, title search
 - [x] Bulk Operations — multi-select, batch status changes
 - [x] Comments & Stats — task comments, completion stats
 - [x] Notify webhook — Discord webhook on task completion
-- **Entrega:** Kanban board completo com task editor, filtros, bulk ops, notificações
+- **Deliverable:** Complete Kanban board with task editor, filters, bulk ops, notifications
 
-### Phase 15 — User Management (Semana 17) ✅ DONE
+### Phase 15 — User Management (Week 17) ✅ DONE
 - [x] Settings page (`/settings`) — admin-only user management panel
 - [x] List users — table with username, role, created date
 - [x] Create users — form with username, password, role (admin/user)
@@ -285,9 +285,9 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 - [x] Change passwords — admin can reset any user's password
 - [x] `backend/routers/users.py` — CRUD endpoints for user management
 - [x] Role-based access — admin sees Settings, regular users do not
-- **Entrega:** Multi-user management UI com create, delete, password reset
+- **Deliverable:** Multi-user management UI with create, delete, password reset
 
-### Phase 16 — Cron Job Editor (Semana 18) ✅ DONE
+### Phase 16 — Cron Job Editor (Week 18) ✅ DONE
 - [x] `GET /api/cron/jobs` — list all cron jobs from `jobs.json`
 - [x] `POST /api/cron/jobs` — create new cron job
 - [x] `PUT /api/cron/jobs/{id}` — update job (schedule, prompt, enabled)
@@ -298,9 +298,9 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 - [x] `backend/routers/cron.py` — CRUD + run/pause/resume endpoints
 - [x] Frontend CronJobsPage — table with job name, schedule, status, actions
 - [x] Inline editor — edit schedule expression and prompt text
-- **Entrega:** Cron job editor completo com CRUD, run now, pause/resume
+- **Deliverable:** Complete cron job editor with CRUD, run now, pause/resume
 
-### Phase 17 — Profile Editor (Advanced) (Semana 19) ✅ DONE
+### Phase 17 — Profile Editor (Advanced) (Week 19) ✅ DONE
 - [x] 6-tab profile editor:
   - **Model** — select model provider and model name
   - **Agent** — configure agent behavior (temperature, max tokens, etc.)
@@ -312,53 +312,53 @@ E2E tests with Playwright + vision validation will be added in a future phase.
 - [x] `GET /api/profiles/{name}` — full profile detail with config + soul
 - [x] `PUT /api/profiles/{name}/soul` — write SOUL.md content
 - [x] Frontend ProfileEditorPage — tabbed editor with save/load
-- **Entrega:** Advanced profile editor com 6 tabs, SOUL.md editing, live preview
+- **Deliverable:** Advanced profile editor with 6 tabs, SOUL.md editing, live preview
 
 ---
 
-## 6. Cron de Implementação Automática
+## 6. Automatic Implementation Cron
 
-### Estrutura do cron
+### Cron structure
 
-Cada increment é uma task Kanban. O fluxo automático:
+Each increment is a Kanban task. The automatic workflow:
 
 ```yaml
 # Cron job: AgentOS Sprint
-schedule: "0 9 * * 1"  # Toda segunda-feira às 9:00
+schedule: "0 9 * * 1"  # Every Monday at 9:00
 prompt: |
-  Verificar PLAN.md em /opt/data/agentos/PLAN.md
-  Identificar o próximo increment não completado
-  Criar task Kanban com:
+  Check PLAN.md at /opt/data/agentos/PLAN.md
+  Identify the next incomplete increment
+  Create Kanban task with:
     - assignee: coder
     - workspace: dir:/opt/data/agentos
     - skills: [planning-and-delegation, software-quality-practices]
-  Após Coder completar, despachar Pixel para validar E2E
-  Após Pixel validar, despachar Nexus para integrar e commit
-  Após Nexus commit, despachar Atlas para documentar
-  Marcar increment como done no PLAN.md
+  After Coder completes, dispatch Pixel to validate E2E
+  After Pixel validates, dispatch Nexus to integrate and commit
+  After Nexus commits, dispatch Atlas to document
+  Mark increment as done in PLAN.md
 ```
 
-### Gates de qualidade (automáticos)
+### Quality gates (automatic)
 
-| Gate | Quem | O que verifica |
+| Gate | Who | What it checks |
 |------|------|----------------|
-| Implementação | Coder | Feature funciona + E2E test escrito |
-| Validação Visual | Pixel | Screenshot + vision_analyze = PASS |
-| Regressão | Nexus | Todos os testes E2E anteriores ainda passam |
-| Documentação | Atlas | README + PLAN.md atualizados |
+| Implementation | Coder | Feature works + E2E test written |
+| Visual Validation | Pixel | Screenshot + vision_analyze = PASS |
+| Regression | Nexus | All previous E2E tests still pass |
+| Documentation | Atlas | README + PLAN.md updated |
 
-### Condição de parada
+### Stop condition
 
-Se um increment falhar 2 vezes (consecutive_failures=2), o Kanban auto-bloqueia e escala pra Hermes (default profile), que notifica Mauricio via WhatsApp com o erro e próximo step.
+If an increment fails 2 times (consecutive_failures=2), Kanban auto-blocks and escalates to Hermes (default profile), which notifies Mauricio via WhatsApp with the error and next step.
 
 ---
 
-## 7. Estrutura do Repositório
+## 7. Repository Structure
 
 ```
 agentos/
-├── README.md                     # Visão geral + instalação
-├── SECURITY.md                   # Política de disclosure
+├── README.md                     # Overview + installation
+├── SECURITY.md                   # Disclosure policy
 ├── LICENSE                       # MIT
 ├── 020-agentos                   # s6 cont-init.d script (reference)
 ├── .gitignore                    # Bulletproof
@@ -421,14 +421,14 @@ agentos/
 │   ├── s6-agentos.run            # s6 service definition
 │   └── Dockerfile               # Multi-stage (Node build → Python serve)
 └── docs/
-    ├── PLAN.md                   # Este documento (progress tracker)
+    ├── PLAN.md                   # This document (progress tracker)
     ├── ARCHITECTURE.md
     └── CHANGELOG.md
 ```
 
 ---
 
-## 8. Estado Atual
+## 8. Current Status
 
 | Phase | Status | Feature | Notes |
 |-------|--------|---------|-------|
@@ -456,30 +456,30 @@ agentos/
 
 ---
 
-## 9. Como Retomar (para qualquer session)
+## 9. How to Resume (for any session)
 
-Para continuar de onde parou:
+To continue from where you left off:
 
-1. Ler este arquivo (`/opt/data/agentos/PLAN.md`) — ver qual phase está pendente
-2. Verificar o repo: `cd /opt/data/agentos && git log --oneline -5`
-3. Rodar testes existentes: `cd /opt/data/agentos && pytest tests/e2e/ -v`
-4. Ver status do Kanban: `sqlite3 /opt/data/kanban.db "SELECT id,title,status FROM tasks WHERE title LIKE '%AgentOS%' ORDER BY created_at DESC LIMIT 5;"`
-5. Implementar o próximo increment pendente
-6. Seguir o fluxo SDLC (Coder → Pixel → Nexus → Atlas)
+1. Read this file (`/opt/data/agentos/PLAN.md`) — see which phase is pending
+2. Check the repo: `cd /opt/data/agentos && git log --oneline -5`
+3. Run existing tests: `cd /opt/data/agentos && pytest tests/e2e/ -v`
+4. Check Kanban status: `sqlite3 /opt/data/kanban.db "SELECT id,title,status FROM tasks WHERE title LIKE '%AgentOS%' ORDER BY created_at DESC LIMIT 5;"`
+5. Implement the next pending increment
+6. Follow the SDLC workflow (Coder → Pixel → Nexus → Atlas)
 
-### Cron de retomada automática
+### Auto-resume cron
 
 ```yaml
-schedule: "0 9 * * *"  # Diário às 9:00
+schedule: "0 9 * * *"  # Daily at 9:00
 prompt: |
-  Ler /opt/data/agentos/PLAN.md e identificar o próximo increment pendente.
-  Verificar se há task Kanban ativa para AgentOS.
-  Se não houver task ativa e houver increment pendente:
-    1. Criar task Kanban (assignee=coder, workspace=dir:/opt/data/agentos)
-    2. Após Coder completar, despachar Pixel para E2E + vision
-    3. Após Pixel PASS, despachar Nexus para regressão + commit
-    4. Após Nexus commit, atualizar PLAN.md marcando increment como done
-  Se houver task bloqueada: notificar Mauricio via WhatsApp com erro.
+  Read /opt/data/agentos/PLAN.md and identify the next pending increment.
+  Check if there's an active Kanban task for AgentOS.
+  If there's no active task and there's a pending increment:
+    1. Create Kanban task (assignee=coder, workspace=dir:/opt/data/agentos)
+    2. After Coder completes, dispatch Pixel for E2E + vision
+    3. After Pixel PASS, dispatch Nexus for regression + commit
+    4. After Nexus commits, update PLAN.md marking increment as done
+  If there's a blocked task: notify Mauricio via WhatsApp with error.
 ```
 
 ---
@@ -528,4 +528,4 @@ prompt: |
 - **Responsive Design** — hamburger menu on mobile, adaptive layout
 - **Markdown Everywhere** — react-markdown + remark-gfm + rehype-highlight in chat, cards, comments, tasks
 
-*Documento vivo — atualizar a cada increment completado.*
+*Living document — update after each completed increment.*
