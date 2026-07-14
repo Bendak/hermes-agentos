@@ -1,5 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { AuthProvider, useAuth } from './auth/AuthContext'
+import LoginPage from './auth/LoginPage'
+import ProtectedRoute from './auth/ProtectedRoute'
+import UserManagement from './pages/UserManagement'
+import ProfilesPage from './pages/Profiles'
 import { useQuery, useMutation, useQueryClient, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DndContext, DragOverlay, useDroppable, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { useSortable } from '@dnd-kit/sortable'
@@ -213,6 +218,7 @@ interface WorkflowNodeData {
 
 function NavBar() {
   const onOpenSearch = useOpenSearch()
+  const { user, logout } = useAuth()
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     if (typeof window !== 'undefined') {
       return (localStorage.getItem('agentos-theme') as 'dark' | 'light') || 'dark'
@@ -261,6 +267,8 @@ function NavBar() {
               {navLink('/skills', 'Skills')}
               {navLink('/workflows', 'Workflows')}
               {navLink('/cron', 'Cron')}
+              {navLink('/profiles', 'Profiles')}
+              {navLink('/settings', 'Settings')}
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -284,6 +292,19 @@ function NavBar() {
             >
               {theme === 'dark' ? '☀️' : '🌙'}
             </button>
+            {/* User info + logout */}
+            {user && (
+              <div className="hidden sm:flex items-center gap-2 ml-1 pl-2 border-l border-border">
+                <span className="text-xs text-text-tertiary font-mono">{user.username}</span>
+                <button
+                  onClick={logout}
+                  className="p-1.5 rounded-md text-text-tertiary hover:text-error hover:bg-error-subtle/50 transition-colors"
+                  title="Sign out"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                </button>
+              </div>
+            )}
             {/* Mobile hamburger */}
             <button
               className="sm:hidden p-2 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface/60 transition-colors"
@@ -306,6 +327,8 @@ function NavBar() {
             {navLink('/skills', 'Skills')}
             {navLink('/workflows', 'Workflows')}
             {navLink('/cron', 'Cron')}
+            {navLink('/profiles', 'Profiles')}
+            {navLink('/settings', 'Settings')}
             {onOpenSearch && (
               <button
                 onClick={() => { setMobileMenuOpen(false); onOpenSearch() }}
@@ -4447,6 +4470,14 @@ function HelpModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 /* ── App ───────────────────────────────────────────── */
 
 export default function App() {
+  return (
+    <AuthProvider>
+      <AppInner />
+    </AuthProvider>
+  )
+}
+
+function AppInner() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const keySeqRef = useRef<string[]>([])
@@ -4503,17 +4534,20 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <SearchContext.Provider value={{ openSearch: () => setSearchOpen(true) }}>
         <Routes>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/health" element={<HealthPage />} />
-          <Route path="/sessions" element={<SessionsPage />} />
-          <Route path="/sessions/:id" element={<SessionDetailPage />} />
-          <Route path="/tasks" element={<KanbanBoardPage />} />
-          <Route path="/tasks/:id" element={<TaskDetailPage />} />
-          <Route path="/config" element={<ConfigPage />} />
-          <Route path="/skills" element={<SkillsHubPage />} />
-          <Route path="/workflows" element={<WorkflowListPage />} />
-          <Route path="/workflows/:id" element={<WorkflowEditorPage />} />
-          <Route path="/cron" element={<CronPage />} />
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+          <Route path="/health" element={<ProtectedRoute><HealthPage /></ProtectedRoute>} />
+          <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
+          <Route path="/sessions/:id" element={<ProtectedRoute><SessionDetailPage /></ProtectedRoute>} />
+          <Route path="/tasks" element={<ProtectedRoute><KanbanBoardPage /></ProtectedRoute>} />
+          <Route path="/tasks/:id" element={<ProtectedRoute><TaskDetailPage /></ProtectedRoute>} />
+          <Route path="/config" element={<ProtectedRoute><ConfigPage /></ProtectedRoute>} />
+          <Route path="/skills" element={<ProtectedRoute><SkillsHubPage /></ProtectedRoute>} />
+          <Route path="/workflows" element={<ProtectedRoute><WorkflowListPage /></ProtectedRoute>} />
+          <Route path="/workflows/:id" element={<ProtectedRoute><WorkflowEditorPage /></ProtectedRoute>} />
+          <Route path="/cron" element={<ProtectedRoute><CronPage /></ProtectedRoute>} />
+          <Route path="/profiles" element={<ProtectedRoute><ProfilesPage /></ProtectedRoute>} />
+          <Route path="/settings" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
         </Routes>
         <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
         <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
@@ -4564,104 +4598,171 @@ function formatRelativeTime(iso: string | null): string {
   return diff > 0 ? `in ${days}d` : `${days}d ago`
 }
 
-function CronJobCard({
+/* ── Cron Job Edit/Create Dialog ──────────────────── */
+
+function CronJobDialog({
   job,
-  onPause,
-  onResume,
-  onDelete,
-  isPausing,
-  isResuming,
-  isDeleting,
+  onSave,
+  onClose,
+  isSaving,
 }: {
-  job: CronJob
-  onPause: () => void
-  onResume: () => void
-  onDelete: () => void
-  isPausing: boolean
-  isResuming: boolean
-  isDeleting: boolean
+  job: CronJob | null
+  onSave: (data: Record<string, unknown>) => void
+  onClose: () => void
+  isSaving: boolean
 }) {
-  const isPaused = !job.enabled || job.state === 'paused'
-  const statusColor = isPaused ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success'
-  const statusLabel = isPaused ? 'Paused' : 'Active'
-  const schedule = job.schedule?.display || job.schedule_display || '-'
-  const deliverLabel = job.deliver === 'origin' ? (job.origin?.chat_name || 'origin') : job.deliver || '-'
+  const [name, setName] = useState(job?.name || '')
+  const [schedule, setSchedule] = useState(job?.schedule?.expr || job?.schedule_display || '0 * * * *')
+  const [prompt, setPrompt] = useState(job?.prompt || '')
+  const [enabled, setEnabled] = useState(job?.enabled ?? true)
+  const [model, setModel] = useState(job?.model || '')
+  const [deliver, setDeliver] = useState(job?.deliver || 'origin')
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const data: Record<string, unknown> = {
+      name: name.trim(),
+      schedule: schedule.trim(),
+      prompt: prompt.trim(),
+      enabled,
+      deliver,
+    }
+    if (model.trim()) data.model = model.trim()
+    onSave(data)
+  }
 
   return (
-    <div className="rounded-lg border border-border bg-surface/30 p-4 hover:bg-surface/50 transition-colors">
-      <div className="flex items-start justify-between mb-2">
-        <div className="min-w-0 flex-1">
-          <h3 className="text-sm font-medium text-text-primary truncate">{job.name || job.id}</h3>
-          <p className="text-xs text-text-tertiary font-mono mt-0.5">{schedule}</p>
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={onClose}>
+      <div
+        className="bg-bg-elevated border border-border rounded-xl max-w-xl w-full max-h-[85vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <h2 className="text-lg font-bold text-text-primary">
+            {job ? 'Edit Cron Job' : 'New Cron Job'}
+          </h2>
+          <button onClick={onClose} className="text-text-tertiary hover:text-text-primary text-xl leading-none">&times;</button>
         </div>
-        <div className="flex items-center gap-2 shrink-0 ml-3">
-          <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColor}`}>
-            {statusLabel}
-          </span>
-          {job.last_status && (
-            <span className={`px-2 py-0.5 rounded text-xs ${
-              job.last_status === 'ok' ? 'bg-success-subtle text-success' : 'bg-error-subtle text-error'
-            }`}>
-              {job.last_status === 'ok' ? '✓ OK' : '✗ Error'}
-            </span>
-          )}
-        </div>
-      </div>
+        <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
+          {/* Name */}
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Name</label>
+            <input
+              type="text"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              placeholder="e.g. Daily briefing"
+              className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40"
+            />
+          </div>
 
-      {job.prompt && (
-        <p className="text-xs text-text-secondary mb-3 line-clamp-2 whitespace-pre-wrap">{job.prompt}</p>
-      )}
+          {/* Schedule */}
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">
+              Schedule <span className="text-text-tertiary">(cron expression)</span>
+            </label>
+            <input
+              type="text"
+              value={schedule}
+              onChange={(e) => setSchedule(e.target.value)}
+              required
+              placeholder="0 * * * *"
+              className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm font-mono text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40"
+            />
+            <p className="text-[11px] text-text-tertiary mt-1">
+              min hour day month weekday &mdash; e.g. <code className="text-accent">0 8 * * 1-5</code> = weekdays at 8am,{' '}
+              <code className="text-accent">0 */6 * * *</code> = every 6h,{' '}
+              <code className="text-accent">30 21 * * 2</code> = Tuesdays at 9:30pm
+            </p>
+          </div>
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-tertiary mb-3">
-        {job.last_run_at && (
-          <span>Last run: <span className="text-text-secondary">{formatRelativeTime(job.last_run_at)}</span></span>
-        )}
-        {job.next_run_at && (
-          <span>Next run: <span className="text-text-secondary">{formatRelativeTime(job.next_run_at)}</span></span>
-        )}
-        <span>Deliver: <span className="text-text-secondary">{deliverLabel}</span></span>
-        {job.repeat?.completed != null && (
-          <span>Runs: <span className="text-text-secondary">{job.repeat.completed}</span></span>
-        )}
-        {job.skills && job.skills.length > 0 && (
-          <span>Skills: <span className="text-text-secondary">{job.skills.join(', ')}</span></span>
-        )}
-        {job.model && (
-          <span>Model: <span className="text-text-secondary">{job.model}</span></span>
-        )}
-      </div>
+          {/* Prompt */}
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Prompt</label>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={6}
+              placeholder="Describe what this job should do..."
+              className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 resize-y font-mono text-xs leading-relaxed"
+            />
+          </div>
 
-      <div className="flex items-center gap-2">
-        {isPaused ? (
-          <button
-            onClick={onResume}
-            disabled={isResuming}
-            className="px-3 py-1 text-xs rounded bg-success-subtle text-success hover:bg-success/20 disabled:opacity-50 transition-colors"
-          >
-            {isResuming ? 'Resuming…' : '▶ Resume'}
-          </button>
-        ) : (
-          <button
-            onClick={onPause}
-            disabled={isPausing}
-            className="px-3 py-1 text-xs rounded bg-warning-subtle text-warning hover:bg-warning/20 disabled:opacity-50 transition-colors"
-          >
-            {isPausing ? 'Pausing…' : '⏸ Pause'}
-          </button>
-        )}
-        <button
-          onClick={onDelete}
-          disabled={isDeleting}
-          className="px-3 py-1 text-xs rounded bg-error-subtle text-error hover:bg-error/20 disabled:opacity-50 transition-colors"
-        >
-          {isDeleting ? 'Deleting…' : '🗑 Delete'}
-        </button>
+          {/* Model */}
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Model <span className="text-text-tertiary">(optional)</span></label>
+            <input
+              type="text"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              placeholder="e.g. gemma4:31b"
+              className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40"
+            />
+          </div>
+
+          {/* Deliver */}
+          <div>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Deliver to</label>
+            <select
+              value={deliver}
+              onChange={(e) => setDeliver(e.target.value)}
+              className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
+            >
+              <option value="origin">Origin chat</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="none">No delivery</option>
+            </select>
+          </div>
+
+          {/* Enabled toggle */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setEnabled(!enabled)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+                enabled ? 'bg-accent' : 'bg-border'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${
+                  enabled ? 'translate-x-[18px]' : 'translate-x-[3px]'
+                }`}
+              />
+            </button>
+            <span className="text-sm text-text-secondary">{enabled ? 'Enabled' : 'Paused'}</span>
+          </div>
+
+          {/* Actions */}
+          <div className="flex justify-end gap-2 pt-2 border-t border-border">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 text-sm rounded-md text-text-secondary hover:text-text-primary hover:bg-surface/60 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={isSaving || !name.trim() || !schedule.trim()}
+              className="px-4 py-2 text-sm rounded-md bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors font-medium"
+            >
+              {isSaving ? 'Saving...' : job ? 'Save Changes' : 'Create Job'}
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   )
 }
 
+/* ── Cron Page (table + dialog) ─────────────────────── */
+
 function CronPage() {
+  const [editJob, setEditJob] = useState<CronJob | null>(null)
+  const [showCreate, setShowCreate] = useState(false)
+  const queryClient = useQueryClient()
+
   const { data, isLoading, error } = useQuery({
     queryKey: ['cron-jobs'],
     queryFn: async () => {
@@ -4670,6 +4771,38 @@ function CronPage() {
       return res.json() as Promise<{ jobs: CronJob[] }>
     },
     refetchInterval: 10000,
+  })
+
+  const createMutation = useMutation({
+    mutationFn: async (body: Record<string, unknown>) => {
+      const res = await fetch('/api/cron', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (!res.ok) throw new Error('Failed to create job')
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cron-jobs'] })
+      setShowCreate(false)
+    },
+  })
+
+  const updateMutation = useMutation({
+    mutationFn: async ({ id, ...body }: Record<string, unknown>) => {
+      const res = await fetch(`/api/cron/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      if (!res.ok) throw new Error('Failed to update job')
+      return res.json()
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cron-jobs'] })
+      setEditJob(null)
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: async (jobId: string) => {
+      const res = await fetch(`/api/cron/${jobId}`, { method: 'DELETE' })
+      return res.json()
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
   })
 
   const pauseMutation = useMutation({
@@ -4688,10 +4821,10 @@ function CronPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
   })
 
-  const deleteMutation = useMutation({
+  const runNowMutation = useMutation({
     mutationFn: async (jobId: string) => {
-      const res = await fetch(`/api/cron/${jobId}`, { method: 'DELETE' })
-      return res.json()
+      const res = await fetch(`/api/cron/${jobId}/run`, { method: 'POST' })
+      return res.json() as Promise<{ status: string; message: string }>
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
   })
@@ -4704,7 +4837,7 @@ function CronPage() {
     <div className="min-h-screen bg-bg-base">
       <NavBar />
       <header className="px-6 pt-8 pb-4">
-        <div className="mx-auto max-w-5xl">
+        <div className="mx-auto max-w-6xl">
           <div className="flex items-end justify-between">
             <div>
               <h1 className="text-h2 font-bold text-text-primary">Cron Jobs</h1>
@@ -4712,22 +4845,31 @@ function CronPage() {
                 Manage scheduled tasks and automations
               </p>
             </div>
-            {!isLoading && !error && (
-              <div className="flex items-center gap-4 text-sm">
-                <span className="text-text-tertiary">
-                  <span className="text-success font-medium">{activeCount}</span> active
-                </span>
-                {pausedCount > 0 && (
+            <div className="flex items-center gap-4">
+              {!isLoading && !error && (
+                <div className="flex items-center gap-4 text-sm">
                   <span className="text-text-tertiary">
-                    <span className="text-warning font-medium">{pausedCount}</span> paused
+                    <span className="text-semantic-success font-medium">{activeCount}</span> active
                   </span>
-                )}
-              </div>
-            )}
+                  {pausedCount > 0 && (
+                    <span className="text-text-tertiary">
+                      <span className="text-semantic-warning font-medium">{pausedCount}</span> paused
+                    </span>
+                  )}
+                </div>
+              )}
+              <button
+                onClick={() => setShowCreate(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-accent text-white hover:bg-accent/80 transition-colors"
+              >
+                <span className="text-base leading-none">+</span> New Job
+              </button>
+            </div>
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-6 pb-12">
+
+      <main className="mx-auto max-w-6xl px-6 pb-12">
         {isLoading && (
           <div className="space-y-3">
             {Array.from({ length: 3 }).map((_, i) => (
@@ -4747,30 +4889,146 @@ function CronPage() {
         {!isLoading && !error && jobs.length === 0 && (
           <div className="rounded-lg border border-border bg-surface/30 p-8 text-center">
             <p className="text-text-tertiary text-sm">No cron jobs configured.</p>
-            <p className="text-text-tertiary text-xs mt-1">Cron jobs can be created via the Hermes CLI or chat interface.</p>
+            <p className="text-text-tertiary text-xs mt-1">Click &quot;New Job&quot; to create your first scheduled task.</p>
           </div>
         )}
         {jobs.length > 0 && (
-          <div className="space-y-3">
-            {jobs.map((job) => (
-              <CronJobCard
-                key={job.id}
-                job={job}
-                onPause={() => pauseMutation.mutate(job.id)}
-                onResume={() => resumeMutation.mutate(job.id)}
-                onDelete={() => {
-                  if (window.confirm(`Delete cron job "${job.name || job.id}"? This cannot be undone.`)) {
-                    deleteMutation.mutate(job.id)
-                  }
-                }}
-                isPausing={pauseMutation.isPending && pauseMutation.variables === job.id}
-                isResuming={resumeMutation.isPending && resumeMutation.variables === job.id}
-                isDeleting={deleteMutation.isPending && deleteMutation.variables === job.id}
-              />
-            ))}
+          <div className="rounded-lg border border-border overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-surface/40 text-left text-xs text-text-tertiary uppercase tracking-wider">
+                  <th className="px-4 py-3 font-medium">Name</th>
+                  <th className="px-4 py-3 font-medium">Schedule</th>
+                  <th className="px-4 py-3 font-medium">Status</th>
+                  <th className="px-4 py-3 font-medium hidden lg:table-cell">Last Run</th>
+                  <th className="px-4 py-3 font-medium hidden lg:table-cell">Next Run</th>
+                  <th className="px-4 py-3 font-medium text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {jobs.map((job) => {
+                  const isPaused = !job.enabled || job.state === 'paused'
+                  const schedule = job.schedule?.display || job.schedule_display || '-'
+                  return (
+                    <tr key={job.id} className="hover:bg-surface/30 transition-colors">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-text-primary truncate max-w-[200px]">{job.name || job.id}</div>
+                        {job.model && (
+                          <div className="text-[11px] text-text-tertiary font-mono mt-0.5">{job.model}</div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-mono text-xs text-text-secondary">{schedule}</td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-block h-2 w-2 rounded-full ${isPaused ? 'bg-semantic-warning' : 'bg-semantic-success'}`} />
+                          <span className={`text-xs ${isPaused ? 'text-semantic-warning' : 'text-semantic-success'}`}>
+                            {isPaused ? 'Paused' : 'Active'}
+                          </span>
+                          {job.last_status && (
+                            <span className={`text-[11px] px-1.5 py-0.5 rounded ${
+                              job.last_status === 'ok' ? 'bg-semantic-success/10 text-semantic-success' : 'bg-semantic-error/10 text-semantic-error'
+                            }`}>
+                              {job.last_status === 'ok' ? '✓' : '✗'}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-text-tertiary hidden lg:table-cell">
+                        {formatRelativeTime(job.last_run_at)}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-text-tertiary hidden lg:table-cell">
+                        {formatRelativeTime(job.next_run_at)}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          {/* Run Now */}
+                          <button
+                            onClick={() => runNowMutation.mutate(job.id)}
+                            disabled={runNowMutation.isPending && runNowMutation.variables === job.id}
+                            className="px-2 py-1 text-[11px] rounded bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50 transition-colors"
+                            title="Run now"
+                          >
+                            {runNowMutation.isPending && runNowMutation.variables === job.id ? '...' : '▶ Run'}
+                          </button>
+                          {/* Edit */}
+                          <button
+                            onClick={() => setEditJob(job)}
+                            className="px-2 py-1 text-[11px] rounded bg-surface/60 text-text-secondary hover:text-text-primary hover:bg-surface transition-colors"
+                            title="Edit job"
+                          >
+                            ✎ Edit
+                          </button>
+                          {/* Pause / Resume */}
+                          {isPaused ? (
+                            <button
+                              onClick={() => resumeMutation.mutate(job.id)}
+                              disabled={resumeMutation.isPending && resumeMutation.variables === job.id}
+                              className="px-2 py-1 text-[11px] rounded bg-semantic-success/10 text-semantic-success hover:bg-semantic-success/20 disabled:opacity-50 transition-colors"
+                              title="Resume"
+                            >
+                              {resumeMutation.isPending && resumeMutation.variables === job.id ? '...' : '▶ Resume'}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => pauseMutation.mutate(job.id)}
+                              disabled={pauseMutation.isPending && pauseMutation.variables === job.id}
+                              className="px-2 py-1 text-[11px] rounded bg-semantic-warning/10 text-semantic-warning hover:bg-semantic-warning/20 disabled:opacity-50 transition-colors"
+                              title="Pause"
+                            >
+                              {pauseMutation.isPending && pauseMutation.variables === job.id ? '...' : '⏸ Pause'}
+                            </button>
+                          )}
+                          {/* Delete */}
+                          <button
+                            onClick={() => {
+                              if (window.confirm(`Delete cron job "${job.name || job.id}"? This cannot be undone.`)) {
+                                deleteMutation.mutate(job.id)
+                              }
+                            }}
+                            disabled={deleteMutation.isPending && deleteMutation.variables === job.id}
+                            className="px-2 py-1 text-[11px] rounded bg-semantic-error/10 text-semantic-error hover:bg-semantic-error/20 disabled:opacity-50 transition-colors"
+                            title="Delete"
+                          >
+                            {deleteMutation.isPending && deleteMutation.variables === job.id ? '...' : '✕'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Run-now toast */}
+        {runNowMutation.isSuccess && runNowMutation.data && (
+          <div className="fixed bottom-4 right-4 bg-bg-elevated border border-accent/30 rounded-lg px-4 py-3 shadow-lg z-50 max-w-sm">
+            <p className="text-sm text-text-primary font-medium">Job triggered</p>
+            <p className="text-xs text-text-secondary mt-0.5">{(runNowMutation.data as { message: string }).message}</p>
           </div>
         )}
       </main>
+
+      {/* Create dialog */}
+      {showCreate && (
+        <CronJobDialog
+          job={null}
+          onSave={(data) => createMutation.mutate(data)}
+          onClose={() => setShowCreate(false)}
+          isSaving={createMutation.isPending}
+        />
+      )}
+
+      {/* Edit dialog */}
+      {editJob && (
+        <CronJobDialog
+          job={editJob}
+          onSave={(data) => updateMutation.mutate({ id: editJob.id, ...data })}
+          onClose={() => setEditJob(null)}
+          isSaving={updateMutation.isPending}
+        />
+      )}
     </div>
   )
 }
