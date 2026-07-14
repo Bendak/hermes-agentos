@@ -124,7 +124,15 @@ def _to_detail(profile_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
         "agent": {
             "max_turns": agent.get("max_turns", 150),
             "gateway_timeout": agent.get("gateway_timeout", 1800),
+            "restart_drain_timeout": agent.get("restart_drain_timeout", 180),
+            "api_max_retries": agent.get("api_max_retries", 3),
+            "tool_use_enforcement": agent.get("tool_use_enforcement", "auto"),
+            "task_completion_guidance": agent.get("task_completion_guidance", True),
+            "parallel_tool_call_guidance": agent.get("parallel_tool_call_guidance", True),
+            "verify_on_stop": agent.get("verify_on_stop", True),
+            "clarify_timeout": agent.get("clarify_timeout", 600),
         },
+        "description": safe.get("description", ""),
     }
 
 
@@ -135,6 +143,7 @@ class ProfileUpdate(BaseModel):
     fallback_providers: list[str] | None = None
     toolsets: list[str] | None = None
     agent: dict[str, Any] | None = None
+    description: str | None = None
 
 
 class ProfileCreate(BaseModel):
@@ -143,6 +152,7 @@ class ProfileCreate(BaseModel):
     fallback_providers: list[str] | None = None
     toolsets: list[str] | None = None
     agent: dict[str, Any] | None = None
+    description: str | None = None
 
 
 # ── Endpoints ────────────────────────────────────────────────────────
@@ -207,6 +217,9 @@ async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]
             existing_agent[k] = v
         cfg["agent"] = existing_agent
 
+    if body.description is not None:
+        cfg["description"] = body.description
+
     yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
     _atomic_write(_config_path(pid), yaml_text)
     return _to_detail(pid, cfg)
@@ -240,6 +253,9 @@ async def create_profile(body: ProfileCreate) -> dict[str, Any]:
             "verify_on_stop": True,
         },
     }
+
+    if body.description:
+        cfg["description"] = body.description
 
     yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
     _atomic_write(_config_path(pid), yaml_text)
@@ -279,3 +295,35 @@ async def duplicate_profile(profile_id: str, body: dict | None = None) -> dict[s
     yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
     _atomic_write(_config_path(new_pid), yaml_text)
     return _to_detail(new_pid, cfg)
+
+
+# ── SOUL.md endpoints ───────────────────────────────────────────────
+
+class SoulUpdate(BaseModel):
+    content: str
+
+
+@router.get("/{profile_id}/soul")
+async def get_soul(profile_id: str) -> dict[str, Any]:
+    """Return the SOUL.md content for a profile."""
+    pid = _sanitize_id(profile_id)
+    dir_path = _profile_dir(pid)
+    if not os.path.isdir(dir_path):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    soul_path = os.path.join(dir_path, "SOUL.md")
+    if not os.path.isfile(soul_path):
+        return {"content": ""}
+    with open(soul_path, "r", encoding="utf-8") as f:
+        return {"content": f.read()}
+
+
+@router.put("/{profile_id}/soul")
+async def update_soul(profile_id: str, body: SoulUpdate) -> dict[str, Any]:
+    """Write the SOUL.md content for a profile."""
+    pid = _sanitize_id(profile_id)
+    dir_path = _profile_dir(pid)
+    if not os.path.isdir(dir_path):
+        raise HTTPException(status_code=404, detail="Profile not found")
+    soul_path = os.path.join(dir_path, "SOUL.md")
+    _atomic_write(soul_path, body.content)
+    return {"ok": True}
