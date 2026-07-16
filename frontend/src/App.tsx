@@ -1709,21 +1709,19 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
       </div>
       <div ref={bottomRef} />
 
-      {/* Floating navigation buttons */}
+      {/* Floating navigation buttons — scroll within current page */}
       <div className="fixed bottom-20 right-4 flex flex-col gap-2 z-50">
         <button
-          onClick={goToFirstPage}
-          disabled={isFirstPage}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover/80 transition shadow-lg disabled:opacity-30 disabled:cursor-not-allowed"
-          title="Jump to oldest messages"
+          onClick={() => messagesRef.current?.scrollIntoView({ behavior: 'smooth' })}
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover/80 transition shadow-lg"
+          title="Scroll to top of page"
         >
           ↑
         </button>
         <button
-          onClick={goToLastPage}
-          disabled={isLastPage}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover/80 transition shadow-lg disabled:opacity-30 disabled:cursor-not-allowed"
-          title="Jump to newest messages"
+          onClick={() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })}
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover/80 transition shadow-lg"
+          title="Scroll to bottom of page"
         >
           ↓
         </button>
