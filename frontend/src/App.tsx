@@ -1483,7 +1483,9 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
   const [total, setTotal] = useState(0)
   const [pageInput, setPageInput] = useState('')
   const [followTail, setFollowTail] = useState(true) // follow tail: auto-scroll to newest
+  const [showScrollButtons, setShowScrollButtons] = useState(false) // only show when content > 2x viewport
   const messagesRef = useRef<HTMLDivElement>(null)
+  const messagesContainerRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const isInitialLoad = useRef(true)
 
@@ -1550,6 +1552,28 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
       }
     }
   }, [data, followTail])
+
+  // Check if scroll buttons should be visible (content > 2x viewport)
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const checkHeight = () => {
+      const viewportHeight = window.innerHeight
+      const contentHeight = container.scrollHeight
+      setShowScrollButtons(contentHeight > viewportHeight * 2)
+    }
+
+    checkHeight()
+    const observer = new ResizeObserver(checkHeight)
+    observer.observe(container)
+    window.addEventListener('resize', checkHeight)
+
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', checkHeight)
+    }
+  }, [data])
 
   // Pagination calculations
   const totalPages = total > 0 ? Math.ceil(total / limit) : 1
@@ -1687,7 +1711,7 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
       </div>
 
       {/* Messages */}
-      <div className="flex flex-col px-2">
+      <div ref={messagesContainerRef} className="flex flex-col px-2">
         {messagesLoading && offset !== null ? (
           <div className="space-y-3 py-6" aria-label="Loading page" role="status">
             {Array.from({ length: 4 }).map((_, i) => (
@@ -1709,23 +1733,25 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
       </div>
       <div ref={bottomRef} />
 
-      {/* Floating navigation buttons — scroll within current page */}
-      <div className="fixed bottom-20 right-4 flex flex-col gap-2 z-50">
-        <button
-          onClick={() => messagesRef.current?.scrollIntoView({ behavior: 'smooth' })}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover/80 transition shadow-lg"
-          title="Scroll to top of page"
-        >
-          ↑
-        </button>
-        <button
-          onClick={() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })}
-          className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover/80 transition shadow-lg"
-          title="Scroll to bottom of page"
-        >
-          ↓
-        </button>
-      </div>
+      {/* Floating navigation buttons — only visible when content > 2x viewport */}
+      {showScrollButtons && (
+        <div className="fixed bottom-20 right-4 flex flex-col gap-2 z-50">
+          <button
+            onClick={() => messagesRef.current?.scrollIntoView({ behavior: 'smooth' })}
+            className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover/80 transition shadow-lg"
+            title="Scroll to top of page"
+          >
+            ↑
+          </button>
+          <button
+            onClick={() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' })}
+            className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover/80 transition shadow-lg"
+            title="Scroll to bottom of page"
+          >
+            ↓
+          </button>
+        </div>
+      )}
     </div>
   )
 }
