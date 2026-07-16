@@ -376,7 +376,7 @@ function AgentCard({ agent }: { agent: AgentProfile }) {
         </span>
       </div>
       <div className="flex items-center justify-between text-caption text-text-tertiary">
-        <span className="font-mono">{agent.pid ? `PID: ${agent.pid}` : 'Idle'}</span>
+        <span className="font-mono">{agent.process_alive ? `PID: ${agent.pid}` : 'Idle'}</span>
         <span>Sessions: {agent.sessions}</span>
       </div>
     </div>
