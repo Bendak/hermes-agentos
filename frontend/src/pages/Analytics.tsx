@@ -237,6 +237,8 @@ function ActivityHeatmapSection() {
     },
   })
 
+  const [hoveredCell, setHoveredCell] = useState<string | null>(null)
+
   if (isLoading) return <div className="text-text-tertiary text-sm py-8">Loading activity data…</div>
   if (error) return <div className="text-semantic-error text-sm py-8">Error loading activity data</div>
   if (!data) return null
@@ -249,8 +251,6 @@ function ActivityHeatmapSection() {
     lookup[key] = entry.count
     if (entry.count > maxCount) maxCount = entry.count
   }
-
-  const [hoveredCell, setHoveredCell] = useState<string | null>(null)
 
   return (
     <div className="space-y-6">
