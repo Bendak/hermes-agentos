@@ -1478,40 +1478,108 @@ function AssistantMessage({ msg }: { msg: MessageItem }) {
 }
 
 function MessagesSection({ sessionId }: { sessionId: string }) {
-  const [offset, setOffset] = useState(0)
   const limit = 100
+  const [offset, setOffset] = useState<number | null>(null) // null = haven't determined last page yet
+  const [total, setTotal] = useState(0)
+  const [pageInput, setPageInput] = useState('')
+  const messagesRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
-  const hasScrolledRef = useRef(false)
+  const isInitialLoad = useRef(true)
 
-  const { data, isLoading, error } = useQuery<MessagesResponse>({
-    queryKey: ['messages', sessionId, offset, limit],
+  // First: fetch total count with limit=1
+  const { data: countData, isLoading: countLoading } = useQuery<MessagesResponse>({
+    queryKey: ['messages-count', sessionId],
     queryFn: async () => {
-      const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
+      const params = new URLSearchParams({ limit: '1', offset: '0' })
       const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?${params}`)
-      if (!res.ok) throw new Error('Failed to load messages')
+      if (!res.ok) throw new Error('Failed to load message count')
       return res.json()
     },
   })
 
+  // Once we know the total, set offset to last page
   useEffect(() => {
-    if (data && !hasScrolledRef.current) {
-      hasScrolledRef.current = true
-      setTimeout(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'auto' })
-      }, 50)
+    if (countData && offset === null) {
+      const t = countData.total
+      setTotal(t)
+      if (t === 0) {
+        setOffset(0)
+      } else {
+        const lastOffset = Math.floor((t - 1) / limit) * limit
+        setOffset(lastOffset)
+      }
+    }
+  }, [countData, offset])
+
+  // Fetch the actual page of messages
+  const { data, isLoading: messagesLoading, error } = useQuery<MessagesResponse>({
+    queryKey: ['messages', sessionId, offset, limit],
+    queryFn: async () => {
+      const params = new URLSearchParams({ limit: String(limit), offset: String(offset!) })
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/messages?${params}`)
+      if (!res.ok) throw new Error('Failed to load messages')
+      return res.json()
+    },
+    enabled: offset !== null,
+  })
+
+  // Sync total from message response
+  useEffect(() => {
+    if (data) {
+      setTotal(data.total)
+      // On first successful load, scroll to bottom
+      if (isInitialLoad.current) {
+        isInitialLoad.current = false
+        setTimeout(() => {
+          bottomRef.current?.scrollIntoView({ behavior: 'auto' })
+        }, 50)
+      }
     }
   }, [data])
 
-  const canLoadMore = data ? offset + data.messages.length < data.total : false
+  // Pagination calculations
+  const totalPages = total > 0 ? Math.ceil(total / limit) : 1
+  const currentPage = offset !== null ? Math.floor(offset / limit) + 1 : 1
+  const isFirstPage = currentPage <= 1
+  const isLastPage = currentPage >= totalPages
+  const rangeStart = offset !== null ? offset + 1 : 0
+  const rangeEnd = offset !== null ? Math.min(offset + (data?.messages.length || 0), total) : 0
 
-  const handleLoadMore = () => {
-    if (!data) return
-    const newOffset = offset + limit
-    setOffset(newOffset)
-    hasScrolledRef.current = false
+  const scrollToMessagesTop = () => {
+    messagesRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  if (isLoading) return (
+  const goToPage = (page: number) => {
+    const clamped = Math.max(1, Math.min(page, totalPages))
+    const newOffset = (clamped - 1) * limit
+    setOffset(newOffset)
+    // Scroll to top of messages area after render
+    setTimeout(() => scrollToMessagesTop(), 50)
+  }
+
+  const goToFirstPage = () => {
+    goToPage(1)
+    setTimeout(() => scrollToMessagesTop(), 50)
+  }
+
+  const goToLastPage = () => {
+    goToPage(totalPages)
+    setTimeout(() => {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }, 50)
+  }
+
+  const handlePageInputSubmit = (e: React.FormEvent) => {
+    e.preventDefault()
+    const num = parseInt(pageInput, 10)
+    if (!isNaN(num) && num >= 1 && num <= totalPages) {
+      goToPage(num)
+      setPageInput('')
+    }
+  }
+
+  // Loading state
+  if (countLoading || (offset === null && messagesLoading)) return (
     <div className="space-y-3 py-6" aria-label="Loading messages" role="status">
       {Array.from({ length: 4 }).map((_, i) => (
         <div key={i} className={`flex ${i % 2 === 0 ? 'justify-end' : 'justify-start'}`}>
@@ -1524,28 +1592,103 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
     </div>
   )
   if (error) return <p className="text-error text-sm py-4">Error: {(error as Error).message}</p>
-  if (!data || data.messages.length === 0) return <p className="text-text-tertiary py-6">No messages in this session</p>
+  if (!data || total === 0) return <p className="text-text-tertiary py-6">No messages in this session</p>
 
   return (
     <div className="flex flex-col">
-      {canLoadMore && (
-        <div className="flex justify-center py-3">
+      {/* Pagination controls at top */}
+      <div ref={messagesRef} className="flex items-center justify-between gap-3 px-2 py-3 border-b border-border/50 mb-3 flex-wrap">
+        <div className="text-caption text-text-tertiary">
+          Showing {rangeStart}–{rangeEnd} of {total}
+        </div>
+        <div className="flex items-center gap-2">
           <button
-            onClick={handleLoadMore}
-            className="px-4 py-1.5 rounded-md bg-surface border border-border text-sm text-text-primary hover:bg-surface-hover/80 transition"
+            onClick={goToFirstPage}
+            disabled={isFirstPage}
+            className="px-2 py-1 rounded-md text-xs bg-bg-elevated border border-border text-text-secondary hover:bg-surface-hover/80 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            title="First page (oldest)"
           >
-            Load more
+            ««
+          </button>
+          <button
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={isFirstPage}
+            className="px-2 py-1 rounded-md text-xs bg-bg-elevated border border-border text-text-secondary hover:bg-surface-hover/80 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            ‹ Prev
+          </button>
+          <form onSubmit={handlePageInputSubmit} className="flex items-center gap-1">
+            <span className="text-caption text-text-tertiary">Page</span>
+            <input
+              type="text"
+              value={pageInput}
+              onChange={(e) => setPageInput(e.target.value)}
+              placeholder={String(currentPage)}
+              className="w-10 text-center text-xs bg-bg-elevated border border-border rounded px-1 py-0.5 text-text-primary focus:outline-none focus:border-accent"
+              title={`Jump to page (1–${totalPages})`}
+            />
+            <span className="text-caption text-text-tertiary">of {totalPages}</span>
+          </form>
+          <button
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={isLastPage}
+            className="px-2 py-1 rounded-md text-xs bg-bg-elevated border border-border text-text-secondary hover:bg-surface-hover/80 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            Next ›
+          </button>
+          <button
+            onClick={goToLastPage}
+            disabled={isLastPage}
+            className="px-2 py-1 rounded-md text-xs bg-bg-elevated border border-border text-text-secondary hover:bg-surface-hover/80 transition disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Last page (newest)"
+          >
+            »»
           </button>
         </div>
-      )}
+      </div>
+
+      {/* Messages */}
       <div className="flex flex-col px-2">
-        {[...data.messages].reverse().map((msg) => {
-          if (msg.role === 'user') return <UserMessage key={msg.id} msg={msg} />
-          if (msg.role === 'assistant') return <AssistantMessage key={msg.id} msg={msg} />
-          return <ToolMessage key={msg.id} msg={msg} />
-        })}
+        {messagesLoading && offset !== null ? (
+          <div className="space-y-3 py-6" aria-label="Loading page" role="status">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className={`flex ${i % 2 === 0 ? 'justify-end' : 'justify-start'}`}>
+                <div className="animate-skeleton rounded-2xl px-4 py-3 bg-surface/30 max-w-[70%] min-w-[12rem]">
+                  <div className="h-3 w-full rounded bg-surface/40 mb-2" />
+                  <div className="h-3 w-3/4 rounded bg-surface/40" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          data.messages.map((msg) => {
+            if (msg.role === 'user') return <UserMessage key={msg.id} msg={msg} />
+            if (msg.role === 'assistant') return <AssistantMessage key={msg.id} msg={msg} />
+            return <ToolMessage key={msg.id} msg={msg} />
+          })
+        )}
       </div>
       <div ref={bottomRef} />
+
+      {/* Floating navigation buttons */}
+      <div className="fixed bottom-20 right-4 flex flex-col gap-2 z-50">
+        <button
+          onClick={goToFirstPage}
+          disabled={isFirstPage}
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover/80 transition shadow-lg disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Jump to oldest messages"
+        >
+          ↑
+        </button>
+        <button
+          onClick={goToLastPage}
+          disabled={isLastPage}
+          className="flex items-center justify-center w-10 h-10 rounded-full bg-bg-elevated border border-border text-text-secondary hover:text-text-primary hover:bg-surface-hover/80 transition shadow-lg disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Jump to newest messages"
+        >
+          ↓
+        </button>
+      </div>
     </div>
   )
 }
