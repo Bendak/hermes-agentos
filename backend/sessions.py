@@ -11,10 +11,15 @@ STATE_DB = os.path.join(settings.AGENTOS_DATA_DIR, "state.db")
 
 # model-to-profile mapping fallback when sessions table lacks `profile` column
 MODEL_TO_PROFILE: Dict[str, str] = {
-    "glm-5.2": "coder",
-    "kimi-k2.6": "pixel",
-    "mimo-v2.5": "atlas",  # shared with nova; best-effort fallback
-    "mimo-v2.5-pro": "nexus",
+    "glm-5.2": "nexus",          # nexus is the orchestrator, uses glm-5.2 most
+    "z-ai/glm-5.2": "nexus",
+    "kimi-k2.6": "pipeline",      # pipeline uses kimi-k2.6
+    "mimo-v2.5": "atlas",         # atlas uses mimo-v2.5
+    "mimo-v2.5-pro": "nova",      # nova uses mimo-v2.5-pro (coder delegates to it)
+    "deepseek-v4-flash": "coder", # coder uses various models via delegation
+    "gemma4:31b": "pixel",        # pixel uses gemma4 for vision
+    "nemotron-3-ultra": "coder",
+    "gemini-3-flash-preview": "hermes",
 }
 
 
@@ -80,7 +85,7 @@ async def count_sessions_by_profile() -> Dict[str, int]:
             # Attempt the ideal query first
             try:
                 async with db.execute(
-                    "SELECT profile, COUNT(*) FROM sessions GROUP BY profile"
+                    "SELECT profile_name, COUNT(*) FROM sessions WHERE profile_name IS NOT NULL GROUP BY profile_name"
                 ) as cursor:
                     rows = await cursor.fetchall()
                     return {row[0]: row[1] for row in rows}
