@@ -1482,6 +1482,7 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
   const [offset, setOffset] = useState<number | null>(null) // null = haven't determined last page yet
   const [total, setTotal] = useState(0)
   const [pageInput, setPageInput] = useState('')
+  const [followTail, setFollowTail] = useState(true) // follow tail: auto-scroll to newest
   const messagesRef = useRef<HTMLDivElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
   const isInitialLoad = useRef(true)
@@ -1521,21 +1522,34 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
       return res.json()
     },
     enabled: offset !== null,
+    // When follow tail is on, refetch every 10s to check for new messages
+    refetchInterval: followTail ? 10_000 : false,
   })
 
   // Sync total from message response
   useEffect(() => {
     if (data) {
-      setTotal(data.total)
+      const newTotal = data.total
+      const totalChanged = newTotal !== total
+      setTotal(newTotal)
       // On first successful load, scroll to bottom
       if (isInitialLoad.current) {
         isInitialLoad.current = false
         setTimeout(() => {
           bottomRef.current?.scrollIntoView({ behavior: 'auto' })
         }, 50)
+      } else if (followTail && totalChanged) {
+        // Follow tail: if new messages arrived, re-jump to last page and scroll to bottom
+        const newLastOffset = Math.floor((newTotal - 1) / limit) * limit
+        if (offset !== newLastOffset) {
+          setOffset(newLastOffset)
+        }
+        setTimeout(() => {
+          bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+        }, 50)
       }
     }
-  }, [data])
+  }, [data, followTail])
 
   // Pagination calculations
   const totalPages = total > 0 ? Math.ceil(total / limit) : 1
@@ -1549,21 +1563,27 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
     messagesRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
-  const goToPage = (page: number) => {
+  const goToPage = (page: number, fromFollowTail = false) => {
     const clamped = Math.max(1, Math.min(page, totalPages))
     const newOffset = (clamped - 1) * limit
     setOffset(newOffset)
+    // If user manually navigates away from last page, disable follow tail
+    if (!fromFollowTail && clamped !== totalPages) {
+      setFollowTail(false)
+    }
     // Scroll to top of messages area after render
     setTimeout(() => scrollToMessagesTop(), 50)
   }
 
   const goToFirstPage = () => {
+    setFollowTail(false)
     goToPage(1)
     setTimeout(() => scrollToMessagesTop(), 50)
   }
 
   const goToLastPage = () => {
-    goToPage(totalPages)
+    setFollowTail(true)
+    goToPage(totalPages, true)
     setTimeout(() => {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }, 50)
@@ -1598,8 +1618,27 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
     <div className="flex flex-col">
       {/* Pagination controls at top */}
       <div ref={messagesRef} className="flex items-center justify-between gap-3 px-2 py-3 border-b border-border/50 mb-3 flex-wrap">
-        <div className="text-caption text-text-tertiary">
-          Showing {rangeStart}–{rangeEnd} of {total}
+        <div className="flex items-center gap-3">
+          <div className="text-caption text-text-tertiary">
+            Showing {rangeStart}–{rangeEnd} of {total}
+          </div>
+          <label className="flex items-center gap-1.5 text-caption text-text-tertiary cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={followTail}
+              onChange={(e) => {
+                const checked = e.target.checked
+                setFollowTail(checked)
+                if (checked) {
+                  // Re-enabling: jump to last page and scroll to bottom
+                  goToPage(totalPages, true)
+                  setTimeout(() => bottomRef.current?.scrollIntoView({ behavior: 'smooth' }), 100)
+                }
+              }}
+              className="w-3.5 h-3.5 rounded border-border accent-accent cursor-pointer"
+            />
+            Follow tail
+          </label>
         </div>
         <div className="flex items-center gap-2">
           <button
