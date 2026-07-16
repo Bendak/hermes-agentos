@@ -74,7 +74,7 @@ def _row_to_session(row: tuple) -> dict:
 async def count_sessions_by_profile() -> Dict[str, int]:
     """Return session counts per profile from state.db.
 
-    Tries `SELECT profile, COUNT(*) FROM sessions GROUP BY profile` first.
+    Tries `SELECT profile_name, COUNT(*) FROM sessions` first.
     Falls back to grouping by model name and mapping to profiles.
     """
     if not os.path.exists(STATE_DB):
@@ -88,19 +88,22 @@ async def count_sessions_by_profile() -> Dict[str, int]:
                     "SELECT profile_name, COUNT(*) FROM sessions WHERE profile_name IS NOT NULL GROUP BY profile_name"
                 ) as cursor:
                     rows = await cursor.fetchall()
-                    return {row[0]: row[1] for row in rows}
+                    if rows:
+                        return {row[0]: row[1] for row in rows}
             except Exception:
-                # Fallback: use model column mapping
-                async with db.execute(
-                    "SELECT model, COUNT(*) FROM sessions GROUP BY model"
-                ) as cursor:
-                    rows = await cursor.fetchall()
-                result: Dict[str, int] = {}
-                for model, cnt in rows:
-                    profile = MODEL_TO_PROFILE.get(model)
-                    if profile:
-                        result[profile] = result.get(profile, 0) + cnt
-                return result
+                pass
+
+            # Fallback: use model column mapping
+            async with db.execute(
+                "SELECT model, COUNT(*) FROM sessions GROUP BY model"
+            ) as cursor:
+                rows = await cursor.fetchall()
+            result: Dict[str, int] = {}
+            for model, cnt in rows:
+                profile = MODEL_TO_PROFILE.get(model)
+                if profile:
+                    result[profile] = result.get(profile, 0) + cnt
+            return result
     except Exception:
         return {}
 
