@@ -575,6 +575,9 @@ from backend.workflow_engine import run_workflow, get_workflow_runs, get_run_det
 from backend.cron import router as cron_router  # noqa: E402
 app.include_router(cron_router)
 
+from backend.analytics import router as analytics_router  # noqa: E402
+app.include_router(analytics_router)
+
 
 @app.get("/api/workflows")
 async def workflows_list(user: dict = Depends(require_auth)):
