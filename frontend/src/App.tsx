@@ -5,6 +5,7 @@ import LoginPage from './auth/LoginPage'
 import ProtectedRoute from './auth/ProtectedRoute'
 import UserManagement from './pages/UserManagement'
 import ProfilesPage from './pages/Profiles'
+import AnalyticsPage from './pages/Analytics'
 import { useQuery, useMutation, useQueryClient, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DndContext, DragOverlay, useDroppable, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { useSortable } from '@dnd-kit/sortable'
@@ -268,6 +269,7 @@ export function NavBar() {
               {navLink('/workflows', 'Workflows')}
               {navLink('/cron', 'Cron')}
               {navLink('/profiles', 'Profiles')}
+              {navLink('/analytics', 'Analytics')}
               {navLink('/settings', 'Settings')}
             </div>
           </div>
@@ -328,6 +330,7 @@ export function NavBar() {
             {navLink('/workflows', 'Workflows')}
             {navLink('/cron', 'Cron')}
             {navLink('/profiles', 'Profiles')}
+            {navLink('/analytics', 'Analytics')}
             {navLink('/settings', 'Settings')}
             {onOpenSearch && (
               <button
@@ -375,6 +378,51 @@ function AgentCard({ agent }: { agent: AgentProfile }) {
       <div className="flex items-center justify-between text-caption text-text-tertiary">
         <span className="font-mono">PID: {agent.pid ?? '-'}</span>
         <span>Sessions: {agent.sessions}</span>
+      </div>
+    </div>
+  )
+}
+
+function HardwareWidget() {
+  const { data } = useQuery<{ cpu: { percent: number }; ram: { percent: number }; disk: { percent: number } }>({
+    queryKey: ['hardware-widget'],
+    queryFn: async () => {
+      const res = await fetch('/api/analytics/hardware')
+      if (!res.ok) throw new Error('Failed')
+      return res.json()
+    },
+    refetchInterval: 10_000,
+  })
+
+  if (!data) return null
+
+  const bars = [
+    { label: 'CPU', pct: data.cpu.percent },
+    { label: 'RAM', pct: data.ram.percent },
+    { label: 'Disk', pct: data.disk.percent },
+  ]
+
+  return (
+    <div className="mt-6 rounded-xl border border-border bg-surface/40 p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-text-primary">System Resources</h3>
+        <Link to="/analytics" className="text-xs text-accent hover:text-accent-hover transition">Details →</Link>
+      </div>
+      <div className="grid grid-cols-3 gap-4">
+        {bars.map((b) => {
+          const color = b.pct < 60 ? 'bg-semantic-success' : b.pct < 80 ? 'bg-yellow-500' : 'bg-semantic-error'
+          return (
+            <div key={b.label}>
+              <div className="flex justify-between text-xs mb-1">
+                <span className="text-text-secondary">{b.label}</span>
+                <span className="text-text-primary font-mono">{b.pct}%</span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-bg-base overflow-hidden">
+                <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${b.pct}%` }} />
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -457,6 +505,8 @@ function DashboardPage() {
             ))}
           </div>
         )}
+        {/* Hardware widget */}
+        <HardwareWidget />
       </main>
     </div>
   )
@@ -4547,6 +4597,7 @@ function AppInner() {
           <Route path="/workflows/:id" element={<ProtectedRoute><WorkflowEditorPage /></ProtectedRoute>} />
           <Route path="/cron" element={<ProtectedRoute><CronPage /></ProtectedRoute>} />
           <Route path="/profiles" element={<ProtectedRoute><ProfilesPage /></ProtectedRoute>} />
+          <Route path="/analytics" element={<ProtectedRoute><AnalyticsPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
         </Routes>
         <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
