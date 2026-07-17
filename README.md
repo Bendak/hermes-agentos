@@ -6,9 +6,10 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 
 ## Features
 
-- **Agent Dashboard** — Live status cards for all your Hermes profiles (model, provider, gateway state, session count). Auto-discovers the default profile and all sub-profiles.
+- **Agent Dashboard** — Live status cards for all your Hermes profiles (model, provider, gateway state, session count, idle/running status). Auto-discovers the default profile and all sub-profiles. Includes hardware monitoring widget (CPU/RAM/Disk)
 - **Session History** — Browse, search, and filter all conversation sessions with FTS5 full-text search
-- **Session Detail** — Read-only chat thread viewer with reasoning blocks, tool call expansion, and message timeline
+- **Session Detail** — Read-only chat thread viewer with reasoning blocks, tool call expansion, chronological message order (oldest first), pagination with page navigation, follow-tail auto-scroll, and floating scroll-to-top/bottom buttons
+- **Analytics Dashboard** — Token usage analytics (per-model breakdown, 7-day trend charts, cache hit rates), activity heatmap (day×hour grid in local timezone), and live system resource monitoring (CPU, RAM, disk, uptime, load average)
 - **Kanban Board** — Interactive task board with drag-and-drop between 5 columns (backlog, ready, running, done, blocked), markdown rendering in cards, task detail view, and archived toggle
 - **Task Editor** — Edit title, body, assignee, priority, and status in a modal dialog
 - **Filters & Search** — Filter kanban tasks by assignee, priority, status; search by title
@@ -21,7 +22,7 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 - **Authentication** — JWT-based auth with login page, protected routes, and multi-user support. Password hashing via `hashlib.pbkdf2_hmac` (bcrypt-free, stdlib only)
 - **User Management** — Admin settings page to list, create, and delete users, and change passwords
 - **Cron Job Editor** — CRUD operations on cron jobs with run now, pause/resume, and inline schedule/prompt editing
-- **Advanced Profile Editor** — 6-tab editor: Model, Agent, Toolsets, Description, Memory (SOUL.md), and Preview
+- **Advanced Profile Editor** — 6-tab editor: Model, Agent, Toolsets, Description, Memory (SOUL.md), and Preview (live YAML)
 - **Dark/Light Mode** — Toggle in navbar with localStorage persistence
 - **Keyboard Shortcuts** — ⌘K quick search, `g+{d,s,t,c,k,w}` navigation, `?` help modal
 - **Responsive Design** — Hamburger menu on mobile, adaptive layout
@@ -82,6 +83,14 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 ### Profile Editor — YAML Preview Tab
 
 ![Profile Editor - Preview](screenshots/12-profile-editor-preview.png)
+
+### Analytics — Token Usage, Activity Heatmap & System Resources
+
+![Analytics](screenshots/13-analytics.png)
+
+### Session Detail — Pagination with Follow Tail
+
+![Session Pagination](screenshots/14-session-pagination.png)
 
 ## Quick Start (Dev Mode)
 
