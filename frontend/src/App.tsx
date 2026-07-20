@@ -4874,6 +4874,36 @@ function CronJobDialog({
   const [enabled, setEnabled] = useState(job?.enabled ?? true)
   const [model, setModel] = useState(job?.model || '')
   const [deliver, setDeliver] = useState(job?.deliver || 'origin')
+  const [availableModels, setAvailableModels] = useState<{ model: string; provider: string }[]>([])
+  const [defaultModel, setDefaultModel] = useState<{ model: string; provider: string }>({ model: '', provider: '' })
+
+  useEffect(() => {
+    const token = localStorage.getItem('agentos_access_token')
+    fetch('/api/models', { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data) {
+          setAvailableModels(data.models || [])
+          setDefaultModel(data.default || { model: '', provider: '' })
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  // Determine initial select value: match existing job model, or default
+  const [modelSelect, setModelSelect] = useState(() => {
+    if (job?.model === '' || job?.model === null || job?.model === undefined) return ''
+    return job?.model || ''
+  })
+
+  const handleModelSelectChange = (val: string) => {
+    setModelSelect(val)
+    if (val === '__none__') {
+      setModel('')
+    } else {
+      setModel(val)
+    }
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -4884,7 +4914,11 @@ function CronJobDialog({
       enabled,
       deliver,
     }
-    if (model.trim()) data.model = model.trim()
+    if (modelSelect === '__none__') {
+      data.model = ''
+    } else if (model.trim()) {
+      data.model = model.trim()
+    }
     onSave(data)
   }
 
@@ -4949,13 +4983,30 @@ function CronJobDialog({
           {/* Model */}
           <div>
             <label className="block text-xs font-medium text-text-secondary mb-1">Model <span className="text-text-tertiary">(optional)</span></label>
-            <input
-              type="text"
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              placeholder="e.g. gemma4:31b"
-              className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40"
-            />
+            <select
+              value={modelSelect}
+              onChange={(e) => handleModelSelectChange(e.target.value)}
+              className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
+            >
+              <option value="">
+                Default{defaultModel.model ? ` (${defaultModel.model} — ${defaultModel.provider})` : ''}
+              </option>
+              {availableModels.map((m) => (
+                <option key={m.model} value={m.model}>
+                  {m.model}{m.provider ? ` — ${m.provider}` : ''}
+                </option>
+              ))}
+              <option value="__none__">No model (script only)</option>
+            </select>
+            {modelSelect === '__none__' ? (
+              <p className="text-[11px] text-text-tertiary mt-1">
+                Job will run script only — no LLM processing. The prompt is still sent but no model is invoked.
+              </p>
+            ) : (
+              <p className="text-[11px] text-text-tertiary mt-1">
+                Leave on Default to use the system model{defaultModel.model ? ` (${defaultModel.model})` : ''}. Pick a specific model to override.
+              </p>
+            )}
           </div>
 
           {/* Deliver */}

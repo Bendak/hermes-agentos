@@ -685,6 +685,55 @@ async def delete_user_endpoint(target_user_id: int, user: dict = Depends(require
     return {"message": f"User {target['username']} deleted"}
 
 
+# ── Models endpoint ───────────────────────────────────────────────
+
+@app.get("/api/models")
+async def list_models(user: dict = Depends(require_auth)) -> dict:
+    """Return available model+provider combos from config files."""
+    import yaml  # noqa: PLC0415
+
+    default_model = None
+    default_provider = None
+    seen = set()
+    models = []
+
+    # Read main config
+    main_cfg = "/opt/data/config.yaml"
+    try:
+        with open(main_cfg) as f:
+            cfg = yaml.safe_load(f) or {}
+        default_model = cfg.get("model", {}).get("default")
+        default_provider = cfg.get("model", {}).get("provider")
+        if default_model:
+            key = (default_model, default_provider)
+            if key not in seen:
+                seen.add(key)
+                models.append({"model": default_model, "provider": default_provider or ""})
+    except Exception:
+        pass
+
+    # Read profile configs
+    import glob  # noqa: PLC0415
+    for cfg_path in sorted(glob.glob("/opt/data/profiles/*/config.yaml")):
+        try:
+            with open(cfg_path) as f:
+                cfg = yaml.safe_load(f) or {}
+            m = cfg.get("model", {}).get("default")
+            p = cfg.get("model", {}).get("provider", "")
+            if m:
+                key = (m, p)
+                if key not in seen:
+                    seen.add(key)
+                    models.append({"model": m, "provider": p})
+        except Exception:
+            continue
+
+    return {
+        "default": {"model": default_model or "", "provider": default_provider or ""},
+        "models": models,
+    }
+
+
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 index_html = os.path.join(dist_path, "index.html")
 
