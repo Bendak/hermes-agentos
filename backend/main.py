@@ -689,31 +689,57 @@ async def delete_user_endpoint(target_user_id: int, user: dict = Depends(require
 
 @app.get("/api/models")
 async def list_models(user: dict = Depends(require_auth)) -> dict:
-    """Return available model+provider combos from config files."""
+    """Return available model+provider combos from cache files and config."""
     import yaml  # noqa: PLC0415
+    import json  # noqa: PLC0415
+    import glob  # noqa: PLC0415
 
     default_model = None
     default_provider = None
     seen = set()
     models = []
 
-    # Read main config
+    # Read main config for default model
     main_cfg = "/opt/data/config.yaml"
     try:
         with open(main_cfg) as f:
             cfg = yaml.safe_load(f) or {}
         default_model = cfg.get("model", {}).get("default")
         default_provider = cfg.get("model", {}).get("provider")
-        if default_model:
-            key = (default_model, default_provider)
-            if key not in seen:
-                seen.add(key)
-                models.append({"model": default_model, "provider": default_provider or ""})
     except Exception:
         pass
 
-    # Read profile configs
-    import glob  # noqa: PLC0415
+    # Read provider_models_cache.json — has ALL models from ALL providers
+    # This cache is populated by `hermes model --refresh` and contains
+    # the live /v1/models response from each configured provider.
+    cache_path = "/opt/data/provider_models_cache.json"
+    try:
+        with open(cache_path) as f:
+            cache = json.load(f)
+        for provider, info in cache.items():
+            p_models = info.get("models", [])
+            for m in p_models:
+                key = (m, provider)
+                if key not in seen:
+                    seen.add(key)
+                    models.append({"model": m, "provider": provider})
+    except Exception:
+        pass
+
+    # Also read ollama_cloud_models_cache.json (separate cache file)
+    ollama_cache_path = "/opt/data/ollama_cloud_models_cache.json"
+    try:
+        with open(ollama_cache_path) as f:
+            ocache = json.load(f)
+        for m in ocache.get("models", []):
+            key = (m, "ollama-cloud")
+            if key not in seen:
+                seen.add(key)
+                models.append({"model": m, "provider": "ollama-cloud"})
+    except Exception:
+        pass
+
+    # Fallback: read profile configs for any models not in cache
     for cfg_path in sorted(glob.glob("/opt/data/profiles/*/config.yaml")):
         try:
             with open(cfg_path) as f:
@@ -727,6 +753,12 @@ async def list_models(user: dict = Depends(require_auth)) -> dict:
                     models.append({"model": m, "provider": p})
         except Exception:
             continue
+
+    # Sort: default model first, then alphabetically by provider then model
+    if default_model:
+        models.sort(key=lambda x: (x["model"] != default_model, x["provider"], x["model"]))
+    else:
+        models.sort(key=lambda x: (x["provider"], x["model"]))
 
     return {
         "default": {"model": default_model or "", "provider": default_provider or ""},

@@ -4991,10 +4991,20 @@ function CronJobDialog({
               <option value="">
                 Default{defaultModel.model ? ` (${defaultModel.model} — ${defaultModel.provider})` : ''}
               </option>
-              {availableModels.map((m) => (
-                <option key={m.model} value={m.model}>
-                  {m.model}{m.provider ? ` — ${m.provider}` : ''}
-                </option>
+              {Object.entries(
+                availableModels.reduce<Record<string, typeof availableModels>>((acc, m) => {
+                  const p = m.provider || 'unknown'
+                  ;(acc[p] ||= []).push(m)
+                  return acc
+                }, {})
+              ).map(([provider, pmodels]) => (
+                <optgroup key={provider} label={provider}>
+                  {pmodels.map((m) => (
+                    <option key={`${provider}-${m.model}`} value={m.model}>
+                      {m.model}
+                    </option>
+                  ))}
+                </optgroup>
               ))}
               <option value="__none__">No model (script only)</option>
             </select>
