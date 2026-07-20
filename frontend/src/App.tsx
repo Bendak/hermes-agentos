@@ -1418,21 +1418,21 @@ function ReasoningBlock({ content }: { content: string }) {
 function ToolMessage({ msg }: { msg: MessageItem }) {
   const [expanded, setExpanded] = useState(false)
   return (
-    <div className="w-full my-2 border border-border rounded-lg bg-bg-elevated font-mono">
+    <div className="w-full my-2 border border-border rounded-lg bg-bg-elevated font-mono min-w-0 overflow-hidden">
       <button
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
         aria-label={expanded ? `Collapse ${msg.tool_name || 'tool'} result` : `Expand ${msg.tool_name || 'tool'} result`}
         className="w-full flex items-center justify-between px-3 py-2 text-mono-sm text-text-secondary hover:bg-surface-hover/40 transition cursor-pointer"
       >
-        <span className="flex items-center gap-2">
-          <span className="inline-block rounded bg-surface px-1.5 py-0.5 text-overline uppercase">
+        <span className="flex items-center gap-2 min-w-0">
+          <span className="inline-block rounded bg-surface px-1.5 py-0.5 text-overline uppercase shrink-0">
             Tool
           </span>
-          <span className="text-mono-sm text-text-secondary">{msg.tool_name || 'unknown'}</span>
+          <span className="text-mono-sm text-text-secondary truncate">{msg.tool_name || 'unknown'}</span>
         </span>
         <span
-          className="text-text-tertiary transition-transform duration-200"
+          className="text-text-tertiary transition-transform duration-200 shrink-0"
           style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
           aria-hidden="true"
         >
@@ -1442,8 +1442,10 @@ function ToolMessage({ msg }: { msg: MessageItem }) {
         </span>
       </button>
       {expanded && (
-        <div className="px-3 py-2 border-t border-border max-h-96 max-w-full w-full min-w-0 overflow-y-auto" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-          <MarkdownRenderer content={msg.content || ''} />
+        <div className="px-3 py-2 border-t border-border max-h-96 w-full min-w-0 overflow-y-auto overflow-x-hidden" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+          <div className="w-full min-w-0 max-w-full">
+            <MarkdownRenderer content={msg.content || ''} />
+          </div>
         </div>
       )}
     </div>
