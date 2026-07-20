@@ -1395,7 +1395,7 @@ function formatMessageTime(iso: string | null): string {
 function ReasoningBlock({ content }: { content: string }) {
   const [expanded, setExpanded] = useState(false)
   return (
-    <div className="mb-1">
+    <div className="mb-1 w-full min-w-0">
       <button
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
@@ -1405,8 +1405,10 @@ function ReasoningBlock({ content }: { content: string }) {
         {expanded ? 'Hide thinking…' : 'Thinking…'}
       </button>
       {expanded && (
-        <div className="mt-1 text-caption text-text-tertiary italic whitespace-pre-wrap max-w-full w-full">
-          <MarkdownRenderer content={content} />
+        <div className="mt-1 text-caption text-text-tertiary italic whitespace-pre-wrap w-full min-w-0 max-h-80 overflow-y-auto border border-border/40 rounded-lg p-2 bg-bg-base/40">
+          <div className="w-full min-w-0" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+            <MarkdownRenderer content={content} />
+          </div>
         </div>
       )}
     </div>
@@ -1440,7 +1442,7 @@ function ToolMessage({ msg }: { msg: MessageItem }) {
         </span>
       </button>
       {expanded && (
-        <div className="px-3 py-2 border-t border-border max-h-96 max-w-full w-full" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+        <div className="px-3 py-2 border-t border-border max-h-96 max-w-full w-full min-w-0 overflow-y-auto" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
           <MarkdownRenderer content={msg.content || ''} />
         </div>
       )}
@@ -1464,10 +1466,10 @@ function UserMessage({ msg }: { msg: MessageItem }) {
 
 function AssistantMessage({ msg }: { msg: MessageItem }) {
   return (
-    <div className="flex flex-col items-start my-2 max-w-[80%] min-w-0">
+    <div className="flex flex-col items-start my-2 max-w-[80%] min-w-0 w-full">
       {msg.reasoning_content && <ReasoningBlock content={msg.reasoning_content} />}
       <div
-        className="bg-surface/60 rounded-2xl rounded-bl-sm px-4 py-2 text-sm text-text-primary w-full"
+        className="bg-surface/60 rounded-2xl rounded-bl-sm px-4 py-2 text-sm text-text-primary w-full min-w-0 overflow-hidden"
         style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}
       >
         <MarkdownRenderer content={msg.content || ''} />
