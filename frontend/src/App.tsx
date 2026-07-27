@@ -3340,16 +3340,34 @@ function ConfigNode({
     const shouldShow = matches || searchTerm === ''
     if (!shouldShow) return null
 
+    const allPrimitive = value.every((item) => typeof item !== 'object' || item === null)
+
     return (
       <div style={{ marginLeft: depth * 16 }}>
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex items-center gap-1 text-sm font-medium text-text-primary hover:text-accent transition-colors py-0.5"
-        >
-          <span className="text-text-tertiary w-3 inline-block">{expanded ? '▼' : '▶'}</span>
-          <span>{name}</span>
-          <span className="text-text-tertiary text-xs ml-1">[{value.length}]</span>
-        </button>
+        <div className="flex items-center gap-1 py-0.5">
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="flex items-center gap-1 text-sm font-medium text-text-primary hover:text-accent transition-colors"
+          >
+            <span className="text-text-tertiary w-3 inline-block">{expanded ? '▼' : '▶'}</span>
+            <span>{name}</span>
+            <span className="text-text-tertiary text-xs ml-1">[{value.length}]</span>
+          </button>
+          {editMode && onChange && allPrimitive && (
+            <div className="flex items-center gap-1 ml-2">
+              <button
+                onClick={() => {
+                  const newVal = [...value, '']
+                  onChange(path || name, newVal)
+                }}
+                className="text-xs text-accent hover:text-accent-hover transition-colors px-1.5 py-0.5 rounded border border-accent/30 hover:border-accent/60"
+                title="Add item"
+              >
+                + Add
+              </button>
+            </div>
+          )}
+        </div>
         {expanded &&
           value.map((item, idx) =>
             typeof item === 'object' && item !== null ? (
@@ -3363,6 +3381,51 @@ function ConfigNode({
                 path={`${path}[${idx}]`}
                 onChange={onChange}
               />
+            ) : editMode && onChange ? (
+              <div
+                key={idx}
+                style={{ marginLeft: (depth + 1) * 16 }}
+                className="flex items-center gap-2 py-0.5 text-sm border-l-2 border-accent/50 pl-2 group"
+              >
+                <span className="text-text-tertiary shrink-0">[{idx}]</span>
+                {typeof item === 'boolean' ? (
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={item}
+                      onChange={(e) => onChange(`${path}[${idx}]`, e.target.checked)}
+                      className="w-4 h-4 accent-accent rounded"
+                    />
+                    <span className="text-text-primary">{item ? 'true' : 'false'}</span>
+                  </label>
+                ) : typeof item === 'number' ? (
+                  <input
+                    type="number"
+                    value={item}
+                    onChange={(e) => onChange(`${path}[${idx}]`, e.target.valueAsNumber)}
+                    className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-sm text-text-primary w-32 font-mono focus:outline-none focus:ring-2 focus:ring-accent/40"
+                  />
+                ) : (
+                  <input
+                    type="text"
+                    value={String(item)}
+                    onChange={(e) => onChange(`${path}[${idx}]`, e.target.value)}
+                    className="bg-bg-elevated border border-border rounded px-2 py-0.5 text-sm text-text-primary font-mono flex-1 min-w-0 focus:outline-none focus:ring-2 focus:ring-accent/40"
+                  />
+                )}
+                {allPrimitive && (
+                  <button
+                    onClick={() => {
+                      const newVal = value.filter((_: any, i: number) => i !== idx)
+                      onChange(path || name, newVal)
+                    }}
+                    className="opacity-0 group-hover:opacity-100 text-xs text-error hover:text-error transition-opacity px-1 shrink-0"
+                    title="Remove item"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
             ) : (
               <div
                 key={idx}
@@ -3459,6 +3522,8 @@ function ConfigPage() {
       if (!res.ok) throw new Error('Failed to load config')
       return res.json()
     },
+    // Don't refetch while user is editing — refetch resets mergedData and breaks controlled inputs
+    refetchInterval: editMode ? false : 5000,
   })
 
   const { data: rawData } = useQuery({
@@ -3476,13 +3541,27 @@ function ConfigPage() {
 
     const result = JSON.parse(JSON.stringify(data)) // Deep clone
     for (const [pathStr, value] of Object.entries(changes)) {
-      const keys = pathStr.split('.')
+      // Parse path: "a.b[0].c" → ["a", "b", "[0]", "c"]
+      const keys = pathStr.split(/\.|\b(?=\[)/).filter(Boolean)
       let obj: any = result
       for (let i = 0; i < keys.length - 1; i++) {
-        if (obj[keys[i]] === undefined) obj[keys[i]] = {}
-        obj = obj[keys[i]]
+        const k = keys[i]
+        if (k.startsWith('[') && k.endsWith(']')) {
+          const idx = parseInt(k.slice(1, -1))
+          if (!Array.isArray(obj) || idx >= obj.length) break
+          obj = obj[idx]
+        } else {
+          if (obj[k] === undefined) obj[k] = {}
+          obj = obj[k]
+        }
       }
-      obj[keys[keys.length - 1]] = value
+      const final = keys[keys.length - 1]
+      if (final.startsWith('[') && final.endsWith(']')) {
+        const idx = parseInt(final.slice(1, -1))
+        if (Array.isArray(obj) && idx < obj.length) obj[idx] = value
+      } else {
+        obj[final] = value
+      }
     }
     return result
   }, [data, changes])
@@ -3519,7 +3598,7 @@ function ConfigPage() {
 
   const handleSave = () => {
     const patches = Object.entries(changes).map(([path, value]) => ({
-      path: path.split('.').filter(Boolean),
+      path: path.split(/\.|\b(?=\[)/).filter(Boolean),
       value,
     }))
     saveMutation.mutate(patches)

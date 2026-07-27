@@ -46,15 +46,33 @@ def _is_editable(key_name: str) -> bool:
 def _apply_patch(config: dict, path: list[str], value: Any) -> dict:
     """Apply a patch at a dot-notation path in the config dict.
 
-    path: list of keys, e.g. ["model", "default"]
-    value: the new value
+    Path segments can be dict keys or array indices like "[0]", "[1]".
+    Examples:
+      ["model", "default"] → config["model"]["default"] = value
+      ["fallback_providers", "[0]"] → config["fallback_providers"][0] = value
     """
     current = config
-    for key in path[:-1]:
-        if key not in current or not isinstance(current[key], dict):
-            current[key] = {}
-        current = current[key]
-    current[path[-1]] = value
+    for i, key in enumerate(path[:-1]):
+        if key.startswith('[') and key.endswith(']'):
+            # Array index
+            idx = int(key[1:-1])
+            if not isinstance(current, list) or idx >= len(current):
+                # Can't navigate — skip
+                return config
+            current = current[idx]
+        else:
+            if key not in current or not isinstance(current[key], dict):
+                current[key] = {}
+            current = current[key]
+
+    # Set the final value
+    final = path[-1]
+    if final.startswith('[') and final.endswith(']'):
+        idx = int(final[1:-1])
+        if isinstance(current, list) and idx < len(current):
+            current[idx] = value
+    else:
+        current[final] = value
     return config
 
 

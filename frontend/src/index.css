@@ -92,21 +92,8 @@ body {
 }
 
 /* Ambient background glow for mission-control feel */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  background:
-    radial-gradient(ellipse 700px 350px at 10% -5%, rgba(0, 229, 185, 0.05), transparent 70%),
-    radial-gradient(ellipse 600px 450px at 90% -10%, rgba(245, 184, 0, 0.04), transparent 70%);
-}
-html.light body::before {
-  background:
-    radial-gradient(ellipse 700px 350px at 10% -5%, rgba(5, 150, 105, 0.04), transparent 70%),
-    radial-gradient(ellipse 600px 450px at 90% -10%, rgba(217, 119, 6, 0.03), transparent 70%);
-}
+/* NOTE: body::before removed — z-index:0 blocked input interaction on mobile.
+   Replaced by inline <div> in App.tsx with z-index:-1 behind content. */
 
 /* Smooth default transitions on interactive elements */
 a, button, input, select, textarea, [role="button"] {
