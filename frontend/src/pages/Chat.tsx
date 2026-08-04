@@ -1,7 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import { NavBar } from '../App'
+import { NavBar, MarkdownRenderer } from '../App'
 
 interface ChatMsg {
   role: 'user' | 'assistant'
@@ -197,8 +195,8 @@ export default function ChatPage() {
                 {m.role === 'user' ? (
                   <span className="whitespace-pre-wrap">{m.content}</span>
                 ) : (
-                  <div className="prose-invert">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content || (m.streaming ? '…' : '')}</ReactMarkdown>
+                  <div className="prose-invert max-w-full">
+                    <MarkdownRenderer content={m.content || (m.streaming ? '…' : '')} />
                     {m.streaming && <span className="inline-block w-2 h-4 bg-accent animate-pulse ml-0.5 align-middle" />}
                   </div>
                 )}
