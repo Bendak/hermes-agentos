@@ -6,6 +6,7 @@ import ProtectedRoute from './auth/ProtectedRoute'
 import UserManagement from './pages/UserManagement'
 import ProfilesPage from './pages/Profiles'
 import AnalyticsPage from './pages/Analytics'
+import ChatPage from './pages/Chat'
 import { useQuery, useMutation, useQueryClient, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DndContext, DragOverlay, useDroppable, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { useSortable } from '@dnd-kit/sortable'
@@ -262,6 +263,7 @@ export function NavBar() {
             {/* Desktop nav links */}
             <div className="hidden sm:flex items-center gap-1 ml-2">
               {navLink('/', 'Dashboard')}
+              {navLink('/chat', 'Chat')}
               {navLink('/sessions', 'Sessions')}
               {navLink('/tasks', 'Tasks')}
               {navLink('/config', 'Config')}
@@ -4875,6 +4877,7 @@ function AppInner() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
+          <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
           <Route path="/health" element={<ProtectedRoute><HealthPage /></ProtectedRoute>} />
           <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
           <Route path="/sessions/:id" element={<ProtectedRoute><SessionDetailPage /></ProtectedRoute>} />
