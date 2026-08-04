@@ -34,6 +34,11 @@ app = FastAPI(title="AgentOS", version="0.1.0")
 # Register profile editor router
 app.include_router(profiles_router)
 
+# Register chat/voice router (Hermes API proxy + Groq STT)
+from backend.chat import router as chat_router  # noqa: E402
+
+app.include_router(chat_router)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:9120"],
