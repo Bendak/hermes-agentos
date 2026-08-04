@@ -1146,7 +1146,7 @@ function RunMetadata({ meta }: { meta: Record<string, any> }) {
 
 /* ── Markdown Renderer ─────────────────────────────── */
 
-function MarkdownRenderer({ content }: { content: string }) {
+export function MarkdownRenderer({ content }: { content: string }) {
   return (
     <div className="max-w-full overflow-hidden">
       <ReactMarkdown
