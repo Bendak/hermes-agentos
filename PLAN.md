@@ -349,7 +349,7 @@ prompt: |
 
 ### Stop condition
 
-If an increment fails 2 times (consecutive_failures=2), Kanban auto-blocks and escalates to Hermes (default profile), which notifies Mauricio via WhatsApp with the error and next step.
+If an increment fails 2 times (consecutive_failures=2), Kanban auto-blocks and escalates to Hermes (default profile), which notifies the user via WhatsApp with the error and next step.
 
 ---
 
@@ -479,7 +479,7 @@ prompt: |
     2. After Coder completes, dispatch Pixel for E2E + vision
     3. After Pixel PASS, dispatch Nexus for regression + commit
     4. After Nexus commits, update PLAN.md marking increment as done
-  If there's a blocked task: notify Mauricio via WhatsApp with error.
+  If there's a blocked task: notify the user via WhatsApp with error.
 ```
 
 ---
