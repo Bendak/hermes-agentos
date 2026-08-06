@@ -259,12 +259,23 @@ def users_exist() -> bool:
 # ── FastAPI Dependencies ─────────────────────────────────────────────
 
 async def require_auth(request: Request) -> dict:
-    """FastAPI dependency: verify Authorization header, return user payload."""
+    """FastAPI dependency: verify Authorization header or query param, return user payload.
+
+    Supports two auth methods:
+    1. Authorization: Bearer <token> (standard, used by fetch interceptor)
+    2. ?token=<token> query param (for media elements like <video src=...> that can't set headers)
+    """
+    # Try Authorization header first
     auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer "):
+    if auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+    else:
+        # Fall back to query param (for media elements: <img>, <video>, <audio>)
+        token = request.query_params.get("token", "")
+
+    if not token:
         raise HTTPException(status_code=401, detail="Missing or invalid authorization header")
 
-    token = auth_header[7:]
     try:
         payload = verify_token(token)
     except ValueError as e:
