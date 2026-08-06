@@ -1256,7 +1256,10 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
   const isPdf = ext === '.pdf'
   // Binary formats that can't be fetched as text
   const isBinary = isVideo || isAudio || isImage || isPdf
-  const previewUrl = `/api/tasks/${taskId}/artifacts/${encodeURIComponent(filename)}?preview=true`
+  // Media elements (<video>, <img>, <audio>, <iframe>) can't set Authorization headers.
+  // Append token as query param so the backend can authenticate via ?token= fallback.
+  const authToken = typeof window !== 'undefined' ? localStorage.getItem('agentos_access_token') : null
+  const previewUrl = `/api/tasks/${taskId}/artifacts/${encodeURIComponent(filename)}?preview=true${isBinary && authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`
 
   const { data: content, isLoading } = useQuery({
     queryKey: ['artifact-content', taskId, filename],
