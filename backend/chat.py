@@ -28,20 +28,31 @@ DEFAULT_GROQ_MODEL = "whisper-large-v3-turbo"
 
 
 def _hermes_api_key() -> str:
-    """API server key: explicit setting, container env, or Hermes .env fallback."""
-    key = settings.HERMES_API_KEY or os.environ.get("API_SERVER_KEY")
+    """API server key: explicit setting, Hermes .env on disk, then container env.
+
+    The gateway validates Bearer tokens against API_SERVER_KEY resolved from
+    /opt/data/.env (which Hermes may regenerate on updates), so the on-disk
+    .env is the source of truth. The container environment (docker-compose)
+    can go stale after Hermes regenerates the key — it is only a last-resort
+    fallback (avoids the "Invalid gateway API key (API_SERVER_KEY)" 401).
+    """
+    key = settings.HERMES_API_KEY
+    if not key:
+        # Primary: parse the Hermes .env on disk (same container, /opt/data/.env)
+        env_path = os.path.join(settings.AGENTOS_DATA_DIR, ".env")
+        try:
+            with open(env_path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line.startswith("API_SERVER_KEY="):
+                        key = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+        except OSError:
+            pass
+    if not key:
+        key = os.environ.get("API_SERVER_KEY")
     if key:
         return key
-    # Fallback: parse the Hermes .env on disk (same container, /opt/data/.env)
-    env_path = os.path.join(settings.AGENTOS_DATA_DIR, ".env")
-    try:
-        with open(env_path, "r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if line.startswith("API_SERVER_KEY="):
-                    return line.split("=", 1)[1].strip().strip('"').strip("'")
-    except OSError:
-        pass
     raise HTTPException(status_code=500, detail="API_SERVER_KEY not configured")
 
 
