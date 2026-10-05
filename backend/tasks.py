@@ -205,6 +205,10 @@ async def create_task(
     if not title.strip():
         return None
 
+    # F-M4-01: never accept a workspace_path outside the allowlist roots.
+    if workspace_path:
+        workspace_path = _validate_workspace_path(workspace_path)
+
     # Map common aliases
     if status == "pending":
         status = "todo"
@@ -307,6 +311,57 @@ async def create_task(
 EDITABLE_FIELDS = {"title", "body", "assignee", "priority", "status", "project_id", "workspace_kind", "workspace_path"}
 
 
+# ── Workspace path security (fixes F-M4-01 / F-M4-04) ─────────────────────────
+# workspace_path values come from the API/DB and must NEVER be trusted on the
+# read side. They must resolve inside one of these allowlist roots, verified at
+# create/update AND again when artifacts are resolved.
+
+def _workspace_roots() -> list[str]:
+    """Allowlist roots for task workspaces. Override via AGENTOS_WORKSPACE_ROOTS
+    (os.pathsep-separated). Defaults to the kanban scratch workspaces and the
+    shared deliverables dir under the data volume."""
+    env = os.environ.get("AGENTOS_WORKSPACE_ROOTS", "")
+    if env.strip():
+        roots = [r for r in env.split(os.pathsep) if r.strip()]
+    else:
+        roots = [
+            os.path.join(settings.AGENTOS_DATA_DIR, "kanban", "workspaces"),
+            os.path.join(settings.AGENTOS_DATA_DIR, "deliverables"),
+        ]
+    return [os.path.realpath(r) for r in roots]
+
+
+def _validate_workspace_path(workspace_path) -> str:
+    """Return realpath(workspace_path) if allowed, else raise ValueError.
+
+    Must be an existing directory contained in one of the allowlist roots.
+    Containment uses os.path.commonpath — bare prefix matching would let a
+    sibling directory sharing a string prefix through (F-M4-04).
+    """
+    if not isinstance(workspace_path, str) or not workspace_path.strip():
+        raise ValueError("workspace_path must be a non-empty string")
+    real = os.path.realpath(workspace_path)
+    if not os.path.isdir(real):
+        raise ValueError("workspace_path must be an existing directory")
+    for root in _workspace_roots():
+        try:
+            if os.path.commonpath([real, root]) == root:
+                return real
+        except ValueError:
+            continue
+    raise ValueError("workspace_path outside allowed roots")
+
+
+def _contained_path(child: str, parent: str) -> bool:
+    """True if realpath(child) is inside realpath(parent) (or is parent)."""
+    real_child = os.path.realpath(child)
+    real_parent = os.path.realpath(parent)
+    try:
+        return os.path.commonpath([real_child, real_parent]) == real_parent
+    except ValueError:
+        return False
+
+
 async def update_task_status(task_id: str, new_status: str) -> dict | None:
     """Update a task's status and related timestamps. Returns the updated task or None.
 
@@ -386,6 +441,10 @@ async def update_task(task_id: str, updates: dict) -> dict | None:
         if k == "workspace_kind" and v is not None:
             if v not in VALID_WORKSPACE_KINDS:
                 return None
+        if k == "workspace_path" and v is not None:
+            # F-M4-01: raise ValueError (mapped to 400 by the endpoint) instead
+            # of silently accepting an arbitrary filesystem path.
+            v = _validate_workspace_path(v)
         filtered[k] = v
 
     if not filtered:

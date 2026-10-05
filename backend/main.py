@@ -300,6 +300,8 @@ from backend.tasks import (  # noqa: E402
     bulk_update,
     search_tasks,
     get_kanban_stats,
+    _validate_workspace_path,
+    _contained_path,
 )
 
 @app.post("/api/tasks")
@@ -307,16 +309,20 @@ async def create_task_endpoint(body: dict, user: dict = Depends(require_auth)):
     title = body.get("title", "")
     if not title.strip():
         raise HTTPException(status_code=400, detail="'title' is required")
-    result = await create_task(
-        title=title,
-        body=body.get("body", ""),
-        assignee=body.get("assignee"),
-        priority=body.get("priority", 2),
-        status=body.get("status", "todo"),
-        created_by=body.get("created_by", "agentos"),
-        workspace_kind=body.get("workspace_kind"),
-        workspace_path=body.get("workspace_path"),
-    )
+    result = None
+    try:
+        result = await create_task(
+            title=title,
+            body=body.get("body", ""),
+            assignee=body.get("assignee"),
+            priority=body.get("priority", 2),
+            status=body.get("status", "todo"),
+            created_by=body.get("created_by", "agentos"),
+            workspace_kind=body.get("workspace_kind"),
+            workspace_path=body.get("workspace_path"),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if result is None:
         raise HTTPException(status_code=400, detail="Failed to create task")
     return result
@@ -331,7 +337,10 @@ async def update_task_endpoint(task_id: str, body: dict, user: dict = Depends(re
     if body.get("status") and len(body) == 1:
         result = await update_task_status(task_id, body["status"])
     else:
-        result = await update_task(task_id, body)
+        try:
+            result = await update_task(task_id, body)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
     if result is None:
         raise HTTPException(status_code=404, detail="Task not found or invalid field value")
     return result
@@ -400,11 +409,23 @@ async def list_task_artifacts(task_id: str, user: dict = Depends(require_auth)):
         raise HTTPException(status_code=404, detail="Task not found")
 
     workspace_path = task.get("workspace_path")
-    if not workspace_path or not os.path.exists(workspace_path):
+    if not workspace_path:
+        return {"files": [], "workspace_path": None}
+
+    # F-M4-01 (read side): DB values are untrusted — re-validate containment
+    # against the allowlist roots before touching the filesystem.
+    try:
+        real_workspace = _validate_workspace_path(workspace_path)
+    except ValueError:
         return {"files": [], "workspace_path": None}
 
     files = []
-    for entry in os.scandir(workspace_path):
+    try:
+        entries = list(os.scandir(real_workspace))
+    except OSError:
+        # F-M4-16: workspace_path may point at a file or vanish — never 500.
+        return {"files": [], "workspace_path": None}
+    for entry in entries:
         if entry.is_file():
             stat = entry.stat()
             files.append({
@@ -430,14 +451,22 @@ async def get_task_artifact(task_id: str, filename: str, user: dict = Depends(re
     if not workspace_path:
         raise HTTPException(status_code=404, detail="No workspace")
 
-    file_path = os.path.join(workspace_path, filename)
+    # F-M4-01 (read side): DB values are untrusted — re-validate the workspace
+    # against the allowlist roots. The old code contained the file against the
+    # attacker-chosen workspace, which is tautological.
+    try:
+        real_workspace = _validate_workspace_path(workspace_path)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    file_path = os.path.join(real_workspace, filename)
     if not os.path.exists(file_path) or not os.path.isfile(file_path):
         raise HTTPException(status_code=404, detail="File not found")
 
-    # Security: ensure file is within workspace
-    real_path = os.path.realpath(file_path)
-    real_workspace = os.path.realpath(workspace_path)
-    if not real_path.startswith(real_workspace):
+    # Security: the file must resolve INSIDE the workspace. commonpath, not a
+    # bare startswith — prefix matching lets a sibling directory sharing a
+    # string prefix through via symlink (F-M4-04).
+    if not _contained_path(file_path, real_workspace):
         raise HTTPException(status_code=403, detail="Access denied")
 
     content_type = _guess_content_type(filename)
