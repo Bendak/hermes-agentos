@@ -128,6 +128,30 @@ cd frontend && npm run build
 ```
 
 
+## Testing
+
+The canonical test suite runs entirely against an isolated sandbox (throwaway
+data dir + throwaway databases) — no real users, workspaces or cron jobs are
+ever touched.
+
+```bash
+# one-time: create the environment (Python 3.11+)
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[test]"
+
+# backend suite
+pytest
+
+# frontend type-check + production build
+cd frontend && npm ci && npx tsc --noEmit && npm run build
+```
+
+Covered areas: config editing (`_apply_patch`), workspace containment,
+the authorization matrix (admin × viewer), token lifecycle (strict claims,
+revocation, refresh rotation), media/artifact transport (no tokens in URLs)
+and cron store integrity (lost updates under concurrency, honest dispatch).
+CI runs both jobs on every push (`.github/workflows/tests.yml`).
+
 ## Installation for AI Agents
 
 > **This section is designed for AI agents (Hermes, Claude, GPT, etc.) to install AgentOS automatically.** Follow these steps based on your environment.
