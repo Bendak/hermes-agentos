@@ -17,7 +17,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from backend.auth import require_auth
+from backend.auth import require_auth, require_admin
 
 PROFILES_DIR = os.environ.get("AGENTOS_PROFILES_DIR", "/opt/data/profiles")
 
@@ -189,7 +189,7 @@ async def get_profile(profile_id: str) -> dict[str, Any]:
     return _to_detail(pid, cfg)
 
 
-@router.put("/{profile_id}")
+@router.put("/{profile_id}", dependencies=[Depends(require_admin)])
 async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]:
     """Update an existing profile's editable fields."""
     pid = _sanitize_id(profile_id)
@@ -225,7 +225,7 @@ async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]
     return _to_detail(pid, cfg)
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_admin)])
 async def create_profile(body: ProfileCreate) -> dict[str, Any]:
     """Create a new profile directory with config.yaml."""
     pid = _sanitize_id(body.name)
@@ -262,7 +262,7 @@ async def create_profile(body: ProfileCreate) -> dict[str, Any]:
     return _to_detail(pid, cfg)
 
 
-@router.delete("/{profile_id}")
+@router.delete("/{profile_id}", dependencies=[Depends(require_admin)])
 async def delete_profile(profile_id: str) -> dict[str, Any]:
     """Delete a profile directory and its contents."""
     pid = _sanitize_id(profile_id)
@@ -276,7 +276,7 @@ async def delete_profile(profile_id: str) -> dict[str, Any]:
     return {"deleted": pid}
 
 
-@router.post("/{profile_id}/duplicate")
+@router.post("/{profile_id}/duplicate", dependencies=[Depends(require_admin)])
 async def duplicate_profile(profile_id: str, body: dict | None = None) -> dict[str, Any]:
     """Duplicate a profile. Optional 'name' in body for the new profile ID."""
     pid = _sanitize_id(profile_id)
@@ -317,7 +317,7 @@ async def get_soul(profile_id: str) -> dict[str, Any]:
         return {"content": f.read()}
 
 
-@router.put("/{profile_id}/soul")
+@router.put("/{profile_id}/soul", dependencies=[Depends(require_admin)])
 async def update_soul(profile_id: str, body: SoulUpdate) -> dict[str, Any]:
     """Write the SOUL.md content for a profile."""
     pid = _sanitize_id(profile_id)

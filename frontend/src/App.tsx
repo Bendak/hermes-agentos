@@ -1,3 +1,4 @@
+import { isAdmin } from "./lib/admin"
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
@@ -2591,12 +2592,14 @@ function KanbanBoardPage() {
             <p className="text-body-sm text-text-secondary mt-1">Task pipeline</p>
           </div>
           <div className="flex items-center gap-3">
+{isAdmin() && (
             <button
               onClick={() => setCreateModalOpen(true)}
               className="flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors text-sm font-medium"
             >
               <span>+</span> New Task
             </button>
+            )}
             <button
               onClick={() => setCreateTriageModalOpen(true)}
               className="flex items-center gap-2 px-4 py-2 bg-purple-subtle text-purple border border-purple/30 rounded-lg hover:bg-purple/20 transition-colors text-sm font-medium"
@@ -3735,6 +3738,7 @@ function ConfigPage() {
             >
               Cancel
             </button>
+{isAdmin() && (
             <button
               onClick={handleSave}
               disabled={Object.keys(changes).length === 0 || saveMutation.isPending}
@@ -3742,6 +3746,7 @@ function ConfigPage() {
             >
               {saveMutation.isPending ? 'Saving...' : `Save Changes (${Object.keys(changes).length})`}
             </button>
+            )}
           </div>
         </div>
       )}
@@ -3893,6 +3898,7 @@ function WorkflowListPage() {
             <h1 className="text-h2 font-bold text-text-primary">Workflows</h1>
             <p className="text-body text-text-secondary mt-1">Design and manage your automation workflows</p>
           </div>
+{isAdmin() && (
           <button
             onClick={() => createMutation.mutate()}
             disabled={createMutation.isPending}
@@ -3901,6 +3907,7 @@ function WorkflowListPage() {
             <span>+</span>
             <span>{createMutation.isPending ? 'Creating...' : 'New Workflow'}</span>
           </button>
+          )}
         </div>
 
         {isLoading ? (
@@ -3922,7 +3929,7 @@ function WorkflowListPage() {
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-h4 font-semibold text-text-primary truncate flex-1 mr-2">{wf.name}</h3>
                   <button
-                    onClick={(e) => handleDelete(e, wf.id, wf.name)}
+                    onClick={(e) => isAdmin() && handleDelete(e, wf.id, wf.name)}
                     className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-error-subtle text-text-tertiary hover:text-error transition-all"
                     title="Delete workflow"
                   >
@@ -5265,12 +5272,14 @@ function CronPage() {
                   )}
                 </div>
               )}
+{isAdmin() && (
               <button
                 onClick={() => setShowCreate(true)}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-accent text-white hover:bg-accent/80 transition-colors"
               >
                 <span className="text-base leading-none">+</span> New Job
               </button>
+              )}
             </div>
           </div>
         </div>
@@ -5350,7 +5359,7 @@ function CronPage() {
                         <div className="flex items-center justify-end gap-1">
                           {/* Run Now */}
                           <button
-                            onClick={() => runNowMutation.mutate(job.id)}
+                            onClick={() => isAdmin() && runNowMutation.mutate(job.id)}
                             disabled={runNowMutation.isPending && runNowMutation.variables === job.id}
                             className="px-2 py-1 text-[11px] rounded bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50 transition-colors"
                             title="Run now"
