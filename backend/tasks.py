@@ -345,7 +345,9 @@ def _validate_workspace_path(workspace_path) -> str:
         raise ValueError("workspace_path must be an existing directory")
     for root in _workspace_roots():
         try:
-            if os.path.commonpath([real, root]) == root:
+            # strict child: workspace_path == root would enumerate every sibling
+            # workspace under it (fixes-verdict residual, LOW)
+            if real != root and os.path.commonpath([real, root]) == root:
                 return real
         except ValueError:
             continue
