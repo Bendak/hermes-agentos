@@ -50,29 +50,46 @@ def _apply_patch(config: dict, path: list[str], value: Any) -> dict:
     Examples:
       ["model", "default"] → config["model"]["default"] = value
       ["fallback_providers", "[0]"] → config["fallback_providers"][0] = value
+
+    Malformed paths (scalar in the middle, dict key inside a list, bad
+    index) leave the config untouched — navigation must never clobber
+    an existing list or dict to force a path to fit.
     """
     current = config
-    for i, key in enumerate(path[:-1]):
+    for key in path[:-1]:
         if key.startswith('[') and key.endswith(']'):
             # Array index
-            idx = int(key[1:-1])
-            if not isinstance(current, list) or idx >= len(current):
-                # Can't navigate — skip
+            try:
+                idx = int(key[1:-1])
+            except ValueError:
+                return config
+            if not isinstance(current, list) or idx < 0 or idx >= len(current):
+                # Can't navigate — leave config unchanged
                 return config
             current = current[idx]
         else:
-            if key not in current or not isinstance(current[key], dict):
+            if isinstance(current, list):
+                # Dict key inside a list — malformed path; never clobber the list
+                return config
+            if key not in current:
                 current[key] = {}
+            elif not isinstance(current[key], (dict, list)):
+                # Scalar in the middle of the path — malformed; never clobber
+                return config
             current = current[key]
 
     # Set the final value
     final = path[-1]
     if final.startswith('[') and final.endswith(']'):
-        idx = int(final[1:-1])
-        if isinstance(current, list) and idx < len(current):
+        try:
+            idx = int(final[1:-1])
+        except ValueError:
+            return config
+        if isinstance(current, list) and 0 <= idx < len(current):
             current[idx] = value
     else:
-        current[final] = value
+        if isinstance(current, dict):
+            current[final] = value
     return config
 
 
