@@ -786,9 +786,17 @@ async def spa_fallback(full_path: str):
     if full_path.startswith("api/"):
         raise HTTPException(status_code=404, detail="Not found")
     # Health endpoint is handled by the explicit route above
-    # Try to serve a real file from dist/
-    candidate = os.path.join(dist_path, full_path)
-    if full_path and os.path.isfile(candidate):
+    # Try to serve a real file from dist/ — path-traversal safe:
+    # resolve symlinks/../segments and require the result to stay inside dist/.
+    # (os.path.join alone is unsafe: '..' segments and absolute full_path escape it)
+    dist_root = os.path.realpath(dist_path)
+    candidate = os.path.realpath(os.path.join(dist_path, full_path))
+    if (
+        full_path
+        and candidate != dist_root
+        and candidate.startswith(dist_root + os.sep)
+        and os.path.isfile(candidate)
+    ):
         return FileResponse(candidate)
     # Fallback to index.html for SPA routing
     if os.path.isfile(index_html):
