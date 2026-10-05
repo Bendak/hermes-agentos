@@ -1,3 +1,4 @@
+import { isAdmin } from "../lib/admin"
 import { useState, useEffect, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { NavBar } from '../App'
@@ -672,12 +673,14 @@ export default function ProfilesPage() {
                 Manage agent configurations, models, and toolsets
               </p>
             </div>
+{isAdmin() && (
             <button
               onClick={() => setCreating(true)}
               className="bg-accent text-text-inverse px-4 py-1.5 rounded-md text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
             >
               + New Profile
             </button>
+            )}
           </div>
         </div>
       </header>

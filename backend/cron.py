@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from backend.auth import require_auth
+from backend.auth import require_auth, require_admin
 
 CRON_JOBS_PATH = "/opt/data/cron/jobs.json"
 
@@ -62,7 +62,7 @@ async def get_cron_job(job_id: str, user: dict = Depends(require_auth)):
 
 
 @router.post("")
-async def create_cron_job(body: dict, user: dict = Depends(require_auth)):
+async def create_cron_job(body: dict, user: dict = Depends(require_admin)):
     """Create a new cron job."""
     now = datetime.now(timezone.utc).isoformat()
     job_id = uuid.uuid4().hex[:12]
@@ -112,7 +112,7 @@ async def create_cron_job(body: dict, user: dict = Depends(require_auth)):
 
 
 @router.put("/{job_id}")
-async def update_cron_job(job_id: str, body: dict, user: dict = Depends(require_auth)):
+async def update_cron_job(job_id: str, body: dict, user: dict = Depends(require_admin)):
     """Update an existing cron job."""
     jobs = _read_jobs()
     job = _find_job(jobs, job_id)
@@ -153,7 +153,7 @@ async def update_cron_job(job_id: str, body: dict, user: dict = Depends(require_
 
 
 @router.delete("/{job_id}")
-async def delete_cron_job(job_id: str, user: dict = Depends(require_auth)):
+async def delete_cron_job(job_id: str, user: dict = Depends(require_admin)):
     """Delete a cron job."""
     jobs = _read_jobs()
     new_jobs = [j for j in jobs if j["id"] != job_id]
@@ -164,7 +164,7 @@ async def delete_cron_job(job_id: str, user: dict = Depends(require_auth)):
 
 
 @router.post("/{job_id}/run")
-async def run_cron_job_now(job_id: str, user: dict = Depends(require_auth)):
+async def run_cron_job_now(job_id: str, user: dict = Depends(require_admin)):
     """Trigger immediate execution of a cron job via Hermes CLI."""
     import subprocess
 
@@ -208,7 +208,7 @@ async def run_cron_job_now(job_id: str, user: dict = Depends(require_auth)):
 
 
 @router.post("/{job_id}/pause")
-async def pause_cron_job(job_id: str, user: dict = Depends(require_auth)):
+async def pause_cron_job(job_id: str, user: dict = Depends(require_admin)):
     """Pause a cron job."""
     jobs = _read_jobs()
     job = _find_job(jobs, job_id)
@@ -222,7 +222,7 @@ async def pause_cron_job(job_id: str, user: dict = Depends(require_auth)):
 
 
 @router.post("/{job_id}/resume")
-async def resume_cron_job(job_id: str, user: dict = Depends(require_auth)):
+async def resume_cron_job(job_id: str, user: dict = Depends(require_admin)):
     """Resume a cron job."""
     jobs = _read_jobs()
     job = _find_job(jobs, job_id)

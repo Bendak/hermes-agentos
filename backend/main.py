@@ -122,7 +122,7 @@ async def auth_register(body: dict, request: Request):
 
     username = body.get("username", "")
     password = body.get("password", "")
-    role = body.get("role", "admin")
+    role = body.get("role", "viewer")  # F-M3-13: default least-privilege; explicit "admin" still allowed
 
     if not username or not password:
         raise HTTPException(status_code=400, detail="Username and password required")
@@ -305,7 +305,7 @@ from backend.tasks import (  # noqa: E402
 )
 
 @app.post("/api/tasks")
-async def create_task_endpoint(body: dict, user: dict = Depends(require_auth)):
+async def create_task_endpoint(body: dict, user: dict = Depends(require_admin)):
     title = body.get("title", "")
     if not title.strip():
         raise HTTPException(status_code=400, detail="'title' is required")
@@ -329,7 +329,7 @@ async def create_task_endpoint(body: dict, user: dict = Depends(require_auth)):
 
 
 @app.patch("/api/tasks/{task_id}")
-async def update_task_endpoint(task_id: str, body: dict, user: dict = Depends(require_auth)):
+async def update_task_endpoint(task_id: str, body: dict, user: dict = Depends(require_admin)):
     # Accept both the legacy {status: "..."} shape and the full partial-update
     # shape ({title, body, assignee, priority, status, project_id, …}).
     # If the only field present is "status" we route through the legacy helper
@@ -377,7 +377,7 @@ async def tasks_detail(task_id: str, user: dict = Depends(require_auth)) -> dict
 
 
 @app.post("/api/tasks/{task_id}/comments")
-async def tasks_add_comment(task_id: str, body: dict, user: dict = Depends(require_auth)):
+async def tasks_add_comment(task_id: str, body: dict, user: dict = Depends(require_admin)):
     text = (body.get("body") or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="Comment body is required")
@@ -500,7 +500,7 @@ async def get_task_logs(task_id: str, user: dict = Depends(require_auth)):
 
 
 @app.post("/api/tasks/bulk")
-async def tasks_bulk(body: dict, user: dict = Depends(require_auth)):
+async def tasks_bulk(body: dict, user: dict = Depends(require_admin)):
     ids = body.get("ids")
     updates = body.get("updates")
     if not isinstance(ids, list) or not ids:
@@ -568,7 +568,7 @@ async def config_raw(user: dict = Depends(require_auth)):
 
 
 @app.patch("/api/config")
-async def config_edit(body: dict, user: dict = Depends(require_auth)):
+async def config_edit(body: dict, user: dict = Depends(require_admin)):
     patches = body.get("patches")
     if not patches or not isinstance(patches, list):
         raise HTTPException(status_code=400, detail="Missing or invalid 'patches' list")
@@ -627,12 +627,12 @@ async def workflow_detail(workflow_id: str, user: dict = Depends(require_auth)):
 
 
 @app.post("/api/workflows")
-async def workflow_create(body: dict, user: dict = Depends(require_auth)):
+async def workflow_create(body: dict, user: dict = Depends(require_admin)):
     return await create_workflow(body)
 
 
 @app.put("/api/workflows/{workflow_id}")
-async def workflow_update(workflow_id: str, body: dict, user: dict = Depends(require_auth)):
+async def workflow_update(workflow_id: str, body: dict, user: dict = Depends(require_admin)):
     result = await update_workflow(workflow_id, body)
     if result is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -640,7 +640,7 @@ async def workflow_update(workflow_id: str, body: dict, user: dict = Depends(req
 
 
 @app.delete("/api/workflows/{workflow_id}")
-async def workflow_delete(workflow_id: str, user: dict = Depends(require_auth)):
+async def workflow_delete(workflow_id: str, user: dict = Depends(require_admin)):
     success = await delete_workflow(workflow_id)
     if not success:
         raise HTTPException(status_code=404, detail="Workflow not found")
@@ -648,7 +648,7 @@ async def workflow_delete(workflow_id: str, user: dict = Depends(require_auth)):
 
 
 @app.post("/api/workflows/{workflow_id}/run")
-async def workflow_run(workflow_id: str, user: dict = Depends(require_auth)):
+async def workflow_run(workflow_id: str, user: dict = Depends(require_admin)):
     try:
         result = await run_workflow(workflow_id)
     except ValueError as e:
