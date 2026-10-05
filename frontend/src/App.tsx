@@ -1257,10 +1257,11 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
   const isPdf = ext === '.pdf'
   // Binary formats that can't be fetched as text
   const isBinary = isVideo || isAudio || isImage || isPdf
-  // Media elements (<video>, <img>, <audio>, <iframe>) can't set Authorization headers.
-  // Append token as query param so the backend can authenticate via ?token= fallback.
-  const authToken = typeof window !== 'undefined' ? localStorage.getItem('agentos_access_token') : null
-  const previewUrl = `/api/tasks/${taskId}/artifacts/${encodeURIComponent(filename)}?preview=true${isBinary && authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`
+  // WI-3 (F-M4-08): media elements can't set Authorization headers, and tokens in
+  // URLs leak via logs/referrers/history. Binary previews load through the
+  // authenticated fetch (global interceptor) + blob object URLs instead of the
+  // old ?token= query-param pattern.
+  const previewUrl = `/api/tasks/${taskId}/artifacts/${encodeURIComponent(filename)}?preview=true`
 
   const { data: content, isLoading } = useQuery({
     queryKey: ['artifact-content', taskId, filename],
@@ -1270,6 +1271,17 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
       return res.text()
     },
     enabled: !isBinary,
+    staleTime: 60000,
+  })
+
+  const { data: blobUrl, isLoading: blobLoading } = useQuery({
+    queryKey: ['artifact-blob', taskId, filename],
+    queryFn: async () => {
+      const res = await fetch(previewUrl)
+      if (!res.ok) throw new Error('Failed to fetch artifact')
+      return URL.createObjectURL(await res.blob())
+    },
+    enabled: isBinary,
     staleTime: 60000,
   })
 
@@ -1298,8 +1310,11 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
 
       {/* Preview content */}
       <div className="p-0">
-        {isLoading && (
+        {(isLoading || (isBinary && blobLoading)) && (
           <p className="text-xs text-text-tertiary p-3">Loading preview…</p>
+        )}
+        {isBinary && !blobUrl && !blobLoading && (
+          <p className="text-xs text-error p-3">Failed to load preview.</p>
         )}
 
         {/* Raw mode */}
@@ -1341,7 +1356,7 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
           <div className="p-3">
             <video
               controls
-              src={previewUrl}
+              src={blobUrl}
               className="max-w-full max-h-96 rounded border border-border"
             />
           </div>
@@ -1350,7 +1365,7 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
         {/* Audio preview */}
         {isAudio && (
           <div className="p-3">
-            <audio controls src={previewUrl} className="w-full" />
+            <audio controls src={blobUrl} className="w-full" />
           </div>
         )}
 
@@ -1358,7 +1373,7 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
         {isImage && (
           <div className="p-3">
             <img
-              src={previewUrl}
+              src={blobUrl}
               alt={filename}
               className="max-w-full rounded border border-border"
             />
@@ -1368,7 +1383,7 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
         {/* PDF preview */}
         {isPdf && (
           <iframe
-            src={previewUrl}
+            src={blobUrl}
             title={filename}
             className="w-full h-[32rem] border-0"
           />
@@ -3234,13 +3249,23 @@ function TaskDetailPage() {
                             <p className="text-sm text-text-primary truncate">{file.name}</p>
                             <p className="text-xs text-text-tertiary">{formatFileSize(file.size)} • {formatTime(file.modified)}</p>
                           </div>
-                          <a
-                            href={`/api/tasks/${id}/artifacts/${encodeURIComponent(file.name)}`}
-                            download
+                          <button
+                            onClick={async () => {
+                              // WI-3 (F-M4-02): authenticated fetch + blob download —
+                              // a bare <a href> carried no Authorization header (401)
+                              const res = await fetch(`/api/tasks/${id}/artifacts/${encodeURIComponent(file.name)}`)
+                              if (!res.ok) return
+                              const url = URL.createObjectURL(await res.blob())
+                              const a = document.createElement('a')
+                              a.href = url
+                              a.download = file.name
+                              a.click()
+                              URL.revokeObjectURL(url)
+                            }}
                             className="opacity-0 group-hover:opacity-100 text-xs text-accent hover:text-accent-hover transition"
                           >
                             ⬇ Download
-                          </a>
+                          </button>
                           <button
                             onClick={() => setPreviewFile(previewFile === file.name ? null : file.name)}
                             className="opacity-0 group-hover:opacity-100 text-xs text-accent hover:text-accent-hover transition"

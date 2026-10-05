@@ -305,13 +305,14 @@ async def require_auth(request: Request) -> dict:
     1. Authorization: Bearer <token> (standard, used by fetch interceptor)
     2. ?token=<token> query param (for media elements like <video src=...> that can't set headers)
     """
-    # Try Authorization header first
+    # Authorization header only. F-M4-08: the old ?token= query-param fallback
+    # leaked credentials via logs/referrers/history — media elements now load
+    # bytes through authenticated fetch + blob object URLs instead.
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
     else:
-        # Fall back to query param (for media elements: <img>, <video>, <audio>)
-        token = request.query_params.get("token", "")
+        token = ""
 
     if not token:
         raise HTTPException(status_code=401, detail="Missing or invalid authorization header")

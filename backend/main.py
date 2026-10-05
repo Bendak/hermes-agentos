@@ -478,12 +478,22 @@ async def get_task_artifact(task_id: str, filename: str, user: dict = Depends(re
         raise HTTPException(status_code=403, detail="Access denied")
 
     content_type = _guess_content_type(filename)
+    # F-M4-10: active content types are never served as markup at app origin.
+    # HTML previews render through our own components as text. SVG keeps its
+    # type (needed by <img> blob rendering) — safe there: scripts don't execute
+    # in img context, and direct URL access requires the Authorization header.
+    if content_type in ("text/html", "application/xhtml+xml"):
+        content_type = "text/plain"
     disposition = "inline" if preview else "attachment"
     return FileResponse(
         file_path,
         filename=filename,
         media_type=content_type,
         content_disposition_type=disposition,
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+        },
     )
 
 
