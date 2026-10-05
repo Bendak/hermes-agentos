@@ -56,6 +56,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       const data = await res.json()
       localStorage.setItem(TOKEN_KEY, data.access_token)
+      // WI-3: refresh tokens rotate — persist the new one or the next refresh
+      // would replay the stale jti and revoke the whole family
+      if (data.refresh_token) {
+        localStorage.setItem(REFRESH_KEY, data.refresh_token)
+      }
       setToken(data.access_token)
       return data.access_token
     } catch {
@@ -122,6 +127,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (refreshRes.ok) {
               const data = await refreshRes.json()
               localStorage.setItem(TOKEN_KEY, data.access_token)
+              // WI-3: persist rotated refresh token (see doRefresh)
+              if (data.refresh_token) {
+                localStorage.setItem(REFRESH_KEY, data.refresh_token)
+              }
               setToken(data.access_token)
               // Retry original request
               const headers = new Headers(init?.headers)
@@ -159,6 +168,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const logout = useCallback(() => {
+    // WI-3: revoke every outstanding server-side token, then clear locally
+    const currentToken = localStorage.getItem(TOKEN_KEY)
+    if (currentToken) {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + currentToken },
+      }).catch(() => {})
+    }
     clearAuth()
   }, [clearAuth])
 
