@@ -46,10 +46,21 @@ def _init_db() -> None:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 username TEXT UNIQUE NOT NULL,
                 password_hash TEXT NOT NULL,
-                role TEXT NOT NULL DEFAULT 'admin',
-                created_at TEXT NOT NULL
+                role TEXT NOT NULL DEFAULT 'viewer',
+                created_at TEXT NOT NULL,
+                token_version INTEGER NOT NULL DEFAULT 1,
+                refresh_jti TEXT
             )
         """)
+        # migrations for tables created before these columns existed
+        for ddl in (
+            "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1",
+            "ALTER TABLE users ADD COLUMN refresh_jti TEXT",
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass
         conn.execute("""
             CREATE TABLE IF NOT EXISTS app_config (
                 key TEXT PRIMARY KEY,
@@ -163,21 +174,33 @@ def _decode_token(token: str, secret: str) -> dict:
 
     payload = json.loads(_b64_decode(body_b64))
 
-    # Check expiry
+    # Strict claims: a token WITHOUT exp must never be accepted (F-M1-10).
     exp = payload.get("exp")
-    if exp and datetime.now(timezone.utc).timestamp() > exp:
+    if not isinstance(exp, (int, float)):
+        raise ValueError("Token missing expiry")
+    if datetime.now(timezone.utc).timestamp() > exp:
         raise ValueError("Token expired")
+    try:
+        int(payload.get("sub"))
+    except (TypeError, ValueError):
+        raise ValueError("Invalid token subject")
+    if payload.get("type") not in ("access", "refresh"):
+        raise ValueError("Invalid token type")
 
     return payload
 
 
-def create_access_token(user_id: int, role: str) -> str:
-    """Create a short-lived access token."""
+def create_access_token(user_id: int, role: str, ver: Optional[int] = None) -> str:
+    """Create a short-lived access token carrying the user's token_version claim."""
+    if ver is None:
+        user = get_user_by_id(int(user_id))
+        ver = (user or {}).get("token_version", 1)
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "role": role,
         "type": "access",
+        "ver": int(ver),
         "iat": now.timestamp(),
         "exp": (now + ACCESS_TOKEN_EXPIRY).timestamp(),
     }
@@ -185,15 +208,32 @@ def create_access_token(user_id: int, role: str) -> str:
 
 
 def create_refresh_token(user_id: int) -> str:
-    """Create a long-lived refresh token."""
+    """Create a long-lived refresh token and rotate the stored jti.
+
+    Only the latest issued refresh token stays valid (users.refresh_jti); older
+    ones become replay evidence in verify_and_rotate_refresh()."""
+    user = get_user_by_id(int(user_id))
+    ver = (user or {}).get("token_version", 1)
+    jti = secrets.token_urlsafe(16)
     now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "type": "refresh",
+        "ver": int(ver),
+        "jti": jti,
         "iat": now.timestamp(),
         "exp": (now + REFRESH_TOKEN_EXPIRY).timestamp(),
     }
-    return _create_token(payload, get_jwt_secret())
+    token = _create_token(payload, get_jwt_secret())
+    conn = _get_db()
+    try:
+        conn.execute(
+            "UPDATE users SET refresh_jti = ? WHERE id = ?", (jti, int(user_id))
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return token
 
 
 def verify_token(token: str) -> dict:
@@ -221,7 +261,7 @@ def get_user_by_id(user_id: int) -> Optional[dict]:
         conn.close()
 
 
-def create_user(username: str, password: str, role: str = "admin") -> dict:
+def create_user(username: str, password: str, role: str = "viewer") -> dict:
     """Create a new user. Returns user dict or raises."""
     _init_db()
     now = datetime.now(timezone.utc).isoformat()
@@ -284,9 +324,14 @@ async def require_auth(request: Request) -> dict:
     if payload.get("type") != "access":
         raise HTTPException(status_code=401, detail="Invalid token type")
 
-    user = get_user_by_id(int(payload["sub"]))
+    try:
+        user = get_user_by_id(int(payload["sub"]))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token subject")
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if payload.get("ver") != user["token_version"]:
+        raise HTTPException(status_code=401, detail="Token revoked")
 
     return {"user_id": user["id"], "username": user["username"], "role": user["role"]}
 
@@ -318,7 +363,8 @@ def update_user_password(user_id: int, new_password: str) -> bool:
     conn = _get_db()
     try:
         cursor = conn.execute(
-            "UPDATE users SET password_hash = ? WHERE id = ?",
+            "UPDATE users SET password_hash = ?, "
+            "token_version = token_version + 1, refresh_jti = NULL WHERE id = ?",
             (pw_hash, user_id),
         )
         conn.commit()
@@ -336,3 +382,43 @@ def delete_user(user_id: int) -> bool:
         return cursor.rowcount > 0
     finally:
         conn.close()
+
+
+# ── Token revocation & refresh rotation (WI-3) ───────────────────────
+
+def bump_token_version(user_id: int) -> bool:
+    """Invalidate every outstanding token for a user (server-side logout)."""
+    conn = _get_db()
+    try:
+        cursor = conn.execute(
+            "UPDATE users SET token_version = token_version + 1, "
+            "refresh_jti = NULL WHERE id = ?",
+            (user_id,),
+        )
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def verify_and_rotate_refresh(token: str) -> dict:
+    """Validate a refresh token with jti rotation. Returns the user dict.
+
+    Raises ValueError on any failure. A replayed (stale) jti is treated as
+    theft: the whole token family is revoked via token_version bump."""
+    payload = _decode_token(token, get_jwt_secret())
+    if payload.get("type") != "refresh":
+        raise ValueError("Invalid token type")
+    try:
+        user = get_user_by_id(int(payload["sub"]))
+    except (TypeError, ValueError):
+        raise ValueError("Invalid token subject")
+    if not user:
+        raise ValueError("User not found")
+    if payload.get("ver") != user["token_version"]:
+        raise ValueError("Token revoked")
+    jti = payload.get("jti")
+    if not jti or user.get("refresh_jti") != jti:
+        bump_token_version(user["id"])
+        raise ValueError("Refresh token reused; all sessions revoked")
+    return user

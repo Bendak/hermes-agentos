@@ -21,6 +21,8 @@ from backend.auth import (
     get_user_by_username,
     get_user_by_id,
     create_user,
+    bump_token_version,
+    verify_and_rotate_refresh,
     users_exist,
     hash_password,
     verify_password,
@@ -78,25 +80,29 @@ async def auth_login(body: dict):
 
 @app.post("/api/auth/refresh")
 async def auth_refresh(body: dict):
-    """Refresh an access token using a refresh token."""
+    """Exchange a refresh token for new access + refresh tokens (rotation).
+
+    Only the newest refresh token is valid; replaying a stale one revokes the
+    whole token family (verify_and_rotate_refresh)."""
     refresh_token = body.get("refresh_token", "")
     if not refresh_token:
         raise HTTPException(status_code=400, detail="Refresh token required")
 
     try:
-        payload = verify_token(refresh_token)
+        user = verify_and_rotate_refresh(refresh_token)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
 
-    if payload.get("type") != "refresh":
-        raise HTTPException(status_code=401, detail="Invalid token type")
-
-    user = get_user_by_id(int(payload["sub"]))
-    if not user:
-        raise HTTPException(status_code=401, detail="User not found")
-
     access_token = create_access_token(user["id"], user["role"])
-    return {"access_token": access_token}
+    new_refresh = create_refresh_token(user["id"])
+    return {"access_token": access_token, "refresh_token": new_refresh}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(user: dict = Depends(require_auth)):
+    """Server-side logout: revoke every outstanding token for this user."""
+    bump_token_version(user["user_id"])
+    return {"status": "logged_out"}
 
 
 @app.post("/api/auth/register")
@@ -117,6 +123,8 @@ async def auth_register(body: dict, request: Request):
             admin_user = get_user_by_id(int(payload["sub"]))
             if not admin_user or admin_user["role"] != "admin":
                 raise HTTPException(status_code=403, detail="Admin access required")
+            if payload.get("ver") != admin_user["token_version"]:
+                raise HTTPException(status_code=401, detail="Token revoked")
         except ValueError as e:
             raise HTTPException(status_code=401, detail=str(e))
 
