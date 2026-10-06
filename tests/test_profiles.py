@@ -605,3 +605,50 @@ def test_upper_bound_rejected(client, admin_headers):
         assert r.status_code == 400, r.text
     finally:
         client.delete("/api/profiles/zz-upper?purge=true", headers=admin_headers)
+
+
+# ── WI-4b lote 4: M13-1 side-door consistency + M13-2 zombie ─────────────
+
+def test_side_door_ids_match_front_door(client, admin_headers):
+    """M13-1: both doors must list the SAME ids — 'default' once, no case
+    variants, no '_' dirs, no config-less dirs. Kills the private-loop class."""
+    import shutil
+    import yaml
+    seeds = {
+        "legit": True,          # with config.yaml → listed
+        "noconfig": False,      # dir without config.yaml → hidden
+        "default": True,        # reserved virtual id → hidden (real dir)
+        "Default": True,        # case variant → hidden (M13-2 zombie)
+        "_archive": True,       # underscore → hidden
+    }
+    for pid, with_cfg in seeds.items():
+        os.makedirs(_pdir(pid), exist_ok=True)
+        if with_cfg:
+            with open(os.path.join(_pdir(pid), "config.yaml"), "w", encoding="utf-8") as f:
+                f.write(yaml.safe_dump({"model": {"default": "m", "provider": "p"}}))
+    try:
+        front = client.get("/api/profiles", headers=admin_headers)
+        side = client.get("/api/profiles/skills-summary", headers=admin_headers)
+        assert front.status_code == 200 and side.status_code == 200
+        front_ids = sorted(r["id"] for r in front.json())
+        side_ids = sorted(r["name"] for r in side.json() if r["name"] != "default")
+        assert front_ids == side_ids, (front_ids, side_ids)
+        # the virtual root 'default' may appear exactly once in the side door
+        assert [r["name"] for r in side.json()].count("default") <= 1
+    finally:
+        for pid in seeds:
+            shutil.rmtree(_pdir(pid), ignore_errors=True)
+
+
+def test_case_variant_dirs_are_not_profiles(client, admin_headers):
+    """M13-2: 'Default' is the reserved id in any case — never listed."""
+    import shutil
+    os.makedirs(_pdir("DEFAULT"), exist_ok=True)
+    with open(os.path.join(_pdir("DEFAULT"), "config.yaml"), "w", encoding="utf-8") as f:
+        f.write("model:\n  default: m\n")
+    try:
+        r = client.get("/api/profiles", headers=admin_headers)
+        ids = [row["id"] for row in r.json()]
+        assert "DEFAULT" not in ids and "Default" not in ids, ids
+    finally:
+        shutil.rmtree(_pdir("DEFAULT"), ignore_errors=True)

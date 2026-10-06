@@ -31,7 +31,9 @@ def iter_sub_profile_ids() -> List[str]:
         return []
     out: List[str] = []
     for entry in sorted(os.listdir(PROFILES_DIR)):
-        if entry.startswith(".") or entry.startswith("_") or entry == DEFAULT_PROFILE_ID:
+        # M13-2: reserved in ANY case — a case-variant dir is not a "zombie
+        # listed but uncontrollable"; it is simply not a profile (API: 400).
+        if entry.startswith(".") or entry.startswith("_") or entry.lower() == DEFAULT_PROFILE_ID:
             continue
         if os.path.isdir(os.path.join(PROFILES_DIR, entry)):
             out.append(entry)
