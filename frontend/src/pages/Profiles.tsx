@@ -406,26 +406,37 @@ function DescriptionTab({ form, setForm }: { form: EditForm; setForm: (f: EditFo
 function MemoryTab({ profileId, onDirtyChange, registerSave }: {
   profileId: string
   onDirtyChange?: (dirty: boolean) => void
-  registerSave?: (fn: () => Promise<void>) => void
+  registerSave?: (fn: () => Promise<boolean>) => void
 }) {
   const [content, setContent] = useState<string>('')
   const [initial, setInitial] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  // a failed load must never look like an empty file — the user would "save" a
+  // fragment over the real SOUL.md (adversarial finding H3)
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const savedTimer = useRef<number | null>(null)
 
-  useEffect(() => {
+  const load = () => {
     setLoading(true)
+    setLoadError(null)
     apiFetch(`/api/profiles/${profileId}/soul`)
       .then((d) => { setContent(d.content || ''); setInitial(d.content || '') })
-      .catch(() => { setContent(''); setInitial('') })
+      .catch((e: any) => {
+        // keep content/initial untouched — only mark the editor unusable
+        setLoadError(String(e?.message || e))
+      })
       .finally(() => setLoading(false))
-  }, [profileId])
+  }
+  useEffect(load, [profileId])
+  useEffect(() => () => { if (savedTimer.current) window.clearTimeout(savedTimer.current) }, [])
 
   const dirty = content !== initial
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty])
 
-  const handleSave = async () => {
+  // returns success — the dialog's main Save aborts when this fails (finding H2)
+  const handleSave = async (): Promise<boolean> => {
     setSaving(true)
     try {
       await apiFetch(`/api/profiles/${profileId}/soul`, {
@@ -434,10 +445,13 @@ function MemoryTab({ profileId, onDirtyChange, registerSave }: {
       })
       setInitial(content) // clears the dirty flag — dialog close won't warn
       setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      if (savedTimer.current) window.clearTimeout(savedTimer.current)
+      savedTimer.current = window.setTimeout(() => setSaved(false), 2000)
+      return true
     } catch (e: any) {
       // never swallow a failed save — silent loss of typed content was the bug
       alert(`Failed to save SOUL.md: ${e?.message || e}`)
+      return false
     } finally {
       setSaving(false)
     }
@@ -452,6 +466,14 @@ function MemoryTab({ profileId, onDirtyChange, registerSave }: {
 
   return (
     <div>
+      {loadError && (
+        <div className="mb-3 p-3 rounded-md border border-red-300 bg-red-50 dark:bg-red-950/30 text-xs text-red-700 dark:text-red-300">
+          <div className="font-medium mb-1">Failed to load SOUL.md — editing disabled to protect the file.</div>
+          <div className="mb-2 font-mono">{loadError}</div>
+          <button onClick={load} className="px-3 py-1.5 text-xs rounded-md bg-red-600 text-white hover:opacity-90">Retry</button>
+        </div>
+      )}
+      <div style={{ display: loadError ? 'none' : 'block' }}>
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs text-text-tertiary">
           Agent personality / system prompt stored in <span className="font-mono text-text-secondary">SOUL.md</span>
@@ -472,6 +494,7 @@ function MemoryTab({ profileId, onDirtyChange, registerSave }: {
         rows={12}
         placeholder="# SOUL.md&#10;&#10;Write the agent's personality and system prompt here..."
       />
+      </div>
     </div>
   )
 }
@@ -523,7 +546,7 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
   const [tab, setTab] = useState<TabKey>('model')
   const [touched, setTouched] = useState(false)
   const [soulDirty, setSoulDirty] = useState(false)
-  const soulSaveRef = useRef<(() => Promise<void>) | null>(null)
+  const soulSaveRef = useRef<(() => Promise<boolean>) | null>(null)
 
   const errors = useMemo(() => validate(form, false), [form])
   const changedCount = useMemo(() => countChanges(original, form), [original, form])
@@ -539,7 +562,12 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
   const handleSave = async () => {
     setTouched(true)
     if (hasErrors) return
-    if (soulDirty && soulSaveRef.current) await soulSaveRef.current()
+    if (soulDirty && soulSaveRef.current) {
+      const ok = await soulSaveRef.current()
+      // a failed soul save must keep the dialog open: onSave() closes it and
+      // the unmount would bypass handleClose's unsaved-changes confirm (H2)
+      if (!ok) return
+    }
     onSave(buildPayload(form))
   }
 
@@ -566,13 +594,15 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
           {tab === 'agent' && <AgentTab form={form} setForm={setForm} errors={touched ? errors : {}} />}
           {tab === 'toolsets' && <ToolsetsTab form={form} setForm={setForm} />}
           {tab === 'description' && <DescriptionTab form={form} setForm={setForm} />}
-          {tab === 'memory' && (
+          {/* kept mounted across tab switches: unmounting destroyed typed SOUL
+              content silently and left a stale dirty flag (H1) */}
+          <div style={{ display: tab === 'memory' ? 'block' : 'none' }}>
             <MemoryTab
               profileId={profile.id}
               onDirtyChange={setSoulDirty}
               registerSave={(fn) => { soulSaveRef.current = fn }}
             />
-          )}
+          </div>
           {tab === 'preview' && <PreviewTab form={form} />}
         </div>
 

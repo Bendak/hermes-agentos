@@ -306,3 +306,41 @@ def test_duplicate_tree_inherits_owner(client, admin_headers):
 def test_viewer_cannot_mutate_profiles(client, viewer_headers, method, path, payload):
     r = client.request(method, path, headers=viewer_headers, json=payload)
     assert r.status_code == 403, f"{method} {path} must be admin-only, got {r.status_code}"
+
+
+# ── M2 (adversarial fixes4): _fix_owner called by EVERY writer ─────────────
+
+def test_fix_owner_called_on_every_writer(client, admin_headers, monkeypatch):
+    """Ownership inheritance can't be proven under non-root (chown-to-self is
+    a no-op), so guard the CALL SITES instead: every create/rewrite path must
+    route through _fix_owner. Deleting the mechanism fails this test."""
+    from backend import profiles as profiles_mod
+
+    calls: list[str] = []
+    monkeypatch.setattr(profiles_mod, "_fix_owner", lambda p: calls.append(str(p)))
+
+    r = client.post("/api/profiles", headers=admin_headers,
+                    json={"name": "zz-own-spy", "model": {"default": "m", "provider": "p"}})
+    assert r.status_code == 200, r.text
+    create_calls = len(calls)
+    assert create_calls >= 2, f"create should fix dir + config: {calls}"
+
+    r = client.put("/api/profiles/zz-own-spy", headers=admin_headers,
+                   json={"agent": {"max_turns": 5}})
+    assert r.status_code == 200, r.text
+    assert len(calls) > create_calls, "update must call _fix_owner"
+
+    prev = len(calls)
+    r = client.put("/api/profiles/zz-own-spy/soul", headers=admin_headers,
+                   json={"content": "# spy"})
+    assert r.status_code == 200, r.text
+    assert len(calls) > prev, "soul write must call _fix_owner"
+
+    prev = len(calls)
+    r = client.post("/api/profiles/zz-own-spy/duplicate", headers=admin_headers,
+                    json={"new_id": "zz-own-spy-2"})
+    assert r.status_code == 200, r.text
+    assert len(calls) > prev + 1, f"duplicate must fix dir + copied tree: {calls[prev:]}"
+
+    client.delete("/api/profiles/zz-own-spy-2?purge=true", headers=admin_headers)
+    client.delete("/api/profiles/zz-own-spy?purge=true", headers=admin_headers)

@@ -8,6 +8,7 @@ Never exposes api_key / token fields to the API.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tempfile
@@ -18,6 +19,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from backend.auth import require_auth, require_admin
+
+logger = logging.getLogger(__name__)
 
 PROFILES_DIR = os.environ.get("AGENTOS_PROFILES_DIR", "/opt/data/profiles")
 
@@ -94,11 +97,16 @@ def _fix_owner(path: str) -> None:
     """
     owner = _profiles_owner()
     if owner is None:
+        logger.warning("_profiles_owner() unavailable — %s keeps its current owner", path)
         return
     try:
         os.chown(path, owner[0], owner[1], follow_symlinks=False)
     except (OSError, NotImplementedError):
-        pass
+        # never follow a symlink target; but never stay silent either — a
+        # swallowed chown failure reproduces the original bug class unseen
+        # (adversarial M1). On rewrite the dir owner is stamped by design:
+        # a third-uid owner is deliberately reassigned.
+        logger.warning("Could not restore canonical owner on %s", path, exc_info=True)
 
 
 def _atomic_write(path: str, data: str) -> None:
