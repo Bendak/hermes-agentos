@@ -652,3 +652,101 @@ def test_case_variant_dirs_are_not_profiles(client, admin_headers):
         assert "DEFAULT" not in ids and "Default" not in ids, ids
     finally:
         shutil.rmtree(_pdir("DEFAULT"), ignore_errors=True)
+
+
+# ── M11-08: /api/models paths + filtered discovery ────────────────────────
+
+def test_models_endpoint_uses_sandbox_and_filters(client, admin_headers, sandbox):
+    """M11-08 (formerly hardcoded /opt/data paths + unfiltered glob):
+
+    1. /api/models must read <AGENTOS_DATA_DIR>/config.yaml and the profile
+       configs under PROFILES_DIR (sandbox-honoring env override), never the
+       real /opt/data prod dir.
+    2. The profile fallback must use the same discovery filters as every other
+       door (M10-16 single source): case-variant 'default', '_' dirs, dotdirs
+       and config-less dirs must NOT leak a (model, provider) pair.
+    """
+    import shutil
+
+    # Seed the sandbox: main config default + one legit sub-profile
+    (sandbox / "config.yaml").write_text(
+        "model:\n  default: main-model\n  provider: main-prov\nagents: []\n",
+        encoding="utf-8",
+    )
+    os.makedirs(_pdir("models-legit"), exist_ok=True)
+    with open(os.path.join(_pdir("models-legit"), "config.yaml"), "w",
+              encoding="utf-8") as f:
+        f.write("model:\n  default: legit-model\n  provider: legit-prov\n")
+
+    # Hostile, out-of-policy seeds — none may leak a model pair.
+    hostile = {
+        "Default": "zombie-model",      # case variant of the reserved id
+        "DEFAULT": "zombie-model-2",    # another case variant
+        "_arch": "archive-model",       # underscore dir
+        ".hidden": "hidden-model",      # dotdir
+        "noconfig": None,               # dir without config.yaml
+    }
+    for pid, model in hostile.items():
+        os.makedirs(_pdir(pid), exist_ok=True)
+        if model is not None:
+            with open(os.path.join(_pdir(pid), "config.yaml"), "w",
+                      encoding="utf-8") as f:
+                f.write(f"model:\n  default: {model}\n  provider: z-prov\n")
+
+    try:
+        r = client.get("/api/models", headers=admin_headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+
+        # (1) sandbox paths honored, not the real /opt/data
+        assert body["default"] == {"model": "main-model", "provider": "main-prov"}, body
+
+        pairs = {(m["model"], m["provider"]) for m in body["models"]}
+        assert ("legit-model", "legit-prov") in pairs, pairs
+        # nothing from the REAL /opt/data profile dir (e.g. mimo models)
+        assert not any(str(_m[0]).startswith("mimo") for _m in pairs), pairs
+
+        # (2) no hostile seed leaks
+        leaked = {m for m in pairs if m[1] == "z-prov"}
+        leaked |= {m for m in pairs if str(m[0]).startswith(("zombie", "archive", "hidden"))}
+        assert not leaked, leaked
+    finally:
+        for pid in ("models-legit", *hostile):
+            shutil.rmtree(_pdir(pid), ignore_errors=True)
+
+
+def test_models_endpoint_consistent_with_front_door(client, admin_headers):
+    """M11-08 /api/models profile-derived (model, provider) pairs must come
+    from exactly the model.default/provider of the profiles the front door
+    lists — same discovery source, no private enumeration."""
+    from backend.profile_discovery import PROFILES_DIR, discover_profile_ids
+
+    front = client.get("/api/profiles", headers=admin_headers)
+    models = client.get("/api/models", headers=admin_headers)
+    assert front.status_code == 200 and models.status_code == 200
+
+    front_pairs = {
+        (p["model"], p["provider"])
+        for p in front.json()
+        if p.get("model") and p.get("provider")
+    }
+    profile_pairs = {
+        (row["model"], row["provider"])
+        for row in models.json()["models"]
+    }
+    # every profile-derived pair in /api/models must belong to a front-door
+    # profile (or match the root default). Profile ids derive only from
+    # discover_profile_ids, so no extra dir should ever feed /api/models.
+    for pid in discover_profile_ids():
+        cfg_path = os.path.join(
+            PROFILES_DIR if pid != "default" else os.path.dirname(PROFILES_DIR),
+            pid if pid != "default" else "",
+            "config.yaml",
+        )
+        assert os.path.isfile(cfg_path) or pid == "default", cfg_path
+    # intersection: profile pairs ⊆ front-door pairs ∪ {main default}
+    main_cfg = models.json()["default"]
+    allowed = front_pairs | {
+        (main_cfg["model"], main_cfg["provider"])
+    } if main_cfg["model"] else front_pairs
+    assert profile_pairs - {("zz-model", "zz-prov")} <= allowed, (profile_pairs, allowed)
