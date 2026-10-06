@@ -464,3 +464,51 @@ def test_legacy_run_results_backfill_trigger_nodes(tmp_path, monkeypatch):
     assert d["result"]["trigger_nodes"] == 1
     # biz arithmetic the front does: 1 - 1 = 0 -> not green for trigger+skip
     assert d["result"]["executed_nodes"] - d["result"]["trigger_nodes"] == 0
+
+
+# ── WI-5 batch 7 (closure #2: M19-1/M19-2) ──────────────────────────────────
+
+def test_malformed_node_results_do_not_crash_reads(tmp_path, monkeypatch):
+    """M19-1: node_results with non-dict entries must not 500 the runs read."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import json as _json
+    import sqlite3 as _sq
+    res = {"node_results": [42, "str", None,
+                            {"node_id": "t", "node_type": "trigger", "status": "completed"}],
+           "executed_nodes": 1, "skipped_nodes": 0, "total_nodes": 4}
+    conn = _sq.connect(str(tmp_path / "agentos.db"))
+    conn.execute("INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at)"
+                 " VALUES ('wf_m', 'm', '', '[]', '[]', 't', 't')")
+    conn.execute("INSERT INTO workflow_runs (id, workflow_id, status, started_at, result)"
+                 " VALUES ('run_m', 'wf_m', 'completed', 't', ?)", (_json.dumps(res),))
+    conn.commit()
+    conn.close()
+
+    from backend.workflow_engine import get_workflow_runs, get_run_detail
+    runs = asyncio.run(get_workflow_runs("wf_m"))
+    assert runs[0]["result"]["trigger_nodes"] == 1  # only the dict entry counts
+    d = asyncio.run(get_run_detail("run_m"))
+    assert d["result"]["trigger_nodes"] == 1
+
+
+def test_corrupt_result_json_flagged_not_500(tmp_path, monkeypatch):
+    """M19-2: invalid run-result JSON is flagged on BOTH read paths."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "agentos.db"))
+    conn.execute("INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at)"
+                 " VALUES ('wf_c', 'c', '', '[]', '[]', 't', 't')")
+    conn.execute("INSERT INTO workflow_runs (id, workflow_id, status, started_at, result)"
+                 " VALUES ('run_c', 'wf_c', 'completed', 't', 'garbage{')")
+    conn.execute("INSERT INTO workflow_runs (id, workflow_id, status, started_at, result)"
+                 " VALUES ('run_ok', 'wf_c', 'completed', 't', '{\"node_results\": [], \"executed_nodes\": 0}')")
+    conn.commit()
+    conn.close()
+
+    from backend.workflow_engine import get_workflow_runs, get_run_detail
+    runs = asyncio.run(get_workflow_runs("wf_c"))
+    by_id = {r["id"]: r for r in runs}
+    assert by_id["run_c"]["result"] is None and by_id["run_c"].get("result_corrupt") is True
+    assert by_id["run_ok"]["result"] is not None and "result_corrupt" not in by_id["run_ok"]
+    d = asyncio.run(get_run_detail("run_c"))
+    assert d["result"] is None and d.get("result_corrupt") is True
