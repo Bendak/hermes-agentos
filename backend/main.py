@@ -500,7 +500,8 @@ async def get_task_artifact(task_id: str, filename: str, user: dict = Depends(re
 @app.get("/api/tasks/{task_id}/logs")
 async def get_task_logs(task_id: str, user: dict = Depends(require_auth)):
     """Return worker session log for a task."""
-    log_path = f"/opt/data/kanban/logs/{task_id}.log"
+    # M11-08 class: resolve under settings.AGENTOS_DATA_DIR, not hardcoded /opt/data
+    log_path = os.path.join(settings.AGENTOS_DATA_DIR, "kanban", "logs", f"{task_id}.log")
     if not os.path.exists(log_path):
         return {"content": None, "size": 0}
     size = os.path.getsize(log_path)
@@ -739,17 +740,21 @@ async def list_models(user: dict = Depends(require_auth)) -> dict:
     """Return available model+provider combos from cache files and config."""
     import yaml  # noqa: PLC0415
     import json  # noqa: PLC0415
-    import glob  # noqa: PLC0415
 
     default_model = None
     default_provider = None
     seen = set()
     models = []
 
+    # M11-08: resolve every path from settings/profile_discovery (the
+    # AGENTOS_DATA_DIR / AGENTOS_PROFILES_DIR overrides) instead of hardcoding
+    # /opt/data. Profile enumeration goes through the single source so the
+    # same filters as every other discovery door apply (M13-1/M13-2).
+    from backend.profile_discovery import MAIN_CONFIG, PROFILES_DIR, iter_sub_profile_ids  # noqa: PLC0415
+
     # Read main config for default model
-    main_cfg = "/opt/data/config.yaml"
     try:
-        with open(main_cfg) as f:
+        with open(MAIN_CONFIG) as f:
             cfg = yaml.safe_load(f) or {}
         default_model = cfg.get("model", {}).get("default")
         default_provider = cfg.get("model", {}).get("provider")
@@ -759,7 +764,7 @@ async def list_models(user: dict = Depends(require_auth)) -> dict:
     # Read provider_models_cache.json — has ALL models from ALL providers
     # This cache is populated by `hermes model --refresh` and contains
     # the live /v1/models response from each configured provider.
-    cache_path = "/opt/data/provider_models_cache.json"
+    cache_path = os.path.join(settings.AGENTOS_DATA_DIR, "provider_models_cache.json")
     try:
         with open(cache_path) as f:
             cache = json.load(f)
@@ -774,7 +779,7 @@ async def list_models(user: dict = Depends(require_auth)) -> dict:
         pass
 
     # Also read ollama_cloud_models_cache.json (separate cache file)
-    ollama_cache_path = "/opt/data/ollama_cloud_models_cache.json"
+    ollama_cache_path = os.path.join(settings.AGENTOS_DATA_DIR, "ollama_cloud_models_cache.json")
     try:
         with open(ollama_cache_path) as f:
             ocache = json.load(f)
@@ -786,8 +791,15 @@ async def list_models(user: dict = Depends(require_auth)) -> dict:
     except Exception:
         pass
 
-    # Fallback: read profile configs for any models not in cache
-    for cfg_path in sorted(glob.glob("/opt/data/profiles/*/config.yaml")):
+    # Fallback: read profile configs for any models not in cache.
+    # M11-08: enumerate via the single discovery source (M10-16) instead of an
+    # unfiltered glob — case-variant 'default', '_' dirs and dotfiles are
+    # skipped exactly like on the front/side doors; a manually seeded
+    # out-of-policy dir can no longer leak its model here.
+    for pid in iter_sub_profile_ids():
+        cfg_path = os.path.join(PROFILES_DIR, pid, "config.yaml")
+        if not os.path.isfile(cfg_path):
+            continue
         try:
             with open(cfg_path) as f:
                 cfg = yaml.safe_load(f) or {}
