@@ -44,7 +44,14 @@ async def list_workflows() -> list[dict]:
     conn = _get_db()
     try:
         rows = conn.execute("SELECT * FROM workflows ORDER BY updated_at DESC").fetchall()
-        return [dict(row) for row in rows]
+        out = []
+        for row in rows:
+            d = dict(row)
+            # M8-15: counts travel with the row so the list never JSON-parses blobs
+            d["node_count"] = len(parse_graph_field(d.get("nodes"), "nodes"))
+            d["edge_count"] = len(parse_graph_field(d.get("edges"), "edges"))
+            out.append(d)
+        return out
     finally:
         conn.close()  # M8-05: an exception must not leak a connection
 
@@ -56,6 +63,26 @@ async def get_workflow(workflow_id: str) -> dict | None:
         return dict(row) if row else None
     finally:
         conn.close()
+
+
+def parse_graph_field(raw, field: str) -> list:
+    """M15-1: legacy rows hold SQL NULL graphs (pre-WI-5 verbatim writes).
+
+    NULL (or a JSON 'null') normalizes to [] so the row is EDITABLE and
+    RUNNABLE again (recovery, not a 500 wall); genuinely corrupt JSON raises
+    ValueError (400/honest run failure) naming the field.
+    """
+    if raw is None:
+        return []
+    try:
+        val = json.loads(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"'{field}' is not valid JSON (legacy row)")
+    if val is None:
+        return []
+    if not isinstance(val, list):
+        raise ValueError(f"'{field}' must be a list")
+    return val
 
 
 def _validated_graph(data: dict) -> tuple[list, list]:
@@ -102,6 +129,30 @@ def _validated_graph(data: dict) -> tuple[list, list]:
                 f"edges[{i}] duplicates the pair {ev['source']}->{ev['target']}"
             )
         pairs.add((ev["source"], ev["target"]))
+    # M15-3: edge ids must be unique (duplicates silently overwrote each other)
+    edge_ids: set[str] = set()
+    for i, ev in enumerate(edges):
+        if ev["id"] in edge_ids:
+            raise ValueError(f"edges[{i}] duplicates edge id '{ev['id']}'")
+        edge_ids.add(ev["id"])
+    # M15-2: a>=2 cycle (a->b->a) escaped validation and died at run time as a
+    # misleading engine error — reject it here (Kahn's algorithm)
+    indeg = {n_id: 0 for n_id in ids}
+    adj: dict[str, list[str]] = {n_id: [] for n_id in ids}
+    for ev in edges:
+        adj[ev["source"]].append(ev["target"])
+        indeg[ev["target"]] += 1
+    queue = [n_id for n_id, d in indeg.items() if d == 0]
+    seen = 0
+    while queue:
+        nid = queue.pop()
+        seen += 1
+        for nxt in adj[nid]:
+            indeg[nxt] -= 1
+            if indeg[nxt] == 0:
+                queue.append(nxt)
+    if seen != len(ids):
+        raise ValueError("edges form a cycle")
     return nodes, edges
 
 
@@ -113,7 +164,7 @@ async def create_workflow(data: dict) -> dict:
     try:
         conn.execute(
             "INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (wf_id, data.get("name", "Untitled"), data.get("description", ""),
+            (wf_id, data.get("name") or "Untitled", data.get("description") or "",
              json.dumps(nodes), json.dumps(edges), now, now)
         )
         conn.commit()
@@ -141,17 +192,17 @@ async def update_workflow(workflow_id: str, data: dict) -> dict | None:
                 raise ValueError("'nodes' must be a list")
             if "edges" in data and not isinstance(edges, list):
                 raise ValueError("'edges' must be a list")
-            merged_nodes = nodes if "nodes" in data else json.loads(existing["nodes"])
-            merged_edges = edges if "edges" in data else json.loads(existing["edges"])
+            merged_nodes = nodes if "nodes" in data else parse_graph_field(existing["nodes"], "nodes")
+            merged_edges = edges if "edges" in data else parse_graph_field(existing["edges"], "edges")
             _validated_graph({"nodes": merged_nodes, "edges": merged_edges})
         else:
-            merged_nodes = json.loads(existing["nodes"])
-            merged_edges = json.loads(existing["edges"])
+            merged_nodes = parse_graph_field(existing["nodes"], "nodes")
+            merged_edges = parse_graph_field(existing["edges"], "edges")
 
         conn.execute(
             "UPDATE workflows SET name=?, description=?, nodes=?, edges=?, updated_at=? WHERE id=?",
             (
-                data.get("name", existing["name"]),
+                data.get("name") or existing["name"],
                 data.get("description", existing["description"]),
                 json.dumps(merged_nodes),
                 json.dumps(merged_edges),

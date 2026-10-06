@@ -208,6 +208,8 @@ interface Workflow {
   edges: string  // JSON string from backend
   created_at: string
   updated_at: string
+  node_count?: number  // M8-15: counts travel with the list
+  edge_count?: number
 }
 
 interface WorkflowNodeData {
@@ -3982,7 +3984,7 @@ function WorkflowListPage() {
                   {wf.description || 'No description'}
                 </p>
                 <div className="flex items-center justify-between text-caption text-text-tertiary">
-                  <span>{(() => { try { return JSON.parse(wf.nodes).length } catch { return 0 } })()} nodes</span>
+                  <span>{wf.node_count ?? (() => { try { return JSON.parse(wf.nodes).length } catch { return 0 } })()} nodes</span>
                   <span>{formatDate(wf.updated_at)}</span>
                 </div>
               </div>
@@ -4614,6 +4616,7 @@ function WorkflowEditorPage() {
                       <div className="flex gap-4 text-xs mb-3">
                         <span className="text-emerald-400">✅ {detail.result?.executed_nodes || 0} executed</span>
                         <span className="text-text-tertiary">⏭️ {detail.result?.skipped_nodes || 0} skipped</span>
+                        <span className="text-amber-400">🚧 {detail.result?.stub_nodes || 0} stub</span>
                         <span className="text-text-secondary">📊 {detail.result?.total_nodes || 0} total</span>
                       </div>
 
@@ -4677,6 +4680,7 @@ function WorkflowEditorPage() {
           <div className="text-xs text-text-secondary space-y-1">
             <p>Nodes executed: {runMutation.data.result?.executed_nodes || 0}</p>
             <p>Nodes skipped: {runMutation.data.result?.skipped_nodes || 0}</p>
+            <p>Nodes stub: {runMutation.data.result?.stub_nodes || 0}</p>
             <p>Duration: {calculateDuration(runMutation.data.started_at, runMutation.data.finished_at)}</p>
           </div>
           <button onClick={() => { runMutation.reset(); setRunResults({}) }} className="mt-2 text-xs text-text-tertiary hover:text-text-secondary">

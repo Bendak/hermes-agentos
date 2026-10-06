@@ -672,7 +672,10 @@ async def workflow_run(workflow_id: str, user: dict = Depends(require_admin)):
     try:
         result = await run_workflow(workflow_id)
     except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        if str(e) == "Workflow not found":
+            raise HTTPException(status_code=404, detail=str(e))
+        # M15-1: a corrupt legacy row is a bad request, not a missing workflow
+        raise HTTPException(status_code=400, detail=str(e))
     return result
 
 
