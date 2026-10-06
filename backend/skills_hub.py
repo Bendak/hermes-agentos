@@ -7,7 +7,11 @@ import yaml
 from backend.config import settings
 
 SKILLS_DIR = os.path.join(settings.AGENTOS_DATA_DIR, "skills")
-from backend.profile_discovery import MAIN_CONFIG, PROFILES_DIR  # noqa: E402  (M10-16)
+from backend.profile_discovery import (  # noqa: E402  (M10-16)
+    MAIN_CONFIG,
+    PROFILES_DIR,
+    iter_sub_profile_ids,
+)
 
 # ── Category derivation from directory name prefix ──────────────────
 
@@ -89,15 +93,15 @@ def get_profile_skills_map() -> dict[str, list[str]]:
     all_slugs |= _external_slugs(main_cfg)
     main_disabled: set[str] = set(main_cfg.get("skills", {}).get("disabled", []) or [])
 
-    # Discover profiles
+    # Discover profiles — single source (M13-1: this private loop used to
+    # serve 'default' twice plus case variants and no-config dirs)
     profile_names: list[str] = []
-    # Default profile
     if os.path.exists(MAIN_CONFIG):
         profile_names.append("default")
-    if os.path.isdir(PROFILES_DIR):
-        for entry in sorted(os.listdir(PROFILES_DIR)):
-            if os.path.isdir(os.path.join(PROFILES_DIR, entry)) and not entry.startswith("."):
-                profile_names.append(entry)
+    profile_names.extend(
+        entry for entry in iter_sub_profile_ids()
+        if os.path.isfile(os.path.join(PROFILES_DIR, entry, "config.yaml"))
+    )
 
     # Build map: slug -> list of profile names that have it enabled
     slug_profiles: dict[str, list[str]] = {s: [] for s in all_slugs}
@@ -281,10 +285,10 @@ async def list_profiles_summary() -> list[dict]:
     if not os.path.isdir(PROFILES_DIR):
         return profiles
 
-    for entry in sorted(os.listdir(PROFILES_DIR)):
+    for entry in iter_sub_profile_ids():  # M13-1: single source
         prof_dir = os.path.join(PROFILES_DIR, entry)
-        if not os.path.isdir(prof_dir) or entry.startswith("."):
-            continue
+        if not os.path.isfile(os.path.join(prof_dir, "config.yaml")):
+            continue  # front-door policy: half-born profiles are not listed
 
         cfg = _read_yaml(os.path.join(prof_dir, "config.yaml"))
         profile_disabled: set[str] = set(cfg.get("skills", {}).get("disabled", []) or [])
