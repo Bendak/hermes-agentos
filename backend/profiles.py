@@ -45,12 +45,24 @@ def _sanitize_id(profile_id: str) -> str:
     return profile_id
 
 
+class ConfigParseError(Exception):
+    """config.yaml exists but is not valid YAML (M10-08)."""
+    def __init__(self, profile_id: str, message: str):
+        self.profile_id = profile_id
+        self.message = message
+        super().__init__(f"Invalid config.yaml: {message}")
+
+
 def _read_config(profile_id: str) -> dict[str, Any]:
     path = _config_path(profile_id)
     if not os.path.isfile(path):
         raise FileNotFoundError(f"Config not found: {path}")
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+        text = f.read()
+    try:
+        return yaml.safe_load(text) or {}
+    except yaml.YAMLError as e:
+        raise ConfigParseError(profile_id, str(e)) from e
 
 
 def _atomic_write(path: str, data: str) -> None:
@@ -139,6 +151,9 @@ def _to_detail(profile_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
 # ── Pydantic models ──────────────────────────────────────────────────
 
 class ProfileUpdate(BaseModel):
+    # replace=True rebuilds a fresh config when the existing one is unparseable
+    # (repair path for broken profiles, M10-08).
+    replace: bool = False
     model: dict[str, Any] | None = None
     fallback_providers: list[str] | None = None
     toolsets: list[str] | None = None
@@ -147,7 +162,9 @@ class ProfileUpdate(BaseModel):
 
 
 class ProfileCreate(BaseModel):
-    name: str
+    # Frontend historically sent 'id'; accept either (M10-01).
+    name: str | None = None
+    id: str | None = None
     model: dict[str, Any] | None = None
     fallback_providers: list[str] | None = None
     toolsets: list[str] | None = None
@@ -173,8 +190,22 @@ async def list_profiles() -> list[dict[str, Any]]:
         try:
             cfg = _read_config(entry)
             results.append(_to_summary(entry, cfg))
-        except Exception:
-            continue
+        except Exception as e:
+            # Broken config must NOT vanish from the list (M10-08) — surface
+            # a degraded entry with the error so the UI can offer a repair.
+            results.append({
+                "id": entry,
+                "name": entry,
+                "model": "",
+                "provider": "",
+                "base_url": "",
+                "fallback_providers": [],
+                "toolsets": [],
+                "toolsets_count": 0,
+                "max_turns": 0,
+                "gateway_timeout": 0,
+                "error": f"Invalid config.yaml: {getattr(e, 'message', str(e))}",
+            })
     return results
 
 
@@ -186,6 +217,8 @@ async def get_profile(profile_id: str) -> dict[str, Any]:
         cfg = _read_config(pid)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Profile not found")
+    except ConfigParseError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return _to_detail(pid, cfg)
 
 
@@ -193,10 +226,17 @@ async def get_profile(profile_id: str) -> dict[str, Any]:
 async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]:
     """Update an existing profile's editable fields."""
     pid = _sanitize_id(profile_id)
+    if not os.path.isdir(_profile_dir(pid)):
+        raise HTTPException(status_code=404, detail="Profile not found")
     try:
         cfg = _read_config(pid)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Profile not found")
+    except ConfigParseError as e:
+        if not body.replace:
+            raise HTTPException(status_code=400, detail=str(e))
+        # Repair path: rebuild a fresh config from the submitted fields.
+        cfg = {}
 
     # Merge updates into existing config (preserving all other keys)
     if body.model is not None:
@@ -228,7 +268,10 @@ async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]
 @router.post("", dependencies=[Depends(require_admin)])
 async def create_profile(body: ProfileCreate) -> dict[str, Any]:
     """Create a new profile directory with config.yaml."""
-    pid = _sanitize_id(body.name)
+    raw = (body.name or body.id or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail="'name' is required")
+    pid = _sanitize_id(raw)
     dir_path = _profile_dir(pid)
     if os.path.exists(dir_path):
         raise HTTPException(status_code=409, detail=f"Profile '{pid}' already exists")
@@ -263,17 +306,36 @@ async def create_profile(body: ProfileCreate) -> dict[str, Any]:
 
 
 @router.delete("/{profile_id}", dependencies=[Depends(require_admin)])
-async def delete_profile(profile_id: str) -> dict[str, Any]:
-    """Delete a profile directory and its contents."""
+async def delete_profile(profile_id: str, purge: bool = False) -> dict[str, Any]:
+    """Delete a profile's configuration (config.yaml + SOUL.md).
+
+    Durable data (state.db, memories/, auth.json, skills/, backups/) is
+    PRESERVED by default — a full rmtree is destructive and must be explicitly
+    requested with ?purge=true (M10-03).
+    """
     pid = _sanitize_id(profile_id)
     dir_path = _profile_dir(pid)
     if not os.path.isdir(dir_path):
         raise HTTPException(status_code=404, detail="Profile not found")
 
-    # Recursively remove the profile directory
     import shutil
-    shutil.rmtree(dir_path)
-    return {"deleted": pid}
+    if purge:
+        shutil.rmtree(dir_path)
+        return {"deleted": pid, "purged": True}
+
+    removed = []
+    for name in ("config.yaml", "SOUL.md"):
+        f = os.path.join(dir_path, name)
+        if os.path.isfile(f):
+            os.unlink(f)
+            removed.append(name)
+    # clean up the directory only if nothing durable is left
+    try:
+        if not os.listdir(dir_path):
+            os.rmdir(dir_path)
+    except OSError:
+        pass
+    return {"deleted": pid, "purged": False, "removed": removed}
 
 
 @router.post("/{profile_id}/duplicate", dependencies=[Depends(require_admin)])
@@ -294,6 +356,19 @@ async def duplicate_profile(profile_id: str, body: dict | None = None) -> dict[s
     os.makedirs(new_dir, exist_ok=True)
     yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
     _atomic_write(_config_path(new_pid), yaml_text)
+
+    # Copy identity + capability files (M10-06): SOUL.md, skills/, plugins/,
+    # cron/. Runtime DATA (state.db, memories/, auth.json, backups/) is not
+    # duplicated.
+    import shutil
+    src_soul = os.path.join(_profile_dir(pid), "SOUL.md")
+    if os.path.isfile(src_soul):
+        shutil.copy2(src_soul, os.path.join(new_dir, "SOUL.md"))
+    for cap_dir in ("skills", "plugins", "cron"):
+        src_cap = os.path.join(_profile_dir(pid), cap_dir)
+        if os.path.isdir(src_cap):
+            shutil.copytree(src_cap, os.path.join(new_dir, cap_dir), dirs_exist_ok=True)
+
     return _to_detail(new_pid, cfg)
 
 

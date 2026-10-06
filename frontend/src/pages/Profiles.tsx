@@ -12,6 +12,7 @@ interface ProfileSummary {
   provider: string
   toolsets_count: number
   fallback_count: number
+  error?: string
 }
 
 interface AgentConfig {
@@ -44,7 +45,19 @@ async function apiFetch(path: string, opts?: RequestInit) {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (token) headers['Authorization'] = `Bearer ${token}`
   const res = await fetch(`${API}${path}`, { ...opts, headers })
-  if (!res.ok) throw new Error((await res.json()).detail || 'Request failed')
+  if (!res.ok) {
+    let msg = `Request failed (${res.status})`
+    try {
+      const j = await res.json()
+      if (j && j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail)
+    } catch {
+      try {
+        const t = await res.text()
+        if (t) msg = t.slice(0, 300)
+      } catch { /* keep generic */ }
+    }
+    throw new Error(msg)
+  }
   return res.json()
 }
 
@@ -571,7 +584,7 @@ function ProfileCreateDialog({ onSave, onClose, saving }: {
   const handleSave = () => {
     setTouched(true)
     if (hasErrors) return
-    onSave({ id: form.id, ...buildPayload(form) })
+    onSave({ id: form.id, name: form.id, ...buildPayload(form) })
   }
 
   return (
@@ -628,37 +641,61 @@ export default function ProfilesPage() {
   const [editing, setEditing] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
+  const [deletePurge, setDeletePurge] = useState(false)
 
   const { data: profiles = [] } = useQuery({
     queryKey: ['profiles'],
     queryFn: () => apiFetch('/api/profiles') as Promise<ProfileSummary[]>,
   })
 
-  const { data: detail } = useQuery({
+  const { data: detail, error: detailError, isLoading: detailLoading } = useQuery({
     queryKey: ['profile', editing],
     queryFn: () => apiFetch(`/api/profiles/${editing}`) as Promise<ProfileDetail>,
     enabled: !!editing,
+    retry: false,
   })
 
   const updateMut = useMutation({
     mutationFn: (data: any) => apiFetch(`/api/profiles/${editing}`, { method: 'PUT', body: JSON.stringify(data) }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['profiles'] }); setEditing(null) },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['profiles'] })
+      qc.invalidateQueries({ queryKey: ['profile', editing] }) // M10-13: detail must not go stale
+      setEditing(null)
+    },
     onError: (e: any) => { alert(`Failed to save profile: ${e.message || e}`) },
   })
 
   const createMut = useMutation({
     mutationFn: (data: any) => apiFetch('/api/profiles', { method: 'POST', body: JSON.stringify(data) }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['profiles'] }); setCreating(false) },
+    onError: (e: any) => { alert(`Failed to create profile: ${e.message || e}`) },
   })
 
   const deleteMut = useMutation({
-    mutationFn: (id: string) => apiFetch(`/api/profiles/${id}`, { method: 'DELETE' }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['profiles'] }); setDeleteTarget(null) },
+    mutationFn: ({ id, purge }: { id: string; purge: boolean }) =>
+      apiFetch(`/api/profiles/${id}${purge ? '?purge=true' : ''}`, { method: 'DELETE' }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['profiles'] }); setDeleteTarget(null); setDeletePurge(false) },
+    onError: (e: any) => { alert(`Failed to delete profile: ${e.message || e}`) },
   })
 
   const dupMut = useMutation({
     mutationFn: (id: string) => apiFetch(`/api/profiles/${id}/duplicate`, { method: 'POST' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['profiles'] }),
+    onError: (e: any) => { alert(`Failed to duplicate profile: ${e.message || e}`) },
+  })
+
+  // M10-08 repair: rebuild a fresh config.yaml for a broken profile
+  const recreateMut = useMutation({
+    mutationFn: (id: string) =>
+      apiFetch(`/api/profiles/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...buildPayload(defaultForm()), replace: true }),
+      }),
+    onSuccess: (_d, id) => {
+      qc.invalidateQueries({ queryKey: ['profiles'] })
+      qc.invalidateQueries({ queryKey: ['profile', id] })
+    },
+    onError: (e: any) => { alert(`Failed to rebuild config: ${e.message || e}`) },
   })
 
   return (
@@ -698,7 +735,14 @@ export default function ProfilesPage() {
                   <h3 className="text-h5 font-semibold text-text-primary">{p.name}</h3>
                   <span className="text-caption px-2 py-1 rounded bg-accent-subtle text-accent font-mono">{p.id}</span>
                 </div>
-                <div className="space-y-1.5 text-body-sm text-text-secondary">
+                {p.error ? (
+                  <div className="mb-3 rounded-md border border-error/40 bg-error-subtle/40 px-3 py-2">
+                    <div className="text-caption font-semibold text-error mb-0.5">⚠ Invalid config.yaml</div>
+                    <div className="text-caption text-text-tertiary line-clamp-3 break-all">{p.error}</div>
+                    <div className="text-caption text-text-tertiary mt-1">Use <b>Edit</b> to rebuild the configuration.</div>
+                  </div>
+                ) : null}
+                {!p.error && (<div className="space-y-1.5 text-body-sm text-text-secondary">
                   <div className="flex justify-between">
                     <span className="text-text-tertiary">Model</span>
                     <span className="text-text-primary font-mono text-xs">{p.model}</span>
@@ -715,7 +759,7 @@ export default function ProfilesPage() {
                     <span className="text-text-tertiary">Fallbacks</span>
                     <span className="text-text-primary">{p.fallback_count}</span>
                   </div>
-                </div>
+                </div>)}
                 <div className="flex gap-2 mt-4 pt-4 border-t border-border">
                   <button
                     onClick={(e) => { e.stopPropagation(); setEditing(p.id) }}
@@ -730,7 +774,7 @@ export default function ProfilesPage() {
                     Duplicate
                   </button>
                   <button
-                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.id) }}
+                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.id); setDeletePurge(false) }}
                     className="px-3 py-1 text-xs rounded border border-error/30 text-error hover:bg-error-subtle/50 transition-colors ml-auto"
                   >
                     Delete
@@ -752,6 +796,31 @@ export default function ProfilesPage() {
         />
       )}
 
+      {/* Repair Dialog — broken config.yaml (M10-08) */}
+      {(editing && !detail && !detailLoading && detailError) && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-bg-elevated border border-border rounded-xl p-6 max-w-md w-full">
+            <h3 className="text-h5 font-bold text-text-primary mb-2">⚠ Invalid config.yaml</h3>
+            <p className="text-body-sm text-text-secondary mb-3 break-all">
+              {(detailError as Error)?.message || 'Could not read the configuration.'}
+            </p>
+            <p className="text-body-sm text-text-tertiary mb-4">
+              You can rebuild a default configuration for this profile (replaces the current file).
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button onClick={() => setEditing(null)} className="px-4 py-2 text-sm rounded border border-border text-text-secondary hover:bg-surface/60 transition-colors">Cancel</button>
+              <button
+                onClick={() => recreateMut.mutate(editing)}
+                disabled={recreateMut.isPending}
+                className="px-4 py-2 text-sm rounded bg-accent text-text-inverse hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {recreateMut.isPending ? 'Rebuilding…' : 'Rebuild configuration'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Create Dialog */}
       {creating && (
         <ProfileCreateDialog
@@ -766,13 +835,23 @@ export default function ProfilesPage() {
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-bg-elevated border border-border rounded-xl p-6 max-w-sm w-full">
             <h3 className="text-h5 font-bold text-text-primary mb-2">Delete Profile?</h3>
-            <p className="text-body-sm text-text-secondary mb-4">
-              This will permanently delete <span className="font-mono text-accent">{deleteTarget}</span> and its config.yaml.
+            <p className="text-body-sm text-text-secondary mb-3">
+              Removes the configuration of <span className="font-mono text-accent">{deleteTarget}</span> (config.yaml and SOUL.md).{' '}
+              History, memories and profile data are preserved.
             </p>
+            <label className="flex items-start gap-2 mb-4 text-body-sm text-text-secondary cursor-pointer">
+              <input
+                type="checkbox"
+                checked={deletePurge}
+                onChange={(e) => setDeletePurge(e.target.checked)}
+                className="mt-0.5"
+              />
+              <span>Also delete <b>all data</b> (history, memories, auth) — irreversible</span>
+            </label>
             <div className="flex gap-3 justify-end">
               <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 text-sm rounded border border-border text-text-secondary hover:bg-surface/60 transition-colors">Cancel</button>
               <button
-                onClick={() => deleteMut.mutate(deleteTarget)}
+                onClick={() => deleteMut.mutate({ id: deleteTarget, purge: deletePurge })}
                 className="px-4 py-2 text-sm rounded bg-error text-white hover:bg-error/90 transition-colors"
               >
                 Delete
