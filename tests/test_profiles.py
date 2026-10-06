@@ -234,6 +234,68 @@ def test_duplicate_does_not_follow_symlinks(client, admin_headers):
     os.unlink(outside)
 
 
+# ── Cross-app ownership (bug report 06/10/26: root-owned profiles break the
+# hermes-uid dashboard writer) ──────────────────────────────────────────
+
+def test_created_profile_inherits_profiles_owner(client, admin_headers):
+    """Files created via the API must belong to PROFILES_DIR's owner, not to
+    the API process's uid (which may be root in the container)."""
+    r = client.post("/api/profiles", headers=admin_headers,
+                    json={"name": "zz-own-a", "model": {"default": "m", "provider": "p"}})
+    assert r.status_code == 200, r.text
+    owner = os.stat(PROFILES).st_uid, os.stat(PROFILES).st_gid
+    d = _pdir("zz-own-a")
+    assert (os.stat(d).st_uid, os.stat(d).st_gid) == owner, "profile dir must inherit owner"
+    assert (os.stat(os.path.join(d, "config.yaml")).st_uid,
+            os.stat(os.path.join(d, "config.yaml")).st_gid) == owner, "config.yaml must inherit owner"
+
+    import shutil
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_rewrite_keeps_owner_and_private_modes(client, admin_headers):
+    """Atomic rename must not change ownership on rewrite (gateway-owned files
+    stay gateway-owned) and new files are private (M10-15)."""
+    r = client.post("/api/profiles", headers=admin_headers,
+                    json={"name": "zz-own-b", "model": {"default": "m", "provider": "p"}})
+    assert r.status_code == 200, r.text
+    d = _pdir("zz-own-b")
+    owner = os.stat(PROFILES).st_uid, os.stat(PROFILES).st_gid
+
+    r2 = client.put("/api/profiles/zz-own-b", headers=admin_headers,
+                    json={"description": "rewrite me"})
+    assert r2.status_code == 200, r2.text
+
+    st_cfg = os.stat(os.path.join(d, "config.yaml"))
+    assert (st_cfg.st_uid, st_cfg.st_gid) == owner, "rewrite must not change owner"
+    assert st_cfg.st_mode & 0o077 == 0, f"config.yaml must be private, got {oct(st_cfg.st_mode & 0o777)}"
+    assert os.stat(d).st_mode & 0o077 == 0, "profile dir must be private"
+
+    r3 = client.put("/api/profiles/zz-own-b/soul", headers=admin_headers, json={"content": "# soul\n"})
+    assert r3.status_code == 200, r3.text
+    st_soul = os.stat(os.path.join(d, "SOUL.md"))
+    assert (st_soul.st_uid, st_soul.st_gid) == owner
+
+    import shutil
+    shutil.rmtree(d, ignore_errors=True)
+
+
+def test_duplicate_tree_inherits_owner(client, admin_headers):
+    _mkprofile("zz-own-src", soul="# s\n", skills=True)
+    owner = os.stat(PROFILES).st_uid, os.stat(PROFILES).st_gid
+    r = client.post("/api/profiles/zz-own-src/duplicate", headers=admin_headers,
+                    json={"name": "zz-own-out"})
+    assert r.status_code == 200, r.text
+    for rel in ("", "config.yaml", "SOUL.md", "skills", "skills/hello.md"):
+        path = os.path.join(_pdir("zz-own-out"), rel)
+        st = os.stat(path, follow_symlinks=False)
+        assert (st.st_uid, st.st_gid) == owner, f"{rel or '.'} must inherit owner"
+
+    import shutil
+    for pid in ("zz-own-src", "zz-own-out"):
+        shutil.rmtree(_pdir(pid), ignore_errors=True)
+
+
 # ── M10-02 regression guard: viewer cannot mutate profiles ─────────────────
 
 @pytest.mark.parametrize("method,path,payload", [
