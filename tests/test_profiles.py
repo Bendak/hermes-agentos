@@ -364,6 +364,8 @@ def test_fix_owner_issues_symlink_safe_chown(monkeypatch):
 
     spy: list[tuple] = []
     monkeypatch.setattr(os, "chown", lambda *a, **k: spy.append((a, k)))
+    # N-7: pin the canonical owner so the chown TARGET can be asserted exactly
+    monkeypatch.setattr(profiles_mod, "_profiles_owner", lambda: (9999, 9999))
     probe = os.path.join(PROFILES, "zz-chown-probe.txt")
     with open(probe, "w", encoding="utf-8") as f:
         f.write("x")
@@ -372,5 +374,13 @@ def test_fix_owner_issues_symlink_safe_chown(monkeypatch):
     finally:
         os.unlink(probe)
     assert spy, "_fix_owner must call os.chown"
-    _args, kwargs = spy[0]
+    args, kwargs = spy[0]
+    assert args[1] == 9999 and args[2] == 9999, f"chown target must be the canonical owner: {args}"
     assert kwargs.get("follow_symlinks") is False
+
+    # N-7 (M8): owner-unknown must WARN-and-skip — a null-guard bypass that
+    # chowns to (0,0) reintroduces the cross-app uid bug and fails here.
+    spy.clear()
+    monkeypatch.setattr(profiles_mod, "_profiles_owner", lambda: None)
+    profiles_mod._fix_owner(probe)
+    assert not spy, "owner-unknown must not chown at all"

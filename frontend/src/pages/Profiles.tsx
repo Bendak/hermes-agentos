@@ -459,7 +459,13 @@ function MemoryTab({ profileId, visible, onDirtyChange, registerSave }: {
   }, [visible])
 
   // returns success — the dialog's main Save aborts when this fails (finding H2)
+  // N-8 (E11): synchronous re-entrancy guard — `saving` state lags a render, so
+  // two triggers in the same window (dialog Save + tab Save) could start two
+  // PUTs whose out-of-order landing leaves the FILE older than the buffer.
+  const savingRef = useRef(false)
   const handleSave = async (): Promise<boolean> => {
+    if (savingRef.current) return false
+    savingRef.current = true
     setSaving(true)
     try {
       await apiFetch(`/api/profiles/${profileId}/soul`, {
@@ -477,6 +483,7 @@ function MemoryTab({ profileId, visible, onDirtyChange, registerSave }: {
       alert(`Failed to save SOUL.md: ${e?.message || e}`)
       return false
     } finally {
+      savingRef.current = false
       setSaving(false)
     }
   }
