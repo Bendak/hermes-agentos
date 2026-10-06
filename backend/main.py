@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from backend.agents import get_profiles, get_profile_detail, check_process_alive
 from backend.config import settings
 from backend.config_viewer import get_config, update_config
-from backend.skills_hub import list_skills, get_skill_detail, list_profiles_summary
+from backend.skills_hub import list_skills, get_skill_detail
 from backend.profiles import router as profiles_router
 from backend.auth import (
     require_auth,
@@ -610,11 +610,6 @@ async def skill_detail(slug: str, user: dict = Depends(require_auth)):
     if result is None:
         raise HTTPException(status_code=404, detail="Skill not found")
     return result
-
-
-@app.get("/api/profiles")
-async def profiles_list(user: dict = Depends(require_auth)):
-    return await list_profiles_summary()
 
 
 # ── Workflows endpoints ────────────────────────────────────────────

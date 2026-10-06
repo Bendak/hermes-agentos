@@ -19,7 +19,7 @@ MODEL_TO_PROFILE: Dict[str, str] = {
     "deepseek-v4-flash": "coder", # coder uses various models via delegation
     "gemma4:31b": "pixel",        # pixel uses gemma4 for vision
     "nemotron-3-ultra": "coder",
-    "gemini-3-flash-preview": "hermes",
+    "gemini-3-flash-preview": "default",   # main-config profile id (was: "hermes", nonexistent)
 }
 
 
@@ -100,9 +100,10 @@ async def count_sessions_by_profile() -> Dict[str, int]:
                 rows = await cursor.fetchall()
             result: Dict[str, int] = {}
             for model, cnt in rows:
-                profile = MODEL_TO_PROFILE.get(model)
-                if profile:
-                    result[profile] = result.get(profile, 0) + cnt
+                # Unmapped models must NOT vanish (M10-10) — conserve the count
+                # in an explicit bucket instead of silently dropping it.
+                profile = MODEL_TO_PROFILE.get(model, "unknown")
+                result[profile] = result.get(profile, 0) + cnt
             return result
     except Exception:
         return {}

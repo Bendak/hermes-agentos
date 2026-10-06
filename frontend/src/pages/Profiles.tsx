@@ -11,7 +11,7 @@ interface ProfileSummary {
   model: string
   provider: string
   toolsets_count: number
-  fallback_count: number
+  fallback_providers: string[]
   error?: string
 }
 
@@ -858,7 +858,7 @@ export default function ProfilesPage() {
                   </div>
                   <div className="flex justify-between">
                     <span className="text-text-tertiary">Fallbacks</span>
-                    <span className="text-text-primary">{p.fallback_count}</span>
+                    <span className="text-text-primary">{p.fallback_providers?.length ?? 0}</span>
                   </div>
                 </div>)}
                 <div className="flex gap-2 mt-4 pt-4 border-t border-border">
