@@ -418,12 +418,24 @@ function MemoryTab({ profileId, visible, onDirtyChange, registerSave }: {
   // fragment over the real SOUL.md (adversarial finding H3)
   const [loadError, setLoadError] = useState<string | null>(null)
   const savedTimer = useRef<number | null>(null)
+  // N-1: refs mirror the live buffer so a fetch that resolves LATE can refuse
+  // to clobber content typed (or saved) while the request was in flight.
+  const contentRef = useRef(content)
+  contentRef.current = content
+  const initialRef = useRef(initial)
+  initialRef.current = initial
+  const genRef = useRef(0)
 
   const load = () => {
     setLoading(true)
     setLoadError(null)
+    const gen = genRef.current
     apiFetch(`/api/profiles/${profileId}/soul`)
-      .then((d) => { setContent(d.content || ''); setInitial(d.content || ''); loadedOnce.current = true })
+      .then((d) => {
+        // dirty-since-fetch-start OR saved-since-fetch-start → keep the buffer
+        if (gen !== genRef.current || contentRef.current !== initialRef.current) return
+        setContent(d.content || ''); setInitial(d.content || ''); loadedOnce.current = true
+      })
       .catch((e: any) => {
         // keep content/initial untouched — only mark the editor unusable
         setLoadError(String(e?.message || e))
@@ -454,6 +466,7 @@ function MemoryTab({ profileId, visible, onDirtyChange, registerSave }: {
         method: 'PUT',
         body: JSON.stringify({ content }),
       })
+      genRef.current += 1 // any save invalidates in-flight fetches (N-1)
       setInitial(content) // clears the dirty flag — dialog close won't warn
       setSaved(true)
       if (savedTimer.current) window.clearTimeout(savedTimer.current)

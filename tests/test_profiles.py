@@ -346,6 +346,31 @@ def test_fix_owner_called_on_every_writer(client, admin_headers, monkeypatch):
     dup_dir = os.path.normpath(_pdir("zz-own-spy-2"))
     assert any(os.path.normpath(c) == dup_dir for c in calls[prev:]), \
         f"duplicate must fix the new dir itself: {calls[prev:]}"
+    # N-2: the walk loop covers the copied FILES — SOUL.md is copied via copy2
+    # and is ONLY fixed by the walk, so its absence kills walk-body deletion.
+    assert any(c.endswith("SOUL.md") for c in calls[prev:]), \
+        f"duplicate walk must fix copied files: {calls[prev:]}"
+    # floor: atomic-write config + dir fix + walk (config + SOUL.md) = 4
+    assert len(calls[prev:]) >= 4, f"expected 4+ fixes in duplicate: {calls[prev:]}"
 
     client.delete("/api/profiles/zz-own-spy-2?purge=true", headers=admin_headers)
     client.delete("/api/profiles/zz-own-spy?purge=true", headers=admin_headers)
+
+
+def test_fix_owner_issues_symlink_safe_chown(monkeypatch):
+    """M-empty-body mutant: call-site spies cannot see inside _fix_owner —
+    assert the chown syscall itself happens with follow_symlinks=False."""
+    from backend import profiles as profiles_mod
+
+    spy: list[tuple] = []
+    monkeypatch.setattr(os, "chown", lambda *a, **k: spy.append((a, k)))
+    probe = os.path.join(PROFILES, "zz-chown-probe.txt")
+    with open(probe, "w", encoding="utf-8") as f:
+        f.write("x")
+    try:
+        profiles_mod._fix_owner(probe)
+    finally:
+        os.unlink(probe)
+    assert spy, "_fix_owner must call os.chown"
+    _args, kwargs = spy[0]
+    assert kwargs.get("follow_symlinks") is False
