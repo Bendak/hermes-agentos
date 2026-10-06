@@ -160,6 +160,80 @@ def test_update_replace_repairs_broken_config(client, admin_headers):
     shutil.rmtree(_pdir("zz-broken3"), ignore_errors=True)
 
 
+# ── M10-08 wrong-shape class (fixes2-verdict N1/P2-N2/P3-N3) ─────────────
+
+def _write_raw(pid: str, content: str) -> None:
+    os.makedirs(_pdir(pid), exist_ok=True)
+    with open(os.path.join(_pdir(pid), "config.yaml"), "w", encoding="utf-8") as f:
+        f.write(content)
+
+
+def test_wrong_shape_scalar_model_is_400_and_repairable(client, admin_headers):
+    """Parseable but wrong-shape (scalar model:) must join the unparseable class:
+    400 on GET, listed with error, and PUT replace:true repairs it."""
+    _write_raw("zz-shape-a", "model: just-a-string\n")
+
+    r = client.get("/api/profiles/zz-shape-a", headers=admin_headers)
+    assert r.status_code == 400, f"expected 400, got {r.status_code}"
+
+    listed = client.get("/api/profiles", headers=admin_headers).json()
+    entry = next((p for p in listed if p["id"] == "zz-shape-a"), None)
+    assert entry is not None and entry.get("error"), "must stay listed with error"
+
+    r2 = client.put("/api/profiles/zz-shape-a", headers=admin_headers,
+                    json={"model": {"default": "repaired", "provider": "p"}, "replace": True})
+    assert r2.status_code == 200, f"replace must repair, got {r2.status_code}"
+    r3 = client.get("/api/profiles/zz-shape-a", headers=admin_headers)
+    assert r3.status_code == 200
+    assert r3.json()["model"]["default"] == "repaired"
+
+    import shutil
+    shutil.rmtree(_pdir("zz-shape-a"), ignore_errors=True)
+
+
+def test_wrong_shape_list_root_is_400(client, admin_headers):
+    _write_raw("zz-shape-b", "- a\n- b\n")
+    r = client.get("/api/profiles/zz-shape-b", headers=admin_headers)
+    assert r.status_code == 400, f"expected 400, got {r.status_code}"
+
+    import shutil
+    shutil.rmtree(_pdir("zz-shape-b"), ignore_errors=True)
+
+
+def test_duplicate_of_broken_config_is_400_not_500(client, admin_headers):
+    """fixes2-verdict P2-N2: duplicate on an unparseable source was a 500."""
+    _write_raw("zz-dup-broken", "model: [unclosed\n")
+    r = client.post("/api/profiles/zz-dup-broken/duplicate", headers=admin_headers,
+                    json={"name": "zz-dup-broken-copy"})
+    assert r.status_code == 400, f"expected 400, got {r.status_code}"
+
+    import shutil
+    shutil.rmtree(_pdir("zz-dup-broken"), ignore_errors=True)
+    shutil.rmtree(_pdir("zz-dup-broken-copy"), ignore_errors=True)
+
+
+def test_duplicate_does_not_follow_symlinks(client, admin_headers):
+    """fixes2-verdict P3-N3: duplicate must copy symlinks as symlinks
+    (consistent with delete, which does not follow them)."""
+    _mkprofile("zz-sym-src", soul="# s\n", skills=True)
+    outside = os.path.join(PROFILES, "zz-outside-sentinel.txt")
+    with open(outside, "w") as f:
+        f.write("secret-sentinel\n")
+    link = os.path.join(_pdir("zz-sym-src"), "skills", "link.md")
+    os.symlink(outside, link)
+
+    r = client.post("/api/profiles/zz-sym-src/duplicate", headers=admin_headers,
+                    json={"name": "zz-sym-out"})
+    assert r.status_code == 200, r.text
+    copied = os.path.join(_pdir("zz-sym-out"), "skills", "link.md")
+    assert os.path.islink(copied), "symlink must be copied as a symlink, not followed"
+
+    import shutil
+    for pid in ("zz-sym-src", "zz-sym-out"):
+        shutil.rmtree(_pdir(pid), ignore_errors=True)
+    os.unlink(outside)
+
+
 # ── M10-02 regression guard: viewer cannot mutate profiles ─────────────────
 
 @pytest.mark.parametrize("method,path,payload", [

@@ -60,9 +60,18 @@ def _read_config(profile_id: str) -> dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         text = f.read()
     try:
-        return yaml.safe_load(text) or {}
+        data = yaml.safe_load(text) or {}
     except yaml.YAMLError as e:
         raise ConfigParseError(profile_id, str(e)) from e
+    # Wrong-shape configs PARSE but crash the API consumers (fixes2-verdict N1:
+    # scalar `model:`, list root, ...). Treat them exactly like unparseable ones
+    # so the 400 + replace:true repair machinery covers this class too.
+    if not isinstance(data, dict):
+        raise ConfigParseError(profile_id, f"top-level must be a mapping, got {type(data).__name__}")
+    for key, typ in (("model", dict), ("agent", dict), ("fallback_providers", list), ("toolsets", list)):
+        if key in data and data[key] is not None and not isinstance(data[key], typ):
+            raise ConfigParseError(profile_id, f"'{key}' must be a {typ.__name__}, got {type(data[key]).__name__}")
+    return data
 
 
 def _atomic_write(path: str, data: str) -> None:
@@ -102,8 +111,8 @@ def _strip_sensitive(d: dict[str, Any]) -> dict[str, Any]:
 
 def _to_summary(profile_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
     """Extract summary fields for grid display."""
-    model = cfg.get("model", {}) or {}
-    agent = cfg.get("agent", {}) or {}
+    model = cfg.get("model") if isinstance(cfg.get("model"), dict) else {}
+    agent = cfg.get("agent") if isinstance(cfg.get("agent"), dict) else {}
     return {
         "id": profile_id,
         "name": profile_id,
@@ -121,8 +130,8 @@ def _to_summary(profile_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
 def _to_detail(profile_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
     """Full editable detail (sensitive fields stripped)."""
     safe = _strip_sensitive(cfg)
-    model = safe.get("model", {}) or {}
-    agent = safe.get("agent", {}) or {}
+    model = safe.get("model") if isinstance(safe.get("model"), dict) else {}
+    agent = safe.get("agent") if isinstance(safe.get("agent"), dict) else {}
     return {
         "id": profile_id,
         "name": profile_id,
@@ -346,6 +355,8 @@ async def duplicate_profile(profile_id: str, body: dict | None = None) -> dict[s
         cfg = _read_config(pid)
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Profile not found")
+    except ConfigParseError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     new_name = (body or {}).get("name", f"{pid}-copy") if body else f"{pid}-copy"
     new_pid = _sanitize_id(new_name)
@@ -367,7 +378,7 @@ async def duplicate_profile(profile_id: str, body: dict | None = None) -> dict[s
     for cap_dir in ("skills", "plugins", "cron"):
         src_cap = os.path.join(_profile_dir(pid), cap_dir)
         if os.path.isdir(src_cap):
-            shutil.copytree(src_cap, os.path.join(new_dir, cap_dir), dirs_exist_ok=True)
+            shutil.copytree(src_cap, os.path.join(new_dir, cap_dir), dirs_exist_ok=True, symlinks=True)
 
     return _to_detail(new_pid, cfg)
 
