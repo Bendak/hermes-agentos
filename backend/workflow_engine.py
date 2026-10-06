@@ -175,8 +175,11 @@ async def run_workflow(workflow_id: str) -> dict:
         conn.close()
         raise ValueError("Workflow not found")
 
-    nodes = json.loads(row["nodes"])
-    edges = json.loads(row["edges"])
+    # M15-1: legacy NULL graphs normalize to [] (row is runnable again);
+    # corrupt JSON raises ValueError naming the field, before any run row.
+    from backend.workflows import parse_graph_field
+    nodes = parse_graph_field(row["nodes"], "nodes")
+    edges = parse_graph_field(row["edges"], "edges")
 
     run_id = f"run_{uuid.uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).isoformat()
