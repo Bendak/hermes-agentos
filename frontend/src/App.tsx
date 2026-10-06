@@ -4017,7 +4017,7 @@ function WorkflowEditorPage() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [runResults, setRunResults] = useState<Record<string, string>>({})
-  const loadedRef = useRef(false)
+  const loadedRef = useRef<string | null>(null)  // M8-03: which id is loaded, not just 'once'
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set())
   const [runDetails, setRunDetails] = useState<Record<string, any>>({})
 
@@ -4056,8 +4056,10 @@ function WorkflowEditorPage() {
 
   // Parse and set nodes/edges when workflow loads
   useEffect(() => {
-    if (workflow && !loadedRef.current) {
-      loadedRef.current = true
+    // M8-03: load once PER workflow id — navigating A→B must load B's graph,
+    // never keep A's canvas (which Save would then write over B).
+    if (workflow && loadedRef.current !== (id ?? null)) {
+      loadedRef.current = id ?? null
       setWfName(workflow.name)
       setWfDescription(workflow.description)
       try {
@@ -4069,8 +4071,14 @@ function WorkflowEditorPage() {
         setNodes([])
         setEdges([])
       }
+      // Q4-3: transients die with the previous workflow
+      setRunResults({})
+      setSelectedNode(null)
+      setSaveStatus('idle')
+      setExpandedRuns(new Set())
+      setRunDetails({})
     }
-  }, [workflow, setNodes, setEdges])
+  }, [workflow, id, setNodes, setEdges])
 
   // Handle new connections
   const onConnect = useCallback(
@@ -4092,6 +4100,7 @@ function WorkflowEditorPage() {
   // Save mutation
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (loadedRef.current !== (id ?? null)) throw new Error('Stale editor state')  // M8-03
       setSaveStatus('saving')
       const res = await fetch(`/api/workflows/${id}`, {
         method: 'PUT',
@@ -4120,6 +4129,7 @@ function WorkflowEditorPage() {
   // Run workflow mutation
   const runMutation = useMutation({
     mutationFn: async () => {
+      setRunResults({})  // Q4-3: stale overlays never survive into a new run
       // Save first
       await saveMutation.mutateAsync()
       const res = await fetch(`/api/workflows/${id}/run`, { method: 'POST' })
@@ -4132,7 +4142,8 @@ function WorkflowEditorPage() {
       if (data.result?.node_results) {
         const results: Record<string, string> = {}
         for (const nr of data.result.node_results) {
-          results[nr.node_id] = nr.status
+          // Q4-2: 'skipped' is sticky — a later duplicate entry never overwrites it
+          if (results[nr.node_id] !== 'skipped') results[nr.node_id] = nr.status
         }
         setRunResults(results)
       }

@@ -192,22 +192,32 @@ async def run_workflow(workflow_id: str) -> dict:
         skipped_set: set[str] = set()
 
         for node_id in order:
+            # M8-01: a gated node must NEVER execute (side effects included) —
+            # checking after execution let children run AND get a second entry.
+            if node_id in skipped_set:
+                continue
             node = node_map[node_id]
             result = _execute_node(node, context)
             node_results.append(result)
 
             if result["status"] == "skipped":
                 skipped_set.add(node_id)
-                for downstream_id in graph["adj"].get(node_id, []):
-                    if downstream_id in node_map and downstream_id not in skipped_set:
-                        skipped_set.add(downstream_id)
+                # Q4-1: no true/false branch wiring exists in the editor yet, so
+                # a failed condition gates its ENTIRE transitive downstream.
+                # Each gated node gets exactly one 'skipped' entry (counts close).
+                stack = list(graph["adj"].get(node_id, []))
+                while stack:
+                    down = stack.pop()
+                    if down in node_map and down not in skipped_set:
+                        skipped_set.add(down)
                         node_results.append({
-                            "node_id": downstream_id,
-                            "label": node_map[downstream_id].get("data", {}).get("label", ""),
-                            "node_type": node_map[downstream_id].get("data", {}).get("nodeType", ""),
+                            "node_id": down,
+                            "label": node_map[down].get("data", {}).get("label", ""),
+                            "node_type": node_map[down].get("data", {}).get("nodeType", ""),
                             "status": "skipped",
                             "output": {"reason": "upstream condition failed"},
                         })
+                        stack.extend(graph["adj"].get(down, []))
 
         finished_at = datetime.now(timezone.utc).isoformat()
         result_json = json.dumps({
