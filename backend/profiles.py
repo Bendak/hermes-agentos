@@ -22,7 +22,11 @@ from backend.auth import require_auth, require_admin
 
 logger = logging.getLogger(__name__)
 
-PROFILES_DIR = os.environ.get("AGENTOS_PROFILES_DIR", "/opt/data/profiles")
+from backend.profile_discovery import (  # noqa: E402  (M10-16 single source)
+    DEFAULT_PROFILE_ID,
+    PROFILES_DIR,
+)
+
 
 # Fields that must NEVER be returned or edited via the API
 _SENSITIVE_KEY_PATTERNS = re.compile(r"(api_key|token|secret|password)", re.IGNORECASE)
@@ -43,6 +47,9 @@ def _config_path(profile_id: str) -> str:
 
 def _sanitize_id(profile_id: str) -> str:
     """Validate profile_id is a safe directory name (no path traversal)."""
+    if profile_id == DEFAULT_PROFILE_ID:
+        raise HTTPException(status_code=400,
+                            detail="'default' is reserved for the root config profile")
     if not re.match(r"^[a-zA-Z0-9_-]+$", profile_id):
         raise HTTPException(status_code=400, detail="Profile ID must contain only letters, numbers, hyphens, or underscores")
     return profile_id
@@ -181,70 +188,140 @@ def _to_detail(profile_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
             "default": model.get("default", ""),
             "provider": model.get("provider", ""),
             "base_url": model.get("base_url", ""),
+            "api_mode": model.get("api_mode", ""),
         },
         "fallback_providers": safe.get("fallback_providers", []) or [],
         "toolsets": safe.get("toolsets", []) or [],
-        "agent": {
-            "max_turns": agent.get("max_turns", 150),
-            "gateway_timeout": agent.get("gateway_timeout", 1800),
-            "restart_drain_timeout": agent.get("restart_drain_timeout", 180),
-            "api_max_retries": agent.get("api_max_retries", 3),
-            "tool_use_enforcement": agent.get("tool_use_enforcement", "auto"),
-            "task_completion_guidance": agent.get("task_completion_guidance", True),
-            "parallel_tool_call_guidance": agent.get("parallel_tool_call_guidance", True),
-            "verify_on_stop": agent.get("verify_on_stop", True),
-            "clarify_timeout": agent.get("clarify_timeout", 600),
-        },
+        # Effective values with GATEWAY defaults (never invented ones) —
+        # create persists every key so the round-trip cannot lie (M10-07).
+        "agent": {k: agent.get(k, d) for k, d in _AGENT_DEFAULTS.items()},
         "description": safe.get("description", ""),
     }
 
 
-# ── Validation layer (M10-07 / M10-12) ─────────────────────────────────
+# ── Validation layer (M10-07 / M10-12 / M11-1 / M11-2) ───────────────────
 # Everything below lands in the config.yaml the gateway loads: unknown keys
-# and wrong types must be rejected at the door, never persisted.
+# and wrong types must be rejected at the door, never persisted — and junk
+# already sitting in the file must not survive an API rewrite (prune).
 
-_MODEL_KEYS: dict[str, type] = {"default": str, "provider": str, "base_url": str}
-
-_AGENT_KEYS: dict[str, type] = {
-    "max_turns": int,
-    "gateway_timeout": int,
-    "restart_drain_timeout": int,
-    "api_max_retries": int,
-    "clarify_timeout": int,
-    "tool_use_enforcement": str,
-    "task_completion_guidance": bool,
-    "parallel_tool_call_guidance": bool,
-    "verify_on_stop": bool,
+# Value tuples use EXACT types (type(v) is t) — bool/int confusion and numeric
+# subclasses are rejected (WT-2); negatives are rejected everywhere (WT-3).
+_MODEL_KEYS: dict[str, tuple] = {
+    "default": (str,),
+    "provider": (str,),
+    "base_url": (str,),
+    "api_mode": (str,),  # honored by the gateway runtime (M11-2b)
 }
 
-# Gateway defaults — create persists EVERY key over these (M10-07 round-trip).
+# Full gateway agent schema (hermes_cli.config_defaults, 46 keys) PLUS the 4
+# keys present in every production config (personalities, reasoning_effort,
+# verbose, inherit_mcp_toolsets) — whitelist = schema ∪ observed (M11-2).
+_AGENT_SCHEMA: dict[str, tuple] = {
+    "agent_cache": (dict,),
+    "api_max_retries": (int,),
+    "auto_recovery_cycles": (int,),
+    "bot_mode_protocol": (bool,),
+    "budget_warning_ratio": (type(None), int, float),
+    "build_wait_timeout": (int,),
+    "clarify_timeout": (int,),
+    "coding_context": (str,),
+    "coding_instructions": (str,),
+    "cron_drain_timeout": (int,),
+    "disabled_toolsets": (list,),
+    "empty_response_guard": (dict,),
+    "environment_hint": (str,),
+    "environment_probe": (bool,),
+    "execution_guidance": (str,),
+    "fast_auto_seconds": (int,),
+    "gateway_auto_continue_freshness": (int,),
+    "gateway_notify_interval": (int,),
+    "gateway_startup_restore_drain_timeout": (int,),
+    "gateway_startup_warmup_timeout": (int,),
+    "gateway_timeout": (int,),
+    "gateway_timeout_warning": (int,),
+    "gateway_turn_lease_timeout": (int,),
+    "image_input_mode": (str,),
+    "intent_ack_continuation": (str,),
+    "local_stream_stale_timeout": (int,),
+    "max_turns": (type(None), int),
+    "max_verify_nudges": (int,),
+    "parallel_tool_call_guidance": (bool,),
+    "reasoning_echo": (bool,),
+    "reasoning_overrides": (dict,),
+    "reconnect_attention_after": (int,),
+    "restart_after_turn_timeout": (int,),
+    "restart_drain_timeout": (int,),
+    "run_budget_seconds": (type(None), int, float),
+    "sanitizer_heal_escalation_threshold": (int,),
+    "service_tier": (str,),
+    "session_stall_timeout": (int,),
+    "stall_guards": (bool,),
+    "stream_drain_timeout": (int, float),
+    "task_completion_guidance": (bool,),
+    "text_verbosity": (str,),
+    "tool_use_enforcement": (str,),
+    "turn_liveness": (dict,),
+    "verify_guidance": (bool,),
+    "verify_on_stop": (bool,),
+    # observed in every production config (schema-adjacent, gateway-honored)
+    "personalities": (dict,),
+    "reasoning_effort": (str,),
+    "verbose": (bool,),
+    "inherit_mcp_toolsets": (bool,),
+}
+
+# UI-editable subset — create persists these (over the gateway defaults).
+_AGENT_UI_KEYS: tuple = (
+    "max_turns",
+    "gateway_timeout",
+    "restart_drain_timeout",
+    "api_max_retries",
+    "clarify_timeout",
+    "tool_use_enforcement",
+    "task_completion_guidance",
+    "parallel_tool_call_guidance",
+    "verify_on_stop",
+)
+
+# Gateway defaults taken VERBATIM from hermes_cli.config_defaults (M11-2 note:
+# the old hardcoded values diverged from the gateway on 4 of 9 keys).
 _AGENT_DEFAULTS: dict[str, Any] = {
-    "max_turns": 150,
+    "max_turns": None,
     "gateway_timeout": 1800,
-    "restart_drain_timeout": 180,
+    "restart_drain_timeout": 0,
     "api_max_retries": 3,
-    "clarify_timeout": 600,
+    "clarify_timeout": 3600,
     "tool_use_enforcement": "auto",
     "task_completion_guidance": True,
     "parallel_tool_call_guidance": True,
-    "verify_on_stop": True,
+    "verify_on_stop": False,
 }
 
 
-def _checked_kv(section: str, data: Any, spec: dict[str, type]) -> dict[str, Any]:
-    """Whitelist + type-check a model/agent patch; reject unknown keys (400)."""
+def _checked_kv(section: str, data: Any, spec: dict[str, tuple]) -> dict[str, Any]:
+    """Whitelist + exact-type-check a model/agent patch; reject unknown keys."""
     if not isinstance(data, dict):
         raise HTTPException(status_code=400, detail=f"'{section}' must be a mapping")
     out: dict[str, Any] = {}
     for k, v in data.items():
-        want = spec.get(k)
-        if want is None:
+        allowed = spec.get(k)
+        if allowed is None:
             raise HTTPException(status_code=400, detail=f"Unknown {section} key: '{k}'")
-        # bool is an int subclass — the XOR rejects bool on int keys and vice-versa
-        if isinstance(v, bool) != (want is bool) or not isinstance(v, want):
-            raise HTTPException(status_code=400, detail=f"{section}.{k} must be {want.__name__}")
+        if not any(type(v) is t for t in allowed):
+            names = "/".join(t.__name__ for t in allowed)
+            raise HTTPException(status_code=400, detail=f"{section}.{k} must be {names}")
+        if isinstance(v, (int, float)) and v < 0:
+            raise HTTPException(status_code=400, detail=f"{section}.{k} must be >= 0")
         out[k] = v
     return out
+
+
+def _prune_section(section: str, data: Any, spec: dict[str, tuple]) -> dict[str, Any]:
+    """Drop sub-keys outside the whitelist (M11-1) — pre-existing junk must not
+    survive an update/duplicate rewrite of the config the gateway loads."""
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if k in spec}
 
 
 def _checked_str_list(field: str, value: Any) -> list[str]:
@@ -371,13 +448,18 @@ async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]
 
     if body.agent is not None:
         existing_agent = cfg.get("agent", {}) or {}
-        existing_agent.update(_checked_kv("agent", body.agent, _AGENT_KEYS))
+        existing_agent.update(_checked_kv("agent", body.agent, _AGENT_SCHEMA))
         cfg["agent"] = existing_agent
 
     if body.description is not None:
         if not isinstance(body.description, str):
             raise HTTPException(status_code=400, detail="'description' must be a string")
         cfg["description"] = body.description
+
+    # M11-1: junk already in the file must not survive the rewrite — prune the
+    # model/agent sections to the whitelist (top-level keys are user territory).
+    cfg["model"] = _prune_section("model", cfg.get("model", {}), _MODEL_KEYS)
+    cfg["agent"] = _prune_section("agent", cfg.get("agent", {}), _AGENT_SCHEMA)
 
     yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
     _atomic_write(_config_path(pid), yaml_text)
@@ -401,9 +483,13 @@ async def create_profile(body: ProfileCreate) -> dict[str, Any]:
     # Persist EVERY whitelisted setting — the dialog sends them and _to_detail
     # reports them; dropping any is silent content loss (M10-07).
     model_patch = _checked_kv("model", body.model or {}, _MODEL_KEYS)
-    agent_patch = _checked_kv("agent", body.agent or {}, _AGENT_KEYS)
+    agent_patch = _checked_kv("agent", body.agent or {}, _AGENT_SCHEMA)
+    model_cfg: dict[str, Any] = {k: model_patch.get(k, "") for k in ("default", "provider", "base_url")}
+    if "api_mode" in model_patch:
+        # only when sent — an empty string would confuse mode detection (M11-2b)
+        model_cfg["api_mode"] = model_patch["api_mode"]
     cfg: dict[str, Any] = {
-        "model": {k: model_patch.get(k, "") for k in _MODEL_KEYS},
+        "model": model_cfg,
         "providers": {},
         "fallback_providers": _checked_str_list("fallback_providers", body.fallback_providers or []),
         "toolsets": (_checked_str_list("toolsets", body.toolsets)
@@ -470,6 +556,9 @@ async def duplicate_profile(profile_id: str, body: dict | None = None) -> dict[s
         raise HTTPException(status_code=409, detail=f"Profile '{new_pid}' already exists")
 
     os.makedirs(new_dir, mode=0o700, exist_ok=True)
+    # M11-1: a duplicate must not clone junk the whitelist rejects
+    cfg["model"] = _prune_section("model", cfg.get("model", {}), _MODEL_KEYS)
+    cfg["agent"] = _prune_section("agent", cfg.get("agent", {}), _AGENT_SCHEMA)
     yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
     _atomic_write(_config_path(new_pid), yaml_text)
 

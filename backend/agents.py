@@ -5,56 +5,37 @@ from typing import Any, Dict, List, Optional
 from backend.config import settings
 from backend.sessions import count_sessions_by_profile
 
-PROFILES_DIR = os.path.join(settings.AGENTOS_DATA_DIR, "profiles")
+from backend.profile_discovery import (  # noqa: E402  (M10-16 single source)
+    PROFILES_DIR,
+    discover_profile_ids,
+)
 
 
 def _discover_profile_ids() -> List[str]:
-    """Scan for all profile IDs, including the default profile.
+    """All profile ids (virtual 'default' + sub-profiles).
 
-    The default profile lives directly in AGENTOS_DATA_DIR (config.yaml,
-    SOUL.md, gateway_state.json at the root). Sub-profiles live in the
-    profiles/ subdirectory. We return both, sorted alphabetically.
+    Delegates to profile_discovery (M10-16) — one source of truth for the
+    directory, the filters and the reserved-id policy.
     """
-    result: List[str] = []
-
-    # Check for default profile at the data root
-    root_config = os.path.join(settings.AGENTOS_DATA_DIR, "config.yaml")
-    if os.path.exists(root_config):
-        result.append("default")
-
-    # Scan sub-profiles directory
-    if os.path.isdir(PROFILES_DIR):
-        for entry in sorted(os.listdir(PROFILES_DIR)):
-            full_path = os.path.join(PROFILES_DIR, entry)
-            if os.path.isdir(full_path) and not entry.startswith(".") and not entry.startswith("_"):
-                result.append(entry)
-
-    return sorted(result)
+    return discover_profile_ids(include_default=True)
 
 
 def _parse_yaml_simple(path: str) -> Dict[str, Any]:
-    """Minimal line-based parser for the specific nested YAML used in config.yaml.
+    """Extract the `model` block from config.yaml via PyYAML.
 
-    Extracts top-level keys and a nested `model` block (default, provider).
+    Was a hand-rolled line parser (M10-11): kept quotes, dropped comments wrong,
+    ignored inline maps, and 'default:' as a substring could bleed across keys.
     """
     result: Dict[str, Any] = {"model": {}}
-    in_model = False
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            stripped = line.rstrip("\n")
-            if stripped.strip().startswith("#"):
-                continue
-            if stripped.startswith("model:") and not stripped.strip()[6:].strip():
-                in_model = True
-                continue
-            if in_model:
-                if stripped and not stripped.startswith(" "):
-                    in_model = False
-                    continue
-                if "default:" in stripped:
-                    result["model"]["default"] = stripped.split("default:", 1)[1].strip()
-                if "provider:" in stripped:
-                    result["model"]["provider"] = stripped.split("provider:", 1)[1].strip()
+    try:
+        import yaml
+        with open(path, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+        model = data.get("model")
+        if isinstance(model, dict):
+            result["model"] = model
+    except Exception:
+        pass
     return result
 
 

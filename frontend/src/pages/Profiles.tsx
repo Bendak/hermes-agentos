@@ -16,7 +16,7 @@ interface ProfileSummary {
 }
 
 interface AgentConfig {
-  max_turns: number
+  max_turns: number | null  // gateway default is None (unlimited)
   gateway_timeout: number
   restart_drain_timeout: number
   api_max_retries: number
@@ -29,7 +29,7 @@ interface AgentConfig {
 
 interface ProfileDetail {
   id: string
-  model: { default: string; provider: string; base_url: string }
+  model: { default: string; provider: string; base_url: string; api_mode?: string }
   fallback_providers: string[]
   toolsets: string[]
   agent: AgentConfig
