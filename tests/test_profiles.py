@@ -338,9 +338,14 @@ def test_fix_owner_called_on_every_writer(client, admin_headers, monkeypatch):
 
     prev = len(calls)
     r = client.post("/api/profiles/zz-own-spy/duplicate", headers=admin_headers,
-                    json={"new_id": "zz-own-spy-2"})
+                    json={"name": "zz-own-spy-2"})  # contract key is 'name', not 'new_id'
     assert r.status_code == 200, r.text
     assert len(calls) > prev + 1, f"duplicate must fix dir + copied tree: {calls[prev:]}"
+    # M-3: os.walk never yields the root dir — deleting only the explicit
+    # _fix_owner(new_dir) call must FAIL this test (mutation-verified hole).
+    dup_dir = os.path.normpath(_pdir("zz-own-spy-2"))
+    assert any(os.path.normpath(c) == dup_dir for c in calls[prev:]), \
+        f"duplicate must fix the new dir itself: {calls[prev:]}"
 
     client.delete("/api/profiles/zz-own-spy-2?purge=true", headers=admin_headers)
     client.delete("/api/profiles/zz-own-spy?purge=true", headers=admin_headers)
