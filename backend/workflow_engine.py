@@ -322,6 +322,22 @@ async def run_workflow(workflow_id: str) -> dict:
         }
 
 
+def _parse_result(d: dict) -> None:
+    """M19-2: corrupt run-result JSON is flagged, never a 500 (the M16-1
+    sibling that survived batches 1-5 on the runs endpoints)."""
+    raw = d.get("result")
+    if not raw:
+        return
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        d["result"] = None
+        d["result_corrupt"] = True
+        return
+    d["result"] = parsed
+    _backfill_trigger_nodes(parsed)
+
+
 def _backfill_trigger_nodes(result) -> None:
     """M18-1: legacy run rows predate the trigger_nodes counter — without it
     the front's ||0 fallback repaints old trigger+skip runs as green ✅."""
@@ -330,7 +346,11 @@ def _backfill_trigger_nodes(result) -> None:
         if isinstance(nrs, list):
             result["trigger_nodes"] = sum(
                 1 for nr in nrs
-                if nr.get("status") == "completed" and nr.get("node_type") == "trigger"
+                # M19-1: malformed entries (ints/None/strings) must not crash
+                # the read — skip anything that is not a mapping
+                if isinstance(nr, dict)
+                and nr.get("status") == "completed"
+                and nr.get("node_type") == "trigger"
             )
 
 
@@ -353,9 +373,7 @@ async def get_workflow_runs(workflow_id: str) -> list[dict]:
     results = []
     for row in rows:
         d = dict(row)
-        if d.get("result"):
-            d["result"] = json.loads(d["result"])
-            _backfill_trigger_nodes(d["result"])
+        _parse_result(d)  # M19-2: one corrupt result must not kill the listing
         results.append(d)
 
     return results
@@ -374,7 +392,5 @@ async def get_run_detail(run_id: str) -> dict | None:
         return None
 
     d = dict(row)
-    if d.get("result"):
-        d["result"] = json.loads(d["result"])
-        _backfill_trigger_nodes(d["result"])
+    _parse_result(d)  # M19-2: same guard on the detail path
     return d
