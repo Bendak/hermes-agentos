@@ -15,6 +15,7 @@ def _get_db():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")  # M8-09: cascade needs enforcement
     return conn
 
 
@@ -137,6 +138,8 @@ def _execute_node(node: dict, context: dict) -> dict:
             result["output"] = {"action": "set_variable", "variable": var_name, "value": var_value}
 
         elif action_type == "create_task":
+            # M8-07: a stub no-op must not paint the run green
+            result["status"] = "stub"
             result["output"] = {
                 "action": "create_task",
                 "title": config.get("title", f"Task from {label}"),
@@ -146,6 +149,8 @@ def _execute_node(node: dict, context: dict) -> dict:
             }
 
         elif action_type == "http_request":
+            # M8-07: stub
+            result["status"] = "stub"
             result["output"] = {
                 "action": "http_request",
                 "url": config.get("url", ""),
@@ -154,6 +159,8 @@ def _execute_node(node: dict, context: dict) -> dict:
             }
 
         else:
+            # M8-07: unknown action = stub, not "completed"
+            result["status"] = "stub"
             result["output"] = {"action": action_type, "note": "Unknown action type"}
 
     return result
@@ -223,9 +230,10 @@ async def run_workflow(workflow_id: str) -> dict:
         result_json = json.dumps({
             "node_results": node_results,
             "context": context,
-            "total_nodes": len(nodes),
-            "executed_nodes": len([r for r in node_results if r["status"] == "completed"]),
-            "skipped_nodes": len([r for r in node_results if r["status"] == "skipped"]),
+            "total_nodes": len(node_results),
+            "executed_nodes": sum(1 for r in node_results if r["status"] == "completed"),
+            "skipped_nodes": sum(1 for r in node_results if r["status"] == "skipped"),
+            "stub_nodes": sum(1 for r in node_results if r["status"] == "stub"),
         })
 
         conn = _get_db()

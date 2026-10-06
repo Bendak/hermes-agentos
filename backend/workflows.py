@@ -6,15 +6,16 @@ from datetime import datetime, timezone
 
 from backend.config import settings
 
-
 DB_PATH = os.path.join(settings.AGENTOS_DATA_DIR, "agentos.db")
-
 
 def _get_db():
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    # M8-09: FKs must be enforced or ON DELETE CASCADE is decorative — without
+    # this a deleted workflow leaves its runs behind.
+    conn.execute("PRAGMA foreign_keys=ON")
     return conn
 
 
@@ -41,24 +42,29 @@ _init_db()
 
 async def list_workflows() -> list[dict]:
     conn = _get_db()
-    rows = conn.execute("SELECT * FROM workflows ORDER BY updated_at DESC").fetchall()
-    conn.close()
-    return [dict(row) for row in rows]
+    try:
+        rows = conn.execute("SELECT * FROM workflows ORDER BY updated_at DESC").fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()  # M8-05: an exception must not leak a connection
 
 
 async def get_workflow(workflow_id: str) -> dict | None:
     conn = _get_db()
-    row = conn.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,)).fetchone()
-    conn.close()
-    return dict(row) if row else None
+    try:
+        row = conn.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,)).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
 
 
 def _validated_graph(data: dict) -> tuple[list, list]:
-    """M8-04 + M8-06: reject broken graphs at the door (400, not a dead run).
+    """M8-04 + M8-06 + M14-2: reject broken graphs at the door (400, not a dead run).
 
     nodes: list of mappings with unique non-empty string ids.
     edges: list of mappings with id/source/target non-empty strings pointing
-    at existing nodes. None/non-lists are rejected (never persisted verbatim).
+    at existing nodes; no self-loops, no duplicate pairs. None/non-lists are
+    rejected (never persisted verbatim).
     """
     nodes = data.get("nodes")
     edges = data.get("edges")
@@ -77,6 +83,7 @@ def _validated_graph(data: dict) -> tuple[list, list]:
         if n["id"] in ids:
             raise ValueError(f"duplicate node id: '{n['id']}'")
         ids.add(n["id"])
+    pairs: set[tuple[str, str]] = set()
     for i, ev in enumerate(edges):
         if not isinstance(ev, dict):
             raise ValueError(f"edges[{i}] must be a mapping")
@@ -86,6 +93,15 @@ def _validated_graph(data: dict) -> tuple[list, list]:
         for k in ("source", "target"):
             if ev[k] not in ids:
                 raise ValueError(f"edges[{i}].{k} references unknown node '{ev[k]}'")
+        # M14-2: a self-loop or duplicate pair reaches the run engine and dies
+        # as a misleading "cycle" — it is invalid input, so reject it here.
+        if ev["source"] == ev["target"]:
+            raise ValueError(f"edges[{i}] is a self-loop on '{ev['source']}'")
+        if (ev["source"], ev["target"]) in pairs:
+            raise ValueError(
+                f"edges[{i}] duplicates the pair {ev['source']}->{ev['target']}"
+            )
+        pairs.add((ev["source"], ev["target"]))
     return nodes, edges
 
 
@@ -94,50 +110,67 @@ async def create_workflow(data: dict) -> dict:
     now = datetime.now(timezone.utc).isoformat()
     wf_id = f"wf_{uuid.uuid4().hex[:8]}"
     conn = _get_db()
-    conn.execute(
-        "INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (wf_id, data.get("name", "Untitled"), data.get("description", ""),
-         json.dumps(nodes), json.dumps(edges), now, now)
-    )
-    conn.commit()
-    row = conn.execute("SELECT * FROM workflows WHERE id = ?", (wf_id,)).fetchone()
-    conn.close()
-    return dict(row)
+    try:
+        conn.execute(
+            "INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (wf_id, data.get("name", "Untitled"), data.get("description", ""),
+             json.dumps(nodes), json.dumps(edges), now, now)
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM workflows WHERE id = ?", (wf_id,)).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
 
 
 async def update_workflow(workflow_id: str, data: dict) -> dict | None:
-    # M8-04: validate BEFORE touching the DB — a bad payload must not persist
-    nodes = data.get("nodes")
-    edges = data.get("edges")
-    if "nodes" in data or "edges" in data:
-        _validated_graph(data)
     now = datetime.now(timezone.utc).isoformat()
     conn = _get_db()
-    existing = conn.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,)).fetchone()
-    if not existing:
-        conn.close()
-        return None
+    try:
+        existing = conn.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,)).fetchone()
+        if not existing:
+            return None
 
-    conn.execute(
-        "UPDATE workflows SET name=?, description=?, nodes=?, edges=?, updated_at=? WHERE id=?",
-        (
-            data.get("name", existing["name"]),
-            data.get("description", existing["description"]),
-            json.dumps(nodes if nodes is not None else json.loads(existing["nodes"])),
-            json.dumps(edges if edges is not None else json.loads(existing["edges"])),
-            now,
-            workflow_id,
+        nodes = data.get("nodes")
+        edges = data.get("edges")
+        # M8-04: explicit null/non-list = 400. M14-1: when only ONE side of the
+        # graph is sent, validate the MERGED result — a nodes-only update must
+        # not silently leave the old edges dangling against the new nodes.
+        if "nodes" in data or "edges" in data:
+            if "nodes" in data and not isinstance(nodes, list):
+                raise ValueError("'nodes' must be a list")
+            if "edges" in data and not isinstance(edges, list):
+                raise ValueError("'edges' must be a list")
+            merged_nodes = nodes if "nodes" in data else json.loads(existing["nodes"])
+            merged_edges = edges if "edges" in data else json.loads(existing["edges"])
+            _validated_graph({"nodes": merged_nodes, "edges": merged_edges})
+        else:
+            merged_nodes = json.loads(existing["nodes"])
+            merged_edges = json.loads(existing["edges"])
+
+        conn.execute(
+            "UPDATE workflows SET name=?, description=?, nodes=?, edges=?, updated_at=? WHERE id=?",
+            (
+                data.get("name", existing["name"]),
+                data.get("description", existing["description"]),
+                json.dumps(merged_nodes),
+                json.dumps(merged_edges),
+                now,
+                workflow_id,
+            )
         )
-    )
-    conn.commit()
-    row = conn.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,)).fetchone()
-    conn.close()
-    return dict(row)
+        conn.commit()
+        row = conn.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,)).fetchone()
+        return dict(row)
+    finally:
+        conn.close()
 
 
 async def delete_workflow(workflow_id: str) -> bool:
     conn = _get_db()
-    result = conn.execute("DELETE FROM workflows WHERE id = ?", (workflow_id,))
-    conn.commit()
-    conn.close()
-    return result.rowcount > 0
+    try:
+        result = conn.execute("DELETE FROM workflows WHERE id = ?", (workflow_id,))
+        conn.commit()
+        return result.rowcount > 0
+    finally:
+        conn.close()
