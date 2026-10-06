@@ -384,3 +384,31 @@ def test_fix_owner_issues_symlink_safe_chown(monkeypatch):
     monkeypatch.setattr(profiles_mod, "_profiles_owner", lambda: None)
     profiles_mod._fix_owner(probe)
     assert not spy, "owner-unknown must not chown at all"
+
+
+def test_profiles_owner_contract(monkeypatch):
+    """N-11 (fixes8): the consumer tests monkeypatch _profiles_owner away, so
+    the PRODUCER's own contract must be asserted directly. Kills M8f (except
+    branch returning (0,0)), M8g (unconditional None), M8h (stat on the wrong
+    path) — the three producer-side survivors of the fixes8 matrix."""
+    from backend import profiles as profiles_mod
+
+    calls: list[str] = []
+
+    def fake_stat(path):
+        calls.append(path)
+        st = type("S", (), {})()
+        st.st_uid, st.st_gid = 4242, 4243
+        return st
+
+    monkeypatch.setattr(os, "stat", fake_stat)
+    assert profiles_mod._profiles_owner() == (4242, 4243)
+    # M8h: must stat PROFILES_DIR itself — not dirname() or any other path
+    assert calls == [profiles_mod.PROFILES_DIR], calls
+
+    def raiser(path):
+        raise OSError("gone")
+
+    monkeypatch.setattr(os, "stat", raiser)
+    # M8f/M8g: error path must return None, never a fallback uid
+    assert profiles_mod._profiles_owner() is None
