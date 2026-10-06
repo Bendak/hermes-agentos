@@ -1263,6 +1263,21 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
   // old ?token= query-param pattern.
   const previewUrl = `/api/tasks/${taskId}/artifacts/${encodeURIComponent(filename)}?preview=true`
 
+  // Artifact bytes must NEVER be refetched: the app's QueryClient has a
+  // global refetchInterval of 5s (live data default), and a refetch here
+  // swaps the object URL — <video>/<img> see a new src and reload from
+  // scratch every 5 seconds (reported bug: video preview resets while
+  // playing). Artifact bytes are immutable per (task, filename), so the
+  // query is fully refetch-immune and cached for the whole session.
+  const STATIC_QUERY = {
+    refetchInterval: false as const,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    staleTime: Infinity,
+    gcTime: Infinity,
+  }
+
   const { data: content, isLoading } = useQuery({
     queryKey: ['artifact-content', taskId, filename],
     queryFn: async () => {
@@ -1271,7 +1286,7 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
       return res.text()
     },
     enabled: !isBinary,
-    staleTime: 60000,
+    ...STATIC_QUERY,
   })
 
   const { data: blobUrl, isLoading: blobLoading } = useQuery({
@@ -1282,7 +1297,7 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
       return URL.createObjectURL(await res.blob())
     },
     enabled: isBinary,
-    staleTime: 60000,
+    ...STATIC_QUERY,
   })
 
   const showToggle = isCode || isMarkdown || (!isBinary && !isCode && !isMarkdown)
