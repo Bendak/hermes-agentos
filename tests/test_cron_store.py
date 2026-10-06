@@ -28,6 +28,11 @@ import backend.cron as c
 from backend.auth import require_admin, require_auth
 from backend.main import app
 
+pytestmark = pytest.mark.skipif(
+    not c.HAVE_STORE,
+    reason="Hermes cron store not importable here (AGENTOS_HERMES_SRC) — endpoints answer 503",
+)
+
 
 @pytest.fixture()
 def cron_client(client, sandbox):
@@ -81,7 +86,6 @@ def _proc_worker(args):
         cl.post("/api/cron", json={"name": f"t2-{tag}-{i}", "prompt": "x", "schedule": "0 9 * * *"})
 
 
-@pytest.mark.skipif(not c.HAVE_STORE, reason="Hermes cron store not importable here")
 def test_lost_update_processes(cron_client, sandbox):
     import sys
 

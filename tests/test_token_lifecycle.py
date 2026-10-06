@@ -178,3 +178,31 @@ def test_access_token_with_refresh_type_rejected(client, fresh_user):
     body = login(client, name, "pw-" + "x" * 16).json()
     r = client.get("/api/auth/me", headers={"Authorization": "Bearer " + body["refresh_token"]})
     assert r.status_code == 401
+
+
+def test_refresh_rotation_single_use_under_concurrency(client, fresh_user):
+    """N1 regression: N concurrent refreshes with ONE token — exactly one 200.
+
+    verify_and_rotate_refresh does a CAS (UPDATE ... WHERE refresh_jti = old),
+    so a single caller wins; every loser is treated as a replay and the
+    family is revoked."""
+    import threading
+
+    name, _ = fresh_user
+    body = login(client, name, "pw-" + "x" * 16).json()
+    refresh = body["refresh_token"]
+
+    codes = []
+
+    def go():
+        r = client.post("/api/auth/refresh", json={"refresh_token": refresh})
+        codes.append(r.status_code)
+
+    threads = [threading.Thread(target=go) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert codes.count(200) == 1, f"winners={codes.count(200)} codes={codes}"
+    assert codes.count(401) == 7, f"codes={codes}"

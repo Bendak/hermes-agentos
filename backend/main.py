@@ -89,12 +89,11 @@ async def auth_refresh(body: dict):
         raise HTTPException(status_code=400, detail="Refresh token required")
 
     try:
-        user = verify_and_rotate_refresh(refresh_token)
+        user, new_refresh = verify_and_rotate_refresh(refresh_token)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
 
     access_token = create_access_token(user["id"], user["role"])
-    new_refresh = create_refresh_token(user["id"])
     return {"access_token": access_token, "refresh_token": new_refresh}
 
 
@@ -404,7 +403,8 @@ def _guess_content_type(filename: str) -> str:
         '.pdf': 'application/pdf', '.md': 'text/markdown', '.txt': 'text/plain',
         '.json': 'application/json', '.yaml': 'text/yaml', '.yml': 'text/yaml',
         '.py': 'text/x-python', '.js': 'text/javascript', '.ts': 'text/typescript',
-        '.html': 'text/html', '.css': 'text/css', '.sh': 'text/x-shellscript',
+        '.html': 'text/html', '.htm': 'text/html', '.xhtml': 'text/plain',
+        '.css': 'text/css', '.sh': 'text/x-shellscript',
     }
     return types.get(ext, 'application/octet-stream')
 

@@ -402,24 +402,57 @@ def bump_token_version(user_id: int) -> bool:
         conn.close()
 
 
-def verify_and_rotate_refresh(token: str) -> dict:
-    """Validate a refresh token with jti rotation. Returns the user dict.
+def verify_and_rotate_refresh(token: str) -> tuple[dict, str]:
+    """Validate a refresh token and rotate its jti ATOMICALLY (CAS).
 
-    Raises ValueError on any failure. A replayed (stale) jti is treated as
-    theft: the whole token family is revoked via token_version bump."""
+    Returns (user, new_refresh_token). Raises ValueError on any failure.
+
+    N1: the check-and-swap is a single conditional UPDATE (refresh_jti must
+    still equal the presented jti), so exactly ONE concurrent caller can
+    rotate a given token. A CAS miss is indistinguishable from a replay —
+    the whole family is revoked via token_version bump (strict single-use
+    rotation with reuse detection; a losing concurrent tab must log in
+    again)."""
     payload = _decode_token(token, get_jwt_secret())
     if payload.get("type") != "refresh":
         raise ValueError("Invalid token type")
     try:
-        user = get_user_by_id(int(payload["sub"]))
+        uid = int(payload["sub"])
     except (TypeError, ValueError):
         raise ValueError("Invalid token subject")
+    user = get_user_by_id(uid)
     if not user:
         raise ValueError("User not found")
     if payload.get("ver") != user["token_version"]:
         raise ValueError("Token revoked")
-    jti = payload.get("jti")
-    if not jti or user.get("refresh_jti") != jti:
+    old_jti = payload.get("jti")
+    if not old_jti:
+        raise ValueError("Invalid refresh token")
+
+    new_jti = secrets.token_urlsafe(16)
+    conn = _get_db()
+    try:
+        cursor = conn.execute(
+            "UPDATE users SET refresh_jti = ? WHERE id = ? AND refresh_jti = ?",
+            (new_jti, user["id"], old_jti),
+        )
+        conn.commit()
+        swapped = cursor.rowcount == 1
+    finally:
+        conn.close()
+
+    if not swapped:
+        # CAS miss: replayed token or a concurrent rotation won the race.
         bump_token_version(user["id"])
         raise ValueError("Refresh token reused; all sessions revoked")
-    return user
+
+    now = datetime.now(timezone.utc)
+    new_payload = {
+        "sub": str(user["id"]),
+        "type": "refresh",
+        "ver": user["token_version"],
+        "jti": new_jti,
+        "iat": now.timestamp(),
+        "exp": (now + REFRESH_TOKEN_EXPIRY).timestamp(),
+    }
+    return user, _create_token(new_payload, get_jwt_secret())
