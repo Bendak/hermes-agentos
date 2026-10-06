@@ -7,8 +7,7 @@ import yaml
 from backend.config import settings
 
 SKILLS_DIR = os.path.join(settings.AGENTOS_DATA_DIR, "skills")
-PROFILES_DIR = os.path.join(settings.AGENTOS_DATA_DIR, "profiles")
-MAIN_CONFIG = os.path.join(settings.AGENTOS_DATA_DIR, "config.yaml")
+from backend.profile_discovery import MAIN_CONFIG, PROFILES_DIR  # noqa: E402  (M10-16)
 
 # ── Category derivation from directory name prefix ──────────────────
 

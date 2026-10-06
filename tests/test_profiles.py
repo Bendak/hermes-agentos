@@ -8,6 +8,7 @@ Covers the M10 findings fixed in WI-4a:
   M10-02 regression guard (viewer cannot mutate)
 """
 
+import logging
 import os
 
 import pytest
@@ -357,7 +358,7 @@ def test_fix_owner_called_on_every_writer(client, admin_headers, monkeypatch):
     client.delete("/api/profiles/zz-own-spy?purge=true", headers=admin_headers)
 
 
-def test_fix_owner_issues_symlink_safe_chown(monkeypatch):
+def test_fix_owner_issues_symlink_safe_chown(monkeypatch, caplog):
     """M-empty-body mutant: call-site spies cannot see inside _fix_owner —
     assert the chown syscall itself happens with follow_symlinks=False."""
     from backend import profiles as profiles_mod
@@ -382,8 +383,13 @@ def test_fix_owner_issues_symlink_safe_chown(monkeypatch):
     # chowns to (0,0) reintroduces the cross-app uid bug and fails here.
     spy.clear()
     monkeypatch.setattr(profiles_mod, "_profiles_owner", lambda: None)
-    profiles_mod._fix_owner(probe)
+    with caplog.at_level(logging.WARNING, logger="backend.profiles"):
+        profiles_mod._fix_owner(probe)
     assert not spy, "owner-unknown must not chown at all"
+    # N-14 (M9): the warning itself is load-bearing observability — deleting it
+    # must fail the suite.
+    assert any("_profiles_owner() unavailable" in rec.getMessage()
+               for rec in caplog.records), "null-owner path must log a warning"
 
 
 def test_profiles_owner_contract(monkeypatch):
@@ -395,7 +401,7 @@ def test_profiles_owner_contract(monkeypatch):
 
     calls: list[str] = []
 
-    def fake_stat(path):
+    def fake_stat(path, *args, **kwargs):  # N-15: probes may pass follow_symlinks
         calls.append(path)
         st = type("S", (), {})()
         st.st_uid, st.st_gid = 4242, 4243
@@ -406,7 +412,7 @@ def test_profiles_owner_contract(monkeypatch):
     # M8h: must stat PROFILES_DIR itself — not dirname() or any other path
     assert calls == [profiles_mod.PROFILES_DIR], calls
 
-    def raiser(path):
+    def raiser(path, *args, **kwargs):
         raise OSError("gone")
 
     monkeypatch.setattr(os, "stat", raiser)
@@ -488,3 +494,72 @@ def test_skills_summary_route_reachable(client, admin_headers):
     r2 = client.get("/api/profiles", headers=admin_headers)
     assert r2.status_code == 200, r2.text
     assert isinstance(r2.json(), list) and "id" in r2.json()[0]
+
+
+# ── WI-4b lote 2: M11-1 prune, M11-2 schema, WT-2/WT-3, M10-16 reserved id ──
+
+def test_update_prunes_junk_but_keeps_real_keys(client, admin_headers):
+    """M11-1: pre-existing junk must not survive an API rewrite; real keys must."""
+    import yaml
+    _mkprofile("zz-prune")
+    cfg_path = os.path.join(_pdir("zz-prune"), "config.yaml")
+    with open(cfg_path, encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    cfg.setdefault("agent", {})["evil_agent_key"] = "boo"
+    cfg["agent"]["personalities"] = {"x": "y"}   # real production key — must survive
+    cfg["model"]["evil_model_key"] = 1
+    cfg["model"]["api_mode"] = "chat_completions"  # real key — must survive
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        f.write(yaml.safe_dump(cfg))
+    try:
+        r = client.put("/api/profiles/zz-prune", headers=admin_headers,
+                       json={"agent": {"max_turns": 50}})
+        assert r.status_code == 200, r.text
+        with open(cfg_path, encoding="utf-8") as f:
+            out = yaml.safe_load(f)
+        assert "evil_agent_key" not in out["agent"], out["agent"]
+        assert "evil_model_key" not in out["model"], out["model"]
+        assert out["agent"]["personalities"] == {"x": "y"}
+        assert out["model"]["api_mode"] == "chat_completions"
+    finally:
+        client.delete("/api/profiles/zz-prune?purge=true", headers=admin_headers)
+
+
+def test_model_api_mode_round_trips(client, admin_headers):
+    """M11-2b: api_mode is whitelisted, persists on create, survives merges."""
+    import yaml
+    r = client.post("/api/profiles", headers=admin_headers,
+                    json={"name": "zz-apimode",
+                          "model": {"default": "m", "provider": "p", "api_mode": "chat_completions"}})
+    assert r.status_code == 200, r.text
+    try:
+        with open(os.path.join(_pdir("zz-apimode"), "config.yaml"), encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        assert cfg["model"]["api_mode"] == "chat_completions"
+        r2 = client.put("/api/profiles/zz-apimode", headers=admin_headers,
+                        json={"model": {"default": "m2"}})
+        assert r2.status_code == 200, r2.text
+        with open(os.path.join(_pdir("zz-apimode"), "config.yaml"), encoding="utf-8") as f:
+            cfg2 = yaml.safe_load(f)
+        assert cfg2["model"]["api_mode"] == "chat_completions"  # merge keeps it
+    finally:
+        client.delete("/api/profiles/zz-apimode?purge=true", headers=admin_headers)
+
+
+def test_negative_numbers_rejected(client, admin_headers):
+    """WT-3: no negative ints/floats may land in the gateway's config."""
+    _mkprofile("zz-neg")
+    try:
+        r = client.put("/api/profiles/zz-neg", headers=admin_headers,
+                       json={"agent": {"max_turns": -5}})
+        assert r.status_code == 400, r.text
+    finally:
+        client.delete("/api/profiles/zz-neg?purge=true", headers=admin_headers)
+
+
+def test_reserved_default_id_rejected(client, admin_headers):
+    """M10-16: 'default' belongs to the root config — no sub-profile may take it."""
+    r = client.post("/api/profiles", headers=admin_headers,
+                    json={"name": "default", "model": {"default": "m"}})
+    assert r.status_code == 400, r.text
+    assert "reserved" in r.text
