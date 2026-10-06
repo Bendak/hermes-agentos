@@ -9,6 +9,50 @@ from backend.config import settings
 
 STATE_DB = os.path.join(settings.AGENTOS_DATA_DIR, "state.db")
 
+
+def _display_where(alias: str = "") -> str:
+    """WI-6 (F-M3-01/03/11): replicate the Hermes display projection exactly.
+    Sources: hermes_state_messages._DISPLAY_ACTIVE_CLAUSE +
+    DISPLAY_VISIBLE_SQL (model_only) + hermes_state_common preview eligibility
+    (display_kind='hidden' is "scaffolding the gateway never paints").
+      - (active=1 OR compacted=1): rewound/branched rows (0,0) are ghost turns
+        never displayed (175.896 of 273.278 rows live in the current state.db).
+      - model_only: rows flagged model-only never enter a display projection.
+      - hidden: model-facing scaffolding, never painted.
+    """
+    pfx = f"{alias}." if alias else ""
+    return (
+        f" AND ({pfx}active = 1 OR {pfx}compacted = 1)"
+        f" AND COALESCE(CASE WHEN json_valid({pfx}display_metadata)"
+        f" THEN json_extract({pfx}display_metadata, '$.model_only') END, 0) = 0"
+        f" AND COALESCE({pfx}display_kind, '') <> 'hidden'"
+    )
+
+
+def _display_text_expr(alias: str = "") -> str:
+    """F-M3-11: carriers store their renderable text in display_metadata.display_text;
+    the gateway paints THAT, never the raw carrier content."""
+    pfx = f"{alias}." if alias else ""
+    return (
+        f"COALESCE(CASE WHEN json_valid({pfx}display_metadata)"
+        f" THEN json_extract({pfx}display_metadata, '$.display_text') END, {pfx}content)"
+    )
+
+
+def _representative_clause(alias: str = "", key_alias: str = "c") -> str:
+    """F-M3-10: one representative row per display group (protected-tail copies
+    share display_order). The canonical pick is active DESC, id DESC."""
+    pfx = f"{alias}." if alias else ""
+    k = f"{key_alias}."
+    return (
+        f" AND {pfx}id = (SELECT {k}id FROM messages {k.rstrip('.')}"
+        f" WHERE {k}session_id = {pfx}session_id"
+        f" AND COALESCE({k}display_order, {k}id) = COALESCE({pfx}display_order, {pfx}id)"
+        f" AND {k}role IN ('user', 'assistant', 'tool')"
+        + _display_where(key_alias) +
+        f" ORDER BY {k}active DESC, {k}id DESC LIMIT 1)"
+    )
+
 # model-to-profile mapping fallback when sessions table lacks `profile` column
 MODEL_TO_PROFILE: Dict[str, str] = {
     "glm-5.2": "nexus",          # nexus is the orchestrator, uses glm-5.2 most
@@ -249,9 +293,10 @@ async def get_session_message_count(session_id: str) -> int:
 
     async with aiosqlite.connect(STATE_DB) as db:
         async with db.execute(
-            """
-            SELECT COUNT(*) FROM messages
-            WHERE session_id = ? AND role IN ('user', 'assistant', 'tool')
+            f"""
+            SELECT COUNT(*) FROM messages m
+            WHERE m.session_id = ? AND m.role IN ('user', 'assistant', 'tool')
+            {_display_where('m')}{_representative_clause('m')}
             """,
             (session_id,),
         ) as cursor:
@@ -272,14 +317,15 @@ async def get_session_messages(session_id: str, limit: int = 100, offset: int = 
 
     async with aiosqlite.connect(STATE_DB) as db:
         async with db.execute(
-            """
+            f"""
             SELECT
-                id, session_id, role, content, tool_name,
-                timestamp, tool_calls, finish_reason, token_count,
-                reasoning_content, compacted
-            FROM messages
-            WHERE session_id = ? AND role IN ('user', 'assistant', 'tool')
-            ORDER BY id ASC
+                m.id, m.session_id, m.role, {_display_text_expr('m')} AS content, m.tool_name,
+                m.timestamp, m.tool_calls, m.finish_reason, m.token_count,
+                m.reasoning_content, m.compacted
+            FROM messages m
+            WHERE m.session_id = ? AND m.role IN ('user', 'assistant', 'tool')
+            {_display_where('m')}{_representative_clause('m')}
+            ORDER BY COALESCE(m.display_order, m.id) ASC
             LIMIT ? OFFSET ?
             """,
             (session_id, limit, offset),
@@ -339,7 +385,7 @@ async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:
     async with aiosqlite.connect(STATE_DB) as db:
         # First gather matching session IDs with their best snippet
         async with db.execute(
-            """
+            f"""
             SELECT
                 s.id,
                 s.source,
@@ -351,11 +397,11 @@ async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:
                 s.tool_call_count,
                 s.chat_type,
                 s.archived,
-                m.content
+                {_display_text_expr('m')} AS content
             FROM messages_fts
             JOIN messages m ON m.rowid = messages_fts.rowid
             JOIN sessions s ON s.id = m.session_id
-            WHERE messages_fts MATCH ?
+            WHERE messages_fts MATCH ?{_display_where('m')}
             GROUP BY s.id
             ORDER BY COUNT(messages_fts.rowid) DESC
             LIMIT ?
