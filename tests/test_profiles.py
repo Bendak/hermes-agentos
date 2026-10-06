@@ -412,3 +412,79 @@ def test_profiles_owner_contract(monkeypatch):
     monkeypatch.setattr(os, "stat", raiser)
     # M8f/M8g: error path must return None, never a fallback uid
     assert profiles_mod._profiles_owner() is None
+
+
+# ── WI-4b lote 1: M10-07 + M10-12 settings persistence & validation ──────
+
+def test_create_persists_all_agent_settings(client, admin_headers):
+    """M10-07: every whitelisted agent key sent by the dialog must round-trip."""
+    import yaml
+    sent = {
+        "task_completion_guidance": False,
+        "parallel_tool_call_guidance": False,
+        "clarify_timeout": 300,
+        "tool_use_enforcement": "strict",
+    }
+    r = client.post("/api/profiles", headers=admin_headers,
+                    json={"name": "zz-settings", "model": {"default": "m", "provider": "p"},
+                          "agent": sent})
+    assert r.status_code == 200, r.text
+    try:
+        with open(os.path.join(_pdir("zz-settings"), "config.yaml"), encoding="utf-8") as f:
+            cfg = yaml.safe_load(f)
+        agent = cfg["agent"]
+        # all 9 keys persisted (not just the 4 sent) — _to_detail must not lie
+        from backend.profiles import _AGENT_DEFAULTS
+        assert set(agent) == set(_AGENT_DEFAULTS), agent
+        for k, v in sent.items():
+            assert agent[k] == v, (k, agent[k])
+        detail = r.json()["agent"]
+        for k, v in sent.items():
+            assert detail[k] == v, (k, detail[k])
+    finally:
+        client.delete("/api/profiles/zz-settings?purge=true", headers=admin_headers)
+
+
+def test_update_rejects_unknown_keys_and_bad_types(client, admin_headers):
+    """M10-12: nothing outside the whitelist may reach the gateway's config."""
+    _mkprofile("zz-validate")
+    try:
+        r = client.put("/api/profiles/zz-validate", headers=admin_headers,
+                       json={"agent": {"evil_key": 1}})
+        assert r.status_code == 400, r.text
+        assert "evil_key" in r.text
+
+        r = client.put("/api/profiles/zz-validate", headers=admin_headers,
+                       json={"model": {"default": 123}})
+        assert r.status_code == 400, r.text
+
+        r = client.put("/api/profiles/zz-validate", headers=admin_headers,
+                       json={"agent": {"max_turns": True}})  # bool is not int here
+        assert r.status_code == 400, r.text
+
+        r = client.put("/api/profiles/zz-validate", headers=admin_headers,
+                       json={"toolsets": "not-a-list"})
+        # pydantic catches typed fields (422); handler-level checks give 400
+        assert r.status_code in (400, 422), r.text
+
+        r = client.put("/api/profiles/zz-validate", headers=admin_headers,
+                       json={"agent": {"max_turns": 42}})
+        assert r.status_code == 200, r.text
+        assert r.json()["agent"]["max_turns"] == 42
+    finally:
+        client.delete("/api/profiles/zz-validate?purge=true", headers=admin_headers)
+
+
+# ── WI-4b lote 1: M10-05 skills-summary route reachable ───────────────────
+
+def test_skills_summary_route_reachable(client, admin_headers):
+    """M10-05: the skills-summary contract is no longer shadowed by the router."""
+    r = client.get("/api/profiles/skills-summary", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    rows = r.json()
+    assert isinstance(rows, list) and rows, rows
+    assert {"name", "skills_enabled", "skills_disabled"} <= set(rows[0]), rows[0]
+    # the router's own list contract must still win on the bare path
+    r2 = client.get("/api/profiles", headers=admin_headers)
+    assert r2.status_code == 200, r2.text
+    assert isinstance(r2.json(), list) and "id" in r2.json()[0]

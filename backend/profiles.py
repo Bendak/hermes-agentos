@@ -199,6 +199,60 @@ def _to_detail(profile_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ── Validation layer (M10-07 / M10-12) ─────────────────────────────────
+# Everything below lands in the config.yaml the gateway loads: unknown keys
+# and wrong types must be rejected at the door, never persisted.
+
+_MODEL_KEYS: dict[str, type] = {"default": str, "provider": str, "base_url": str}
+
+_AGENT_KEYS: dict[str, type] = {
+    "max_turns": int,
+    "gateway_timeout": int,
+    "restart_drain_timeout": int,
+    "api_max_retries": int,
+    "clarify_timeout": int,
+    "tool_use_enforcement": str,
+    "task_completion_guidance": bool,
+    "parallel_tool_call_guidance": bool,
+    "verify_on_stop": bool,
+}
+
+# Gateway defaults — create persists EVERY key over these (M10-07 round-trip).
+_AGENT_DEFAULTS: dict[str, Any] = {
+    "max_turns": 150,
+    "gateway_timeout": 1800,
+    "restart_drain_timeout": 180,
+    "api_max_retries": 3,
+    "clarify_timeout": 600,
+    "tool_use_enforcement": "auto",
+    "task_completion_guidance": True,
+    "parallel_tool_call_guidance": True,
+    "verify_on_stop": True,
+}
+
+
+def _checked_kv(section: str, data: Any, spec: dict[str, type]) -> dict[str, Any]:
+    """Whitelist + type-check a model/agent patch; reject unknown keys (400)."""
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=400, detail=f"'{section}' must be a mapping")
+    out: dict[str, Any] = {}
+    for k, v in data.items():
+        want = spec.get(k)
+        if want is None:
+            raise HTTPException(status_code=400, detail=f"Unknown {section} key: '{k}'")
+        # bool is an int subclass — the XOR rejects bool on int keys and vice-versa
+        if isinstance(v, bool) != (want is bool) or not isinstance(v, want):
+            raise HTTPException(status_code=400, detail=f"{section}.{k} must be {want.__name__}")
+        out[k] = v
+    return out
+
+
+def _checked_str_list(field: str, value: Any) -> list[str]:
+    if not isinstance(value, list) or any(not isinstance(x, str) for x in value):
+        raise HTTPException(status_code=400, detail=f"'{field}' must be a list of strings")
+    return value
+
+
 # ── Pydantic models ──────────────────────────────────────────────────
 
 class ProfileUpdate(BaseModel):
@@ -260,6 +314,18 @@ async def list_profiles() -> list[dict[str, Any]]:
     return results
 
 
+@router.get("/skills-summary")
+async def profile_skills_summary() -> list[dict[str, Any]]:
+    """Skills-enabled/disabled counts per profile (skills-hub knowledge).
+
+    Lived at GET /api/profiles in main.py but the router shadowed it —
+    unreachable dead code (M10-05). Registered BEFORE /{profile_id} so the
+    static path wins the Starlette match. Feeds the future skills-per-profile UI.
+    """
+    from backend.skills_hub import list_profiles_summary
+    return await list_profiles_summary()
+
+
 @router.get("/{profile_id}")
 async def get_profile(profile_id: str) -> dict[str, Any]:
     """Get full profile detail (editable fields only, sensitive stripped)."""
@@ -289,26 +355,28 @@ async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]
         # Repair path: rebuild a fresh config from the submitted fields.
         cfg = {}
 
-    # Merge updates into existing config (preserving all other keys)
+    # Merge updates into existing config (preserving all other keys).
+    # Whitelist + type-check everything (M10-12): this dict is the config the
+    # gateway loads — arbitrary keys/values must never reach it.
     if body.model is not None:
         existing_model = cfg.get("model", {}) or {}
-        for k, v in body.model.items():
-            existing_model[k] = v
+        existing_model.update(_checked_kv("model", body.model, _MODEL_KEYS))
         cfg["model"] = existing_model
 
     if body.fallback_providers is not None:
-        cfg["fallback_providers"] = body.fallback_providers
+        cfg["fallback_providers"] = _checked_str_list("fallback_providers", body.fallback_providers)
 
     if body.toolsets is not None:
-        cfg["toolsets"] = body.toolsets
+        cfg["toolsets"] = _checked_str_list("toolsets", body.toolsets)
 
     if body.agent is not None:
         existing_agent = cfg.get("agent", {}) or {}
-        for k, v in body.agent.items():
-            existing_agent[k] = v
+        existing_agent.update(_checked_kv("agent", body.agent, _AGENT_KEYS))
         cfg["agent"] = existing_agent
 
     if body.description is not None:
+        if not isinstance(body.description, str):
+            raise HTTPException(status_code=400, detail="'description' must be a string")
         cfg["description"] = body.description
 
     yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
@@ -330,23 +398,17 @@ async def create_profile(body: ProfileCreate) -> dict[str, Any]:
     os.makedirs(dir_path, mode=0o700, exist_ok=True)
     _fix_owner(dir_path)
 
+    # Persist EVERY whitelisted setting — the dialog sends them and _to_detail
+    # reports them; dropping any is silent content loss (M10-07).
+    model_patch = _checked_kv("model", body.model or {}, _MODEL_KEYS)
+    agent_patch = _checked_kv("agent", body.agent or {}, _AGENT_KEYS)
     cfg: dict[str, Any] = {
-        "model": {
-            "base_url": (body.model or {}).get("base_url", ""),
-            "default": (body.model or {}).get("default", ""),
-            "provider": (body.model or {}).get("provider", ""),
-        },
+        "model": {k: model_patch.get(k, "") for k in _MODEL_KEYS},
         "providers": {},
-        "fallback_providers": body.fallback_providers or [],
-        "toolsets": body.toolsets or ["hermes-cli"],
-        "agent": {
-            "max_turns": (body.agent or {}).get("max_turns", 150),
-            "gateway_timeout": (body.agent or {}).get("gateway_timeout", 1800),
-            "restart_drain_timeout": 180,
-            "api_max_retries": 3,
-            "tool_use_enforcement": "auto",
-            "verify_on_stop": True,
-        },
+        "fallback_providers": _checked_str_list("fallback_providers", body.fallback_providers or []),
+        "toolsets": (_checked_str_list("toolsets", body.toolsets)
+                     if body.toolsets is not None else ["hermes-cli"]),
+        "agent": {k: agent_patch.get(k, d) for k, d in _AGENT_DEFAULTS.items()},
     }
 
     if body.description:
