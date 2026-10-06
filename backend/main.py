@@ -642,12 +642,18 @@ async def workflow_detail(workflow_id: str, user: dict = Depends(require_auth)):
 
 @app.post("/api/workflows")
 async def workflow_create(body: dict, user: dict = Depends(require_admin)):
-    return await create_workflow(body)
+    try:
+        return await create_workflow(body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.put("/api/workflows/{workflow_id}")
 async def workflow_update(workflow_id: str, body: dict, user: dict = Depends(require_admin)):
-    result = await update_workflow(workflow_id, body)
+    try:
+        result = await update_workflow(workflow_id, body)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if result is None:
         raise HTTPException(status_code=404, detail="Workflow not found")
     return result
