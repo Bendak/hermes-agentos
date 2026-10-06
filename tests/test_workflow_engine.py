@@ -6,6 +6,7 @@ M8-04/M8-06: broken graphs are 400s at the API, never persisted verbatim.
 """
 
 import asyncio
+from datetime import datetime, timezone
 import json
 
 import backend.workflow_engine as engine_mod
@@ -276,3 +277,67 @@ def test_list_returns_counts(client, admin_headers, tmp_path, monkeypatch):
     rows = client.get("/api/workflows", headers=admin_headers).json()
     row = next(w for w in rows if w["id"] == r.json()["id"])
     assert row["node_count"] == 2 and row["edge_count"] == 1, row
+
+
+# ── WI-5 batch 4 ─────────────────────────────────────────────────────────────
+
+def test_corrupt_row_does_not_take_down_the_list(client, admin_headers, tmp_path, monkeypatch):
+    """M16-1: ONE corrupt row must not 500 the whole listing."""
+    _sandbox_db(tmp_path, monkeypatch)
+    r = client.post("/api/workflows", headers=admin_headers, json={
+        "name": "ok-row", "nodes": [{"id": "a", "data": {}}], "edges": []})
+    assert r.status_code == 200, r.text
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "agentos.db"))
+    conn.execute("INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at)"
+                 " VALUES ('wf_bad', 'bad', '', 'garbage{', '[]', 't', 't')")
+    conn.commit()
+    conn.close()
+
+    rows = client.get("/api/workflows", headers=admin_headers).json()
+    assert isinstance(rows, list) and len(rows) >= 2, rows
+    bad = next(w for w in rows if w["id"] == "wf_bad")
+    assert bad["graph_corrupt"] is True and bad["node_count"] is None, bad
+    good = next(w for w in rows if w["id"] == r.json()["id"])
+    assert good["graph_corrupt"] is False and good["node_count"] == 1, good
+
+
+def test_not_found_is_404_and_bad_graph_is_400(client, admin_headers, tmp_path, monkeypatch):
+    """M16-3: typed errors — pinned both ways so a message rename can't flip them."""
+    _sandbox_db(tmp_path, monkeypatch)
+    r = client.post("/api/workflows/wf_missing/run", headers=admin_headers)
+    assert r.status_code == 404, (r.status_code, r.text)
+
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "agentos.db"))
+    conn.execute("INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at)"
+                 " VALUES ('wf_bad2', 'b', '', 'garbage{', '[]', 't', 't')")
+    conn.commit()
+    conn.close()
+    r = client.post("/api/workflows/wf_bad2/run", headers=admin_headers)
+    assert r.status_code == 400, (r.status_code, r.text)
+
+
+def test_stale_running_runs_marked_interrupted(client, admin_headers, tmp_path, monkeypatch):
+    """M8-08: a run stuck 'running' across a restart is a ghost — reads sweep it."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "agentos.db"))
+    conn.execute(
+        "INSERT INTO workflow_runs (id, workflow_id, status, started_at)"
+        " VALUES ('run_ghost', 'wf_x', 'running', '2026-01-01T00:00:00+00:00')"
+    )
+    conn.execute(
+        "INSERT INTO workflow_runs (id, workflow_id, status, started_at)"
+        " VALUES ('run_live', 'wf_x', 'running', ?)",
+        (datetime.now(timezone.utc).isoformat(),),
+    )
+    conn.commit()
+    conn.close()
+
+    from backend.workflow_engine import get_workflow_runs
+    runs = asyncio.run(get_workflow_runs("wf_x"))
+    by_id = {r["id"]: r for r in runs}
+    assert by_id["run_ghost"]["status"] == "failed", by_id["run_ghost"]
+    assert "interrupted" in (by_id["run_ghost"].get("error") or ""), by_id["run_ghost"]
+    assert by_id["run_live"]["status"] == "running", by_id["run_live"]  # live run untouched

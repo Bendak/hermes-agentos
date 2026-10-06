@@ -4601,8 +4601,8 @@ function WorkflowEditorPage() {
                     onClick={() => toggleRun(run.id)}
                   >
                     <span className="text-text-tertiary">{isExpanded ? '▼' : '▶'}</span>
-                    <span className={run.status === 'completed' ? 'text-emerald-400' : 'text-red-400'}>
-                      {run.status === 'completed' ? '✅' : '❌'}
+                    <span className={run.status === 'completed' ? ((run.result?.executed_nodes || 0) === 0 && (run.result?.stub_nodes || 0) > 0 ? 'text-amber-400' : 'text-emerald-400') : (run.status === 'running' || run.status === 'pending') ? 'text-amber-400' : 'text-red-400'}>
+                      {run.status === 'completed' ? ((run.result?.executed_nodes || 0) === 0 && (run.result?.stub_nodes || 0) > 0 ? '🚧' : '✅') : (run.status === 'running' || run.status === 'pending') ? '⏳' : '❌'}
                     </span>
                     <span className="text-text-secondary font-mono flex-1">{run.id}</span>
                     <span className="text-text-tertiary">{formatTime(run.started_at)}</span>
@@ -4614,7 +4614,7 @@ function WorkflowEditorPage() {
                     <div className="p-3 bg-bg-base/40 border-t border-border">
                       {/* Summary stats */}
                       <div className="flex gap-4 text-xs mb-3">
-                        <span className="text-emerald-400">✅ {detail.result?.executed_nodes || 0} executed</span>
+                        <span className={(detail.result?.executed_nodes || 0) > 0 ? 'text-emerald-400' : 'text-text-tertiary'}>{(detail.result?.executed_nodes || 0) > 0 ? '✅' : '○'} {detail.result?.executed_nodes || 0} executed</span>
                         <span className="text-text-tertiary">⏭️ {detail.result?.skipped_nodes || 0} skipped</span>
                         <span className="text-amber-400">🚧 {detail.result?.stub_nodes || 0} stub</span>
                         <span className="text-text-secondary">📊 {detail.result?.total_nodes || 0} total</span>
@@ -4670,8 +4670,8 @@ function WorkflowEditorPage() {
       {runMutation.isSuccess && runMutation.data && (
         <div className="fixed bottom-20 right-4 bg-bg-elevated border border-border rounded-lg p-4 shadow-xl max-w-sm z-50">
           <div className="flex items-center gap-2 mb-2">
-            <span className={runMutation.data.status === 'completed' ? 'text-emerald-400' : 'text-red-400'}>
-              {runMutation.data.status === 'completed' ? '✅' : '❌'}
+            <span className={runMutation.data.status === 'completed' ? ((runMutation.data.result?.executed_nodes || 0) === 0 && (runMutation.data.result?.stub_nodes || 0) > 0 ? 'text-amber-400' : 'text-emerald-400') : (runMutation.data.status === 'running' || runMutation.data.status === 'pending') ? 'text-amber-400' : 'text-red-400'}>
+              {runMutation.data.status === 'completed' ? ((runMutation.data.result?.executed_nodes || 0) === 0 && (runMutation.data.result?.stub_nodes || 0) > 0 ? '🚧' : '✅') : (runMutation.data.status === 'running' || runMutation.data.status === 'pending') ? '⏳' : '❌'}
             </span>
             <span className="text-sm font-medium text-text-primary">
               Run {runMutation.data.status}
