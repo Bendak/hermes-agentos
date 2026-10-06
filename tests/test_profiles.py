@@ -563,3 +563,45 @@ def test_reserved_default_id_rejected(client, admin_headers):
                     json={"name": "default", "model": {"default": "m"}})
     assert r.status_code == 400, r.text
     assert "reserved" in r.text
+
+
+# ── WI-4b lote 3: M12-1/1b/2/3 residuals ──────────────────────────────────
+
+def test_list_profiles_uses_shared_filters(client, admin_headers):
+    """M12-1: the list route must hide '_' dirs and a real 'default' dir
+    (which would otherwise shadow the virtual root profile)."""
+    import yaml
+    for pid in ("_archive", "default"):
+        os.makedirs(_pdir(pid), exist_ok=True)
+        with open(os.path.join(_pdir(pid), "config.yaml"), "w", encoding="utf-8") as f:
+            f.write(yaml.safe_dump({"model": {"default": "sneaky"}}))
+    try:
+        r = client.get("/api/profiles", headers=admin_headers)
+        assert r.status_code == 200, r.text
+        ids = [row["id"] for row in r.json()]
+        assert "_archive" not in ids, ids
+        assert "default" not in ids, ids  # real dir must not shadow the virtual id
+    finally:
+        import shutil
+        for pid in ("_archive", "default"):
+            shutil.rmtree(_pdir(pid), ignore_errors=True)
+
+
+def test_reserved_default_id_case_insensitive(client, admin_headers):
+    """M12-1b: 'Default'/'DEFAULT' are the same reserved id."""
+    for name in ("Default", "DEFAULT"):
+        r = client.post("/api/profiles", headers=admin_headers,
+                        json={"name": name, "model": {"default": "m"}})
+        assert r.status_code == 400, (name, r.text)
+        assert "reserved" in r.text
+
+
+def test_upper_bound_rejected(client, admin_headers):
+    """M12-3: absurd magnitudes (typos) must not reach the gateway config."""
+    _mkprofile("zz-upper")
+    try:
+        r = client.put("/api/profiles/zz-upper", headers=admin_headers,
+                       json={"agent": {"max_turns": 10**20}})
+        assert r.status_code == 400, r.text
+    finally:
+        client.delete("/api/profiles/zz-upper?purge=true", headers=admin_headers)
