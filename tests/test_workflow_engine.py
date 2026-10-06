@@ -415,3 +415,52 @@ def test_trigger_nodes_counted_separately(tmp_path, monkeypatch):
     # run-level honesty: biz = executed - trigger = 0 -> icon 🚧 (front logic),
     # counts must make that computable
     assert res["executed_nodes"] - res["trigger_nodes"] == 0
+
+
+# ── WI-5 batch 6 (final: M18 + UI) ──────────────────────────────────────────
+
+def test_garbage_timeout_env_does_not_break_import(monkeypatch):
+    """M18-5 (MED): HERMES_AGENT_TIMEOUT garbage must not make the module
+    unimportable — a typo'd .env used to take the whole API down at import."""
+    import importlib
+    import backend.workflow_engine as eng
+    for bad in ("abc", "", "1.5"):
+        monkeypatch.setenv("HERMES_AGENT_TIMEOUT", bad)
+        importlib.reload(eng)  # would raise before the fix
+        assert eng._STALE_RUN_SECONDS == max(2 * 3600, 4 * 1800), (bad, eng._STALE_RUN_SECONDS)
+    monkeypatch.delenv("HERMES_AGENT_TIMEOUT", raising=False)
+    importlib.reload(eng)
+
+
+def test_legacy_run_results_backfill_trigger_nodes(tmp_path, monkeypatch):
+    """M18-1: old result rows without trigger_nodes are backfilled on read."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import json as _json
+    import sqlite3 as _sq
+    legacy_result = {
+        "node_results": [
+            {"node_id": "t", "node_type": "trigger", "status": "completed"},
+            {"node_id": "c", "node_type": "condition", "status": "skipped"},
+        ],
+        "executed_nodes": 1, "skipped_nodes": 1, "total_nodes": 2,
+    }
+    conn = _sq.connect(str(tmp_path / "agentos.db"))
+    conn.execute(
+        "INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at)"
+        " VALUES ('wf_l', 'l', '', '[]', '[]', 't', 't')"
+    )
+    conn.execute(
+        "INSERT INTO workflow_runs (id, workflow_id, status, started_at, result)"
+        " VALUES ('run_legacy', 'wf_l', 'completed', 't', ?)",
+        (_json.dumps(legacy_result),),
+    )
+    conn.commit()
+    conn.close()
+
+    from backend.workflow_engine import get_workflow_runs, get_run_detail
+    runs = asyncio.run(get_workflow_runs("wf_l"))
+    assert runs[0]["result"]["trigger_nodes"] == 1, runs[0]["result"]
+    d = asyncio.run(get_run_detail("run_legacy"))
+    assert d["result"]["trigger_nodes"] == 1
+    # biz arithmetic the front does: 1 - 1 = 0 -> not green for trigger+skip
+    assert d["result"]["executed_nodes"] - d["result"]["trigger_nodes"] == 0

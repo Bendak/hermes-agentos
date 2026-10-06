@@ -17,10 +17,23 @@ class WorkflowNotFound(ValueError):
     comparing error strings (a rename silently flipped 404s into 400s)."""
 
 
+def _timeout_int(raw: str | None, default: int = 1800) -> int:
+    """M18-5: a garbage HERMES_AGENT_TIMEOUT must NOT make this module
+    unimportable — a typo'd .env used to take the whole API down at import."""
+    try:
+        return int(raw) if raw else default
+    except ValueError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "HERMES_AGENT_TIMEOUT=%r is not an integer — using %s", raw, default
+        )
+        return default
+
+
 # M8-08: a 'running' row older than this is a ghost. M17-4: derive the gate
 # from the REAL run timeout instead of a hardcoded constant justified by a
 # comment — 4x HERMES_AGENT_TIMEOUT (default 1800s), floor 2h.
-_STALE_RUN_SECONDS = max(2 * 3600, 4 * int(os.environ.get("HERMES_AGENT_TIMEOUT", "1800")))
+_STALE_RUN_SECONDS = max(2 * 3600, 4 * _timeout_int(os.environ.get("HERMES_AGENT_TIMEOUT")))
 
 
 def _sweep_stale_runs(conn) -> None:
@@ -309,6 +322,18 @@ async def run_workflow(workflow_id: str) -> dict:
         }
 
 
+def _backfill_trigger_nodes(result) -> None:
+    """M18-1: legacy run rows predate the trigger_nodes counter — without it
+    the front's ||0 fallback repaints old trigger+skip runs as green ✅."""
+    if isinstance(result, dict) and "trigger_nodes" not in result:
+        nrs = result.get("node_results")
+        if isinstance(nrs, list):
+            result["trigger_nodes"] = sum(
+                1 for nr in nrs
+                if nr.get("status") == "completed" and nr.get("node_type") == "trigger"
+            )
+
+
 async def get_workflow_runs(workflow_id: str) -> list[dict]:
     """Get run history for a workflow."""
     conn = _get_db()
@@ -330,6 +355,7 @@ async def get_workflow_runs(workflow_id: str) -> list[dict]:
         d = dict(row)
         if d.get("result"):
             d["result"] = json.loads(d["result"])
+            _backfill_trigger_nodes(d["result"])
         results.append(d)
 
     return results
@@ -350,4 +376,5 @@ async def get_run_detail(run_id: str) -> dict | None:
     d = dict(row)
     if d.get("result"):
         d["result"] = json.loads(d["result"])
+        _backfill_trigger_nodes(d["result"])
     return d

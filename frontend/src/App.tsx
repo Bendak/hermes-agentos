@@ -2383,7 +2383,7 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
           <div className="flex items-center gap-0.5 shrink-0">
             <button
               onClick={handleEditClick}
-              className="p-1 rounded text-text-tertiary hover:text-accent hover:bg-surface/60 transition opacity-0 group-hover:opacity-100"
+              className="p-1 rounded text-text-tertiary hover:text-accent hover:bg-surface/60 transition opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
               aria-label="Edit task"
               title="Edit task"
             >
@@ -2392,7 +2392,7 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
             {!isArchived && (
               <button
                 onClick={handleArchiveClick}
-                className="p-1 rounded text-text-tertiary hover:text-warning hover:bg-surface/60 transition opacity-0 group-hover:opacity-100"
+                className="p-1 rounded text-text-tertiary hover:text-warning hover:bg-surface/60 transition opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                 aria-label="Archive task"
                 title="Archive task"
               >
@@ -2402,7 +2402,7 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
             {isArchived && (
               <button
                 onClick={handleArchiveClick}
-                className="p-1 rounded text-text-tertiary hover:text-success hover:bg-surface/60 transition opacity-0 group-hover:opacity-100"
+                className="p-1 rounded text-text-tertiary hover:text-success hover:bg-surface/60 transition opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
                 aria-label="Unarchive task"
                 title="Unarchive task"
               >
@@ -3294,13 +3294,13 @@ function TaskDetailPage() {
                               a.click()
                               URL.revokeObjectURL(url)
                             }}
-                            className="opacity-0 group-hover:opacity-100 text-xs text-accent hover:text-accent-hover transition"
+                            className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-xs text-accent hover:text-accent-hover transition"
                           >
                             ⬇ Download
                           </button>
                           <button
                             onClick={() => setPreviewFile(previewFile === file.name ? null : file.name)}
-                            className="opacity-0 group-hover:opacity-100 text-xs text-accent hover:text-accent-hover transition"
+                            className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-xs text-accent hover:text-accent-hover transition"
                           >
                             {previewFile === file.name ? '✕ Close' : '👁 Preview'}
                           </button>
@@ -3484,7 +3484,7 @@ function ConfigNode({
                       const newVal = value.filter((_: any, i: number) => i !== idx)
                       onChange(path || name, newVal)
                     }}
-                    className="opacity-0 group-hover:opacity-100 text-xs text-error hover:text-error transition-opacity px-1 shrink-0"
+                    className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-xs text-error hover:text-error transition-opacity px-1 shrink-0"
                     title="Remove item"
                   >
                     ✕
@@ -3989,7 +3989,7 @@ function WorkflowListPage() {
                   <h3 className="text-h4 font-semibold text-text-primary truncate flex-1 mr-2">{wf.name}</h3>
                   <button
                     onClick={(e) => isAdmin() && handleDelete(e, wf.id, wf.name)}
-                    className="opacity-0 group-hover:opacity-100 p-1.5 rounded-md hover:bg-error-subtle text-text-tertiary hover:text-error transition-all"
+                    className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 p-1.5 rounded-md hover:bg-error-subtle text-text-tertiary hover:text-error transition-all"
                     title="Delete workflow"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
@@ -4036,6 +4036,8 @@ function WorkflowEditorPage() {
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
   const [runResults, setRunResults] = useState<Record<string, string>>({})
+  const [showPalette, setShowPalette] = useState(false)  // M8-10: drawer esquerda < lg
+  const [showProps, setShowProps] = useState(false)      // M8-10: drawer direita < lg
   const loadedRef = useRef<string | null>(null)  // M8-03: which id is loaded, not just 'once'
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set())
   const [runDetails, setRunDetails] = useState<Record<string, any>>({})
@@ -4302,6 +4304,20 @@ function WorkflowEditorPage() {
             <span className="text-caption text-error">Save failed</span>
           )}
           <button
+            onClick={() => setShowPalette(v => !v)}
+            className="lg:hidden px-3 py-1.5 rounded-lg bg-surface text-text-secondary text-body-sm border border-border"
+            aria-label="Toggle node palette"
+          >
+            🧩
+          </button>
+          <button
+            onClick={() => setShowProps(v => !v)}
+            className="lg:hidden px-3 py-1.5 rounded-lg bg-surface text-text-secondary text-body-sm border border-border"
+            aria-label="Toggle properties panel"
+          >
+            ⚙️
+          </button>
+          <button
             onClick={() => saveMutation.mutate()}
             disabled={saveStatus === 'saving'}
             className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-accent text-text-inverse font-medium text-body-sm hover:bg-accent-hover transition-colors disabled:opacity-50"
@@ -4319,9 +4335,9 @@ function WorkflowEditorPage() {
       </div>
 
       {/* Main Editor Area */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Left Sidebar — Node Palette */}
-        <div className="w-56 bg-bg-elevated/60 border-r border-border p-4 flex flex-col gap-3 shrink-0">
+      <div className="flex flex-1 overflow-hidden relative">
+        {/* Left Sidebar — Node Palette (M8-10: drawer below lg, canvas full-width) */}
+        <div className={`w-56 bg-bg-elevated/60 border-r border-border p-4 flex-col gap-3 shrink-0 max-lg:absolute max-lg:z-20 max-lg:h-full max-lg:shadow-xl ${showPalette ? 'flex' : 'hidden lg:flex'}`}>
           <h3 className="text-caption font-semibold text-text-tertiary uppercase tracking-wider mb-1">Add Nodes</h3>
           {(['trigger', 'action', 'condition'] as const).map((nodeType) => {
             const colors = nodeColors[nodeType]
@@ -4378,7 +4394,7 @@ function WorkflowEditorPage() {
 
         {/* Right Panel — Node Properties */}
         {selectedNode && nodeInfo && (
-          <div className="w-64 bg-bg-elevated/60 border-l border-border p-4 shrink-0 overflow-y-auto">
+          <div className={`w-64 bg-bg-elevated/60 border-l border-border p-4 shrink-0 overflow-y-auto max-lg:absolute max-lg:right-0 max-lg:z-20 max-lg:h-full max-lg:shadow-xl ${showProps ? 'block' : 'hidden lg:block'}`}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-h6 font-semibold text-text-primary">Node Properties</h3>
               <button
