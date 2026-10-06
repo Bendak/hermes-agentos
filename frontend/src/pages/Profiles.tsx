@@ -403,8 +403,9 @@ function DescriptionTab({ form, setForm }: { form: EditForm; setForm: (f: EditFo
   )
 }
 
-function MemoryTab({ profileId, onDirtyChange, registerSave }: {
+function MemoryTab({ profileId, visible, onDirtyChange, registerSave }: {
   profileId: string
+  visible?: boolean
   onDirtyChange?: (dirty: boolean) => void
   registerSave?: (fn: () => Promise<boolean>) => void
 }) {
@@ -422,7 +423,7 @@ function MemoryTab({ profileId, onDirtyChange, registerSave }: {
     setLoading(true)
     setLoadError(null)
     apiFetch(`/api/profiles/${profileId}/soul`)
-      .then((d) => { setContent(d.content || ''); setInitial(d.content || '') })
+      .then((d) => { setContent(d.content || ''); setInitial(d.content || ''); loadedOnce.current = true })
       .catch((e: any) => {
         // keep content/initial untouched — only mark the editor unusable
         setLoadError(String(e?.message || e))
@@ -434,6 +435,16 @@ function MemoryTab({ profileId, onDirtyChange, registerSave }: {
 
   const dirty = content !== initial
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty])
+
+  // M-2b: keep-mounted must not shadow external SOUL.md edits — refetch when
+  // the tab becomes visible again, but ONLY over a clean buffer (never discard
+  // what the user typed).
+  const dirtyRef = useRef(dirty)
+  dirtyRef.current = dirty
+  const loadedOnce = useRef(false)
+  useEffect(() => {
+    if (visible && loadedOnce.current && !dirtyRef.current && !loadError) load()
+  }, [visible])
 
   // returns success — the dialog's main Save aborts when this fails (finding H2)
   const handleSave = async (): Promise<boolean> => {
@@ -547,6 +558,9 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
   const [touched, setTouched] = useState(false)
   const [soulDirty, setSoulDirty] = useState(false)
   const soulSaveRef = useRef<(() => Promise<boolean>) | null>(null)
+  // M-2a: disable the main Save while the soul save is in flight — a second
+  // click would double-fire the soul PUT and onSave
+  const [busy, setBusy] = useState(false)
 
   const errors = useMemo(() => validate(form, false), [form])
   const changedCount = useMemo(() => countChanges(original, form), [original, form])
@@ -560,15 +574,21 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
   }
 
   const handleSave = async () => {
+    if (busy) return
     setTouched(true)
     if (hasErrors) return
-    if (soulDirty && soulSaveRef.current) {
-      const ok = await soulSaveRef.current()
-      // a failed soul save must keep the dialog open: onSave() closes it and
-      // the unmount would bypass handleClose's unsaved-changes confirm (H2)
-      if (!ok) return
+    setBusy(true)
+    try {
+      if (soulDirty && soulSaveRef.current) {
+        const ok = await soulSaveRef.current()
+        // a failed soul save must keep the dialog open: onSave() closes it and
+        // the unmount would bypass handleClose's unsaved-changes confirm (H2)
+        if (!ok) return
+      }
+      onSave(buildPayload(form))
+    } finally {
+      setBusy(false)
     }
-    onSave(buildPayload(form))
   }
 
   return (
@@ -599,6 +619,7 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
           <div style={{ display: tab === 'memory' ? 'block' : 'none' }}>
             <MemoryTab
               profileId={profile.id}
+              visible={tab === 'memory'}
               onDirtyChange={setSoulDirty}
               registerSave={(fn) => { soulSaveRef.current = fn }}
             />
@@ -615,7 +636,7 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
             <button onClick={handleClose} className="px-4 py-2 text-sm rounded-md border border-border text-text-secondary hover:bg-surface/60 transition-colors">Cancel</button>
             <button
               onClick={handleSave}
-              disabled={saving || (touched && hasErrors)}
+              disabled={saving || busy || (touched && hasErrors)}
               className="bg-accent text-text-inverse px-4 py-2 text-sm rounded-md font-medium hover:opacity-90 transition-opacity disabled:opacity-50"
             >
               {saving ? 'Saving…' : 'Save Changes'}
