@@ -86,7 +86,9 @@ async def list_tasks(
     if not include_archived:
         query += " AND t.status != 'archived'"
 
-    query += " ORDER BY t.priority DESC, t.created_at DESC LIMIT ?"
+    # M10/backlog (pedido do Mauricio): cards mais novos primeiro — a ordem
+    # por prioridade escondia o recém-criado atrás de cards antigos de loop
+    query += " ORDER BY t.created_at DESC LIMIT ?"
     params.append(limit)
 
     async with aiosqlite.connect(DB_PATH) as db:
