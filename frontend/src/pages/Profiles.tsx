@@ -1,5 +1,5 @@
 import { isAdmin } from "../lib/admin"
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { NavBar } from '../App'
 
@@ -403,8 +403,13 @@ function DescriptionTab({ form, setForm }: { form: EditForm; setForm: (f: EditFo
   )
 }
 
-function MemoryTab({ profileId }: { profileId: string }) {
+function MemoryTab({ profileId, onDirtyChange, registerSave }: {
+  profileId: string
+  onDirtyChange?: (dirty: boolean) => void
+  registerSave?: (fn: () => Promise<void>) => void
+}) {
   const [content, setContent] = useState<string>('')
+  const [initial, setInitial] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -412,10 +417,13 @@ function MemoryTab({ profileId }: { profileId: string }) {
   useEffect(() => {
     setLoading(true)
     apiFetch(`/api/profiles/${profileId}/soul`)
-      .then((d) => setContent(d.content || ''))
-      .catch(() => setContent(''))
+      .then((d) => { setContent(d.content || ''); setInitial(d.content || '') })
+      .catch(() => { setContent(''); setInitial('') })
       .finally(() => setLoading(false))
   }, [profileId])
+
+  const dirty = content !== initial
+  useEffect(() => { onDirtyChange?.(dirty) }, [dirty])
 
   const handleSave = async () => {
     setSaving(true)
@@ -424,14 +432,19 @@ function MemoryTab({ profileId }: { profileId: string }) {
         method: 'PUT',
         body: JSON.stringify({ content }),
       })
+      setInitial(content) // clears the dirty flag — dialog close won't warn
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
-    } catch (e) {
-      // ignore
+    } catch (e: any) {
+      // never swallow a failed save — silent loss of typed content was the bug
+      alert(`Failed to save SOUL.md: ${e?.message || e}`)
     } finally {
       setSaving(false)
     }
   }
+
+  // let the dialog's main Save button save the soul too (keeps its closure fresh)
+  useEffect(() => { registerSave?.(handleSave) })
 
   if (loading) {
     return <div className="text-text-tertiary text-sm py-8 text-center">Loading SOUL.md…</div>
@@ -442,6 +455,7 @@ function MemoryTab({ profileId }: { profileId: string }) {
       <div className="flex items-center justify-between mb-3">
         <p className="text-xs text-text-tertiary">
           Agent personality / system prompt stored in <span className="font-mono text-text-secondary">SOUL.md</span>
+          {dirty && <span className="ml-2 text-amber-500">● unsaved changes</span>}
         </p>
         <button
           onClick={handleSave}
@@ -508,14 +522,24 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
   const [form, setForm] = useState(() => formFromDetail(profile))
   const [tab, setTab] = useState<TabKey>('model')
   const [touched, setTouched] = useState(false)
+  const [soulDirty, setSoulDirty] = useState(false)
+  const soulSaveRef = useRef<(() => Promise<void>) | null>(null)
 
   const errors = useMemo(() => validate(form, false), [form])
   const changedCount = useMemo(() => countChanges(original, form), [original, form])
   const hasErrors = Object.keys(errors).length > 0
 
-  const handleSave = () => {
+  const handleClose = () => {
+    // SOUL edits lived in a separate save button and were silently discarded
+    // on close — never drop typed content without asking.
+    if (soulDirty && !window.confirm('SOUL.md has unsaved changes. Discard them?')) return
+    onClose()
+  }
+
+  const handleSave = async () => {
     setTouched(true)
     if (hasErrors) return
+    if (soulDirty && soulSaveRef.current) await soulSaveRef.current()
     onSave(buildPayload(form))
   }
 
@@ -526,7 +550,7 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
         <div className="px-6 pt-5 pb-0">
           <div className="flex items-center justify-between mb-1">
             <h3 className="text-h5 font-bold text-text-primary">Edit Profile</h3>
-            <button onClick={onClose} className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface/60 transition-colors">
+            <button onClick={handleClose} className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface/60 transition-colors">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
@@ -542,7 +566,13 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
           {tab === 'agent' && <AgentTab form={form} setForm={setForm} errors={touched ? errors : {}} />}
           {tab === 'toolsets' && <ToolsetsTab form={form} setForm={setForm} />}
           {tab === 'description' && <DescriptionTab form={form} setForm={setForm} />}
-          {tab === 'memory' && <MemoryTab profileId={profile.id} />}
+          {tab === 'memory' && (
+            <MemoryTab
+              profileId={profile.id}
+              onDirtyChange={setSoulDirty}
+              registerSave={(fn) => { soulSaveRef.current = fn }}
+            />
+          )}
           {tab === 'preview' && <PreviewTab form={form} />}
         </div>
 
@@ -552,7 +582,7 @@ function ProfileEditDialog({ profile, onSave, onClose, saving }: {
             {changedCount > 0 ? `${changedCount} field${changedCount > 1 ? 's' : ''} changed` : 'No changes'}
           </span>
           <div className="flex gap-3">
-            <button onClick={onClose} className="px-4 py-2 text-sm rounded-md border border-border text-text-secondary hover:bg-surface/60 transition-colors">Cancel</button>
+            <button onClick={handleClose} className="px-4 py-2 text-sm rounded-md border border-border text-text-secondary hover:bg-surface/60 transition-colors">Cancel</button>
             <button
               onClick={handleSave}
               disabled={saving || (touched && hasErrors)}
