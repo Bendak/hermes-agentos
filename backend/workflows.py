@@ -47,9 +47,17 @@ async def list_workflows() -> list[dict]:
         out = []
         for row in rows:
             d = dict(row)
-            # M8-15: counts travel with the row so the list never JSON-parses blobs
-            d["node_count"] = len(parse_graph_field(d.get("nodes"), "nodes"))
-            d["edge_count"] = len(parse_graph_field(d.get("edges"), "edges"))
+            # M8-15: counts travel with the row so the list never JSON-parses
+            # blobs. M16-1: ONE corrupt row must not take the whole listing
+            # down — counts go None and the row is flagged instead.
+            try:
+                d["node_count"] = len(parse_graph_field(d.get("nodes"), "nodes"))
+                d["edge_count"] = len(parse_graph_field(d.get("edges"), "edges"))
+                d["graph_corrupt"] = False
+            except ValueError:
+                d["node_count"] = None
+                d["edge_count"] = None
+                d["graph_corrupt"] = True
             out.append(d)
         return out
     finally:

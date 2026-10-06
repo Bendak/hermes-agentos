@@ -616,7 +616,7 @@ async def skill_detail(slug: str, user: dict = Depends(require_auth)):
 # ── Workflows endpoints ────────────────────────────────────────────
 
 from backend.workflows import list_workflows, get_workflow, create_workflow, update_workflow, delete_workflow  # noqa: E402
-from backend.workflow_engine import run_workflow, get_workflow_runs, get_run_detail  # noqa: E402
+from backend.workflow_engine import run_workflow, get_workflow_runs, get_run_detail, WorkflowNotFound  # noqa: E402
 
 # ── Cron endpoints ────────────────────────────────────────────────
 
@@ -671,9 +671,9 @@ async def workflow_delete(workflow_id: str, user: dict = Depends(require_admin))
 async def workflow_run(workflow_id: str, user: dict = Depends(require_admin)):
     try:
         result = await run_workflow(workflow_id)
+    except WorkflowNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except ValueError as e:
-        if str(e) == "Workflow not found":
-            raise HTTPException(status_code=404, detail=str(e))
         # M15-1: a corrupt legacy row is a bad request, not a missing workflow
         raise HTTPException(status_code=400, detail=str(e))
     return result

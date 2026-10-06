@@ -1,6 +1,7 @@
 import os
 import json
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -9,6 +10,31 @@ from backend.config import settings
 
 
 DB_PATH = os.path.join(settings.AGENTOS_DATA_DIR, "agentos.db")
+
+
+class WorkflowNotFound(ValueError):
+    """M16-3: not-found must be distinguishable from bad-graph by TYPE, not by
+    comparing error strings (a rename silently flipped 404s into 400s)."""
+
+
+# M8-08: a 'running' row older than this is a ghost (runs are bounded at 30min
+# by HERMES_AGENT_TIMEOUT) — no live run can legitimately span 2 hours.
+_STALE_RUN_SECONDS = 2 * 3600
+
+
+def _sweep_stale_runs(conn) -> None:
+    """M8-08: runs stuck 'running'/'pending' across a restart are dead — mark
+    them 'failed' (interrupted) instead of rendering a phantom forever."""
+    cutoff = datetime.fromtimestamp(
+        time.time() - _STALE_RUN_SECONDS, tz=timezone.utc
+    ).isoformat()
+    conn.execute(
+        "UPDATE workflow_runs SET status='failed', finished_at=?, "
+        "error='interrupted (stale running row)' "
+        "WHERE status IN ('running', 'pending') AND started_at < ?",
+        (datetime.now(timezone.utc).isoformat(), cutoff),
+    )
+    conn.commit()
 
 
 def _get_db():
@@ -173,7 +199,7 @@ async def run_workflow(workflow_id: str) -> dict:
     row = conn.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,)).fetchone()
     if not row:
         conn.close()
-        raise ValueError("Workflow not found")
+        raise WorkflowNotFound("Workflow not found")
 
     # M15-1: legacy NULL graphs normalize to [] (row is runnable again);
     # corrupt JSON raises ValueError naming the field, before any run row.
@@ -279,11 +305,14 @@ async def run_workflow(workflow_id: str) -> dict:
 async def get_workflow_runs(workflow_id: str) -> list[dict]:
     """Get run history for a workflow."""
     conn = _get_db()
-    rows = conn.execute(
-        "SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT 50",
-        (workflow_id,)
-    ).fetchall()
-    conn.close()
+    try:
+        _sweep_stale_runs(conn)  # M8-08: ghost runs die on sight
+        rows = conn.execute(
+            "SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT 50",
+            (workflow_id,)
+        ).fetchall()
+    finally:
+        conn.close()
 
     results = []
     for row in rows:
@@ -298,8 +327,11 @@ async def get_workflow_runs(workflow_id: str) -> list[dict]:
 async def get_run_detail(run_id: str) -> dict | None:
     """Get detailed run result."""
     conn = _get_db()
-    row = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
-    conn.close()
+    try:
+        _sweep_stale_runs(conn)  # M8-08: ghost runs die on sight
+        row = conn.execute("SELECT * FROM workflow_runs WHERE id = ?", (run_id,)).fetchone()
+    finally:
+        conn.close()
 
     if not row:
         return None
