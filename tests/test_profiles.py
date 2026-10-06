@@ -750,3 +750,15 @@ def test_models_endpoint_consistent_with_front_door(client, admin_headers):
         (main_cfg["model"], main_cfg["provider"])
     } if main_cfg["model"] else front_pairs
     assert profile_pairs - {("zz-model", "zz-prov")} <= allowed, (profile_pairs, allowed)
+
+
+# ── tasks timestamps (card sort fix) ────────────────────────────────────────
+
+def test_ts_helpers_normalize_milliseconds():
+    """Legacy rows written in ms must render and sort as their true date."""
+    from backend.tasks import _sec, _ts_to_iso, _format_date
+    assert _sec(1791326990) == 1791326990          # seconds untouched
+    assert _sec(1783466246000) == 1783466246       # ms normalized
+    assert _sec(None) is None
+    assert _ts_to_iso(1783466246000) == _ts_to_iso(1783466246)  # display equal
+    assert _format_date(1783466246000) == _format_date(1783466246)

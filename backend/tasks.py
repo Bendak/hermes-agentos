@@ -8,8 +8,22 @@ from backend.config import settings
 DB_PATH = os.path.join(settings.AGENTOS_DATA_DIR, "kanban.db")
 
 
+def _sec(ts: int | float | None) -> int | float | None:
+    """Normalize timestamps to seconds. Some legacy rows were written in
+    milliseconds (13-digit epoch) — they sort above everything and render as
+    None/58000+. Anything past year ~5138 in seconds is ms."""
+    if ts is None:
+        return None
+    try:
+        v = float(ts)
+    except (ValueError, TypeError):
+        return ts
+    return v / 1000 if v > 10**11 else v
+
+
 def _ts_to_iso(ts: int | float | None) -> str | None:
     """Convert Unix timestamp (seconds) to ISO 8601 UTC string."""
+    ts = _sec(ts)
     if ts is None:
         return None
     try:
@@ -21,6 +35,7 @@ def _ts_to_iso(ts: int | float | None) -> str | None:
 
 def _format_date(ts: int | float | None) -> str:
     """Return dd/mm from a Unix timestamp."""
+    ts = _sec(ts)
     if ts is None:
         return "-"
     try:
