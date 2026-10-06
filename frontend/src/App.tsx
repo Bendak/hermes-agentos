@@ -3837,12 +3837,14 @@ function WorkflowNode({ data }: NodeProps) {
   const runStatusStyles: Record<string, string> = {
     completed: 'ring-2 ring-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.3)]',
     skipped: 'opacity-50',
+    stub: 'ring-2 ring-amber-500/50',
     failed: 'ring-2 ring-red-500/60 shadow-[0_0_12px_rgba(239,68,68,0.3)]',
   }
 
   const runStatusIcons: Record<string, string> = {
     completed: '✅',
     skipped: '⏭️',
+    stub: '🚧',
     failed: '❌',
   }
 
@@ -4621,8 +4623,8 @@ function WorkflowEditorPage() {
                           <p className="text-xs font-medium text-text-secondary">Node Execution:</p>
                           {detail.result.node_results.map((node: any) => (
                             <div key={node.node_id} className="flex items-start gap-2 pl-2">
-                              <span className={node.status === 'completed' ? 'text-emerald-400' : node.status === 'skipped' ? 'text-text-tertiary' : 'text-red-400'}>
-                                {node.status === 'completed' ? '✅' : node.status === 'skipped' ? '⏭️' : '❌'}
+                              <span className={node.status === 'completed' ? 'text-emerald-400' : node.status === 'skipped' ? 'text-text-tertiary' : node.status === 'stub' ? 'text-amber-400' : 'text-red-400'}>
+                                {node.status === 'completed' ? '✅' : node.status === 'skipped' ? '⏭️' : node.status === 'stub' ? '🚧' : '❌'}
                               </span>
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
