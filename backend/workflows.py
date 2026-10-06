@@ -50,12 +50,17 @@ async def list_workflows() -> list[dict]:
             # M8-15: counts travel with the row so the list never JSON-parses
             # blobs. M16-1: ONE corrupt row must not take the whole listing
             # down — counts go None and the row is flagged instead.
+            # M17-1: one try per field — corrupt EDGES must not mask a valid
+            # node count (was: one block, healthy side discarded too)
+            d["graph_corrupt"] = False
             try:
                 d["node_count"] = len(parse_graph_field(d.get("nodes"), "nodes"))
-                d["edge_count"] = len(parse_graph_field(d.get("edges"), "edges"))
-                d["graph_corrupt"] = False
             except ValueError:
                 d["node_count"] = None
+                d["graph_corrupt"] = True
+            try:
+                d["edge_count"] = len(parse_graph_field(d.get("edges"), "edges"))
+            except ValueError:
                 d["edge_count"] = None
                 d["graph_corrupt"] = True
             out.append(d)
@@ -68,7 +73,22 @@ async def get_workflow(workflow_id: str) -> dict | None:
     conn = _get_db()
     try:
         row = conn.execute("SELECT * FROM workflows WHERE id = ?", (workflow_id,)).fetchone()
-        return dict(row) if row else None
+        if not row:
+            return None
+        d = dict(row)
+        # M17-2: the detail endpoint must not be the one hiding corruption
+        d["graph_corrupt"] = False
+        try:
+            d["node_count"] = len(parse_graph_field(d.get("nodes"), "nodes"))
+        except ValueError:
+            d["node_count"] = None
+            d["graph_corrupt"] = True
+        try:
+            d["edge_count"] = len(parse_graph_field(d.get("edges"), "edges"))
+        except ValueError:
+            d["edge_count"] = None
+            d["graph_corrupt"] = True
+        return d
     finally:
         conn.close()
 

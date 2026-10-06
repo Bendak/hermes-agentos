@@ -17,9 +17,10 @@ class WorkflowNotFound(ValueError):
     comparing error strings (a rename silently flipped 404s into 400s)."""
 
 
-# M8-08: a 'running' row older than this is a ghost (runs are bounded at 30min
-# by HERMES_AGENT_TIMEOUT) — no live run can legitimately span 2 hours.
-_STALE_RUN_SECONDS = 2 * 3600
+# M8-08: a 'running' row older than this is a ghost. M17-4: derive the gate
+# from the REAL run timeout instead of a hardcoded constant justified by a
+# comment — 4x HERMES_AGENT_TIMEOUT (default 1800s), floor 2h.
+_STALE_RUN_SECONDS = max(2 * 3600, 4 * int(os.environ.get("HERMES_AGENT_TIMEOUT", "1800")))
 
 
 def _sweep_stale_runs(conn) -> None:
@@ -263,6 +264,12 @@ async def run_workflow(workflow_id: str) -> dict:
             "executed_nodes": sum(1 for r in node_results if r["status"] == "completed"),
             "skipped_nodes": sum(1 for r in node_results if r["status"] == "skipped"),
             "stub_nodes": sum(1 for r in node_results if r["status"] == "stub"),
+            # M17-5: completed triggers are not 'work done' — the run-level
+            # icon subtracts them (a trigger+stubs run must not read green)
+            "trigger_nodes": sum(
+                1 for r in node_results
+                if r["status"] == "completed" and r.get("node_type") == "trigger"
+            ),
         })
 
         conn = _get_db()
@@ -306,6 +313,10 @@ async def get_workflow_runs(workflow_id: str) -> list[dict]:
     """Get run history for a workflow."""
     conn = _get_db()
     try:
+        # M17-3: a collection of a thing that does not exist is a 404, not []
+        wf = conn.execute("SELECT 1 FROM workflows WHERE id = ?", (workflow_id,)).fetchone()
+        if not wf:
+            raise WorkflowNotFound("Workflow not found")
         _sweep_stale_runs(conn)  # M8-08: ghost runs die on sight
         rows = conn.execute(
             "SELECT * FROM workflow_runs WHERE workflow_id = ? ORDER BY started_at DESC LIMIT 50",

@@ -323,6 +323,11 @@ def test_stale_running_runs_marked_interrupted(client, admin_headers, tmp_path, 
     _sandbox_db(tmp_path, monkeypatch)
     import sqlite3 as _sq
     conn = _sq.connect(str(tmp_path / "agentos.db"))
+    # M17-3: runs-list requires the parent workflow to exist
+    conn.execute(
+        "INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at)"
+        " VALUES ('wf_x', 'x', '', '[]', '[]', 't', 't')"
+    )
     conn.execute(
         "INSERT INTO workflow_runs (id, workflow_id, status, started_at)"
         " VALUES ('run_ghost', 'wf_x', 'running', '2026-01-01T00:00:00+00:00')"
@@ -341,3 +346,72 @@ def test_stale_running_runs_marked_interrupted(client, admin_headers, tmp_path, 
     assert by_id["run_ghost"]["status"] == "failed", by_id["run_ghost"]
     assert "interrupted" in (by_id["run_ghost"].get("error") or ""), by_id["run_ghost"]
     assert by_id["run_live"]["status"] == "running", by_id["run_live"]  # live run untouched
+
+
+# ── WI-5 batch 5 (M17 residuals) ─────────────────────────────────────────────
+
+def test_partial_corruption_keeps_healthy_count(client, admin_headers, tmp_path, monkeypatch):
+    """M17-1: corrupt EDGES must not mask a valid node count in the list."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "agentos.db"))
+    conn.execute("INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at)"
+                 " VALUES ('wf_half', 'h', '', '[{\"id\": \"a\"}]', 'garbage{', 't', 't')")
+    conn.commit()
+    conn.close()
+    rows = client.get("/api/workflows", headers=admin_headers).json()
+    half = next(w for w in rows if w["id"] == "wf_half")
+    assert half["graph_corrupt"] is True
+    assert half["node_count"] == 1, half   # healthy side kept
+    assert half["edge_count"] is None, half
+
+
+def test_detail_flags_corruption(client, admin_headers, tmp_path, monkeypatch):
+    """M17-2: the by-id endpoint must flag corruption too, not hide it."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "agentos.db"))
+    conn.execute("INSERT INTO workflows (id, name, description, nodes, edges, created_at, updated_at)"
+                 " VALUES ('wf_bad3', 'b', '', 'garbage{', '[]', 't', 't')")
+    conn.commit()
+    conn.close()
+    d = client.get("/api/workflows/wf_bad3", headers=admin_headers).json()
+    assert d["graph_corrupt"] is True and d["node_count"] is None, d
+
+
+def test_runs_of_missing_workflow_404(client, admin_headers, tmp_path, monkeypatch):
+    """M17-3: a collection of a nonexistent thing is 404, not []."""
+    _sandbox_db(tmp_path, monkeypatch)
+    r = client.get("/api/workflows/wf_missing/runs", headers=admin_headers)
+    assert r.status_code == 404, (r.status_code, r.text)
+
+
+def test_sweep_threshold_derived_from_timeout(monkeypatch):
+    """M17-4: the stale gate derives from HERMES_AGENT_TIMEOUT (4x, floor 2h)."""
+    import importlib
+    import backend.workflow_engine as eng
+    monkeypatch.setenv("HERMES_AGENT_TIMEOUT", "9999")
+    importlib.reload(eng)
+    try:
+        assert eng._STALE_RUN_SECONDS == max(2 * 3600, 4 * 9999), eng._STALE_RUN_SECONDS
+    finally:
+        monkeypatch.delenv("HERMES_AGENT_TIMEOUT", raising=False)
+        importlib.reload(eng)
+
+
+def test_trigger_nodes_counted_separately(tmp_path, monkeypatch):
+    """M17-5: completed triggers are not 'work done' — the counter proves it."""
+    _sandbox_db(tmp_path, monkeypatch)
+    nodes = [
+        {"id": "t", "data": {"nodeType": "trigger", "config": {}}},
+        {"id": "s", "data": {"nodeType": "action",
+                             "config": {"action_type": "create_task", "title": "x"}}},
+    ]
+    wf = asyncio.run(workflows_mod.create_workflow({"name": "trg", "nodes": nodes, "edges": []}))
+    run = asyncio.run(engine_mod.run_workflow(wf["id"]))
+    res = run["result"]
+    assert res["trigger_nodes"] == 1, res
+    assert res["executed_nodes"] == 1 and res["stub_nodes"] == 1, res
+    # run-level honesty: biz = executed - trigger = 0 -> icon 🚧 (front logic),
+    # counts must make that computable
+    assert res["executed_nodes"] - res["trigger_nodes"] == 0

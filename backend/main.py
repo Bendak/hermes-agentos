@@ -681,7 +681,10 @@ async def workflow_run(workflow_id: str, user: dict = Depends(require_admin)):
 
 @app.get("/api/workflows/{workflow_id}/runs")
 async def workflow_runs_list(workflow_id: str, user: dict = Depends(require_auth)):
-    return await get_workflow_runs(workflow_id)
+    try:
+        return await get_workflow_runs(workflow_id)
+    except WorkflowNotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.get("/api/runs/{run_id}")

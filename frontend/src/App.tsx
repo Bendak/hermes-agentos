@@ -212,6 +212,21 @@ interface Workflow {
   edge_count?: number
 }
 
+// M17-5: run-level honesty — a completed TRIGGER is not "work done", so a
+// trigger+stubs run reads 🚧 and a trigger+all-skipped run reads ⏭️, never ✅.
+const runLevelIcon = (status: string, res: any): string => {
+  if (status === 'running' || status === 'pending') return '⏳'
+  if (status !== 'completed') return '❌'
+  const biz = (res?.executed_nodes || 0) - (res?.trigger_nodes || 0)
+  if (biz > 0) return '✅'
+  if ((res?.stub_nodes || 0) > 0) return '🚧'
+  if ((res?.skipped_nodes || 0) > 0) return '⏭️'
+  return '✅'
+}
+
+const runLevelClass = (icon: string): string =>
+  icon === '✅' ? 'text-emerald-400' : icon === '❌' ? 'text-red-400' : 'text-amber-400'
+
 interface WorkflowNodeData {
   label: string
   nodeType: 'trigger' | 'action' | 'condition'
@@ -4601,8 +4616,8 @@ function WorkflowEditorPage() {
                     onClick={() => toggleRun(run.id)}
                   >
                     <span className="text-text-tertiary">{isExpanded ? '▼' : '▶'}</span>
-                    <span className={run.status === 'completed' ? ((run.result?.executed_nodes || 0) === 0 && (run.result?.stub_nodes || 0) > 0 ? 'text-amber-400' : 'text-emerald-400') : (run.status === 'running' || run.status === 'pending') ? 'text-amber-400' : 'text-red-400'}>
-                      {run.status === 'completed' ? ((run.result?.executed_nodes || 0) === 0 && (run.result?.stub_nodes || 0) > 0 ? '🚧' : '✅') : (run.status === 'running' || run.status === 'pending') ? '⏳' : '❌'}
+                    <span className={runLevelClass(runLevelIcon(run.status, run.result))}>
+                      {runLevelIcon(run.status, run.result)}
                     </span>
                     <span className="text-text-secondary font-mono flex-1">{run.id}</span>
                     <span className="text-text-tertiary">{formatTime(run.started_at)}</span>
@@ -4670,8 +4685,8 @@ function WorkflowEditorPage() {
       {runMutation.isSuccess && runMutation.data && (
         <div className="fixed bottom-20 right-4 bg-bg-elevated border border-border rounded-lg p-4 shadow-xl max-w-sm z-50">
           <div className="flex items-center gap-2 mb-2">
-            <span className={runMutation.data.status === 'completed' ? ((runMutation.data.result?.executed_nodes || 0) === 0 && (runMutation.data.result?.stub_nodes || 0) > 0 ? 'text-amber-400' : 'text-emerald-400') : (runMutation.data.status === 'running' || runMutation.data.status === 'pending') ? 'text-amber-400' : 'text-red-400'}>
-              {runMutation.data.status === 'completed' ? ((runMutation.data.result?.executed_nodes || 0) === 0 && (runMutation.data.result?.stub_nodes || 0) > 0 ? '🚧' : '✅') : (runMutation.data.status === 'running' || runMutation.data.status === 'pending') ? '⏳' : '❌'}
+            <span className={runLevelClass(runLevelIcon(runMutation.data.status, runMutation.data.result))}>
+              {runLevelIcon(runMutation.data.status, runMutation.data.result)}
             </span>
             <span className="text-sm font-medium text-text-primary">
               Run {runMutation.data.status}
