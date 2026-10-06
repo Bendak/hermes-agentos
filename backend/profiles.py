@@ -74,16 +74,50 @@ def _read_config(profile_id: str) -> dict[str, Any]:
     return data
 
 
+def _profiles_owner() -> tuple[int, int] | None:
+    """Canonical owner of profile files = owner of PROFILES_DIR (the gateway uid)."""
+    try:
+        st = os.stat(PROFILES_DIR)
+        return st.st_uid, st.st_gid
+    except OSError:
+        return None
+
+
+def _fix_owner(path: str) -> None:
+    """Hand created/rewritten profile files to the profiles-dir owner.
+
+    The API may run as root (container uvicorn) while every other profile
+    consumer (Hermes gateway, dashboard describer) runs as the gateway uid.
+    Root-owned files then break those writers with EACCES — even on REWRITE,
+    where the atomic rename would silently change ownership of a gateway-owned
+    file. Never follow symlinks (a symlinked config must not re-own its target).
+    """
+    owner = _profiles_owner()
+    if owner is None:
+        return
+    try:
+        os.chown(path, owner[0], owner[1], follow_symlinks=False)
+    except (OSError, NotImplementedError):
+        pass
+
+
 def _atomic_write(path: str, data: str) -> None:
     """Write data atomically: temp file in same dir, then rename."""
     d = os.path.dirname(path)
-    os.makedirs(d, exist_ok=True)
+    os.makedirs(d, mode=0o700, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(data)
-        os.chmod(tmp, 0o644)
+        # M10-15: preserve existing perms on rewrite; 0600 by default
+        # (profile configs can carry provider api_keys).
+        try:
+            mode = os.stat(path).st_mode & 0o777
+        except OSError:
+            mode = 0o600
+        os.chmod(tmp, mode)
         os.rename(tmp, path)
+        _fix_owner(path)
     except Exception:
         try:
             os.unlink(tmp)
@@ -285,7 +319,8 @@ async def create_profile(body: ProfileCreate) -> dict[str, Any]:
     if os.path.exists(dir_path):
         raise HTTPException(status_code=409, detail=f"Profile '{pid}' already exists")
 
-    os.makedirs(dir_path, exist_ok=True)
+    os.makedirs(dir_path, mode=0o700, exist_ok=True)
+    _fix_owner(dir_path)
 
     cfg: dict[str, Any] = {
         "model": {
@@ -364,7 +399,7 @@ async def duplicate_profile(profile_id: str, body: dict | None = None) -> dict[s
     if os.path.exists(new_dir):
         raise HTTPException(status_code=409, detail=f"Profile '{new_pid}' already exists")
 
-    os.makedirs(new_dir, exist_ok=True)
+    os.makedirs(new_dir, mode=0o700, exist_ok=True)
     yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
     _atomic_write(_config_path(new_pid), yaml_text)
 
@@ -379,6 +414,12 @@ async def duplicate_profile(profile_id: str, body: dict | None = None) -> dict[s
         src_cap = os.path.join(_profile_dir(pid), cap_dir)
         if os.path.isdir(src_cap):
             shutil.copytree(src_cap, os.path.join(new_dir, cap_dir), dirs_exist_ok=True, symlinks=True)
+
+    # everything in the copy belongs to the canonical owner (root-safe)
+    _fix_owner(new_dir)
+    for root, dirs, files in os.walk(new_dir):
+        for name in dirs + files:
+            _fix_owner(os.path.join(root, name))
 
     return _to_detail(new_pid, cfg)
 
