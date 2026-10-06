@@ -264,9 +264,24 @@ async def create_task(
                 started_at INTEGER,
                 ended_at INTEGER,
                 outcome TEXT,
-                summary TEXT
+                summary TEXT,
+                metadata TEXT,
+                error TEXT,
+                worker_started_at INTEGER
             )
         """)
+        # N3: columns added after the original CREATE — get_task SELECTs
+        # metadata/error, so a fresh DB 500s on create_task's read-back.
+        # Migrate pre-existing DBs too (mirrors the users-table migration).
+        for _ddl in (
+            "ALTER TABLE task_runs ADD COLUMN metadata TEXT",
+            "ALTER TABLE task_runs ADD COLUMN error TEXT",
+            "ALTER TABLE task_runs ADD COLUMN worker_started_at INTEGER",
+        ):
+            try:
+                await db.execute(_ddl)
+            except Exception:
+                pass  # column already exists
         await db.execute("""
             CREATE TABLE IF NOT EXISTS task_comments (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

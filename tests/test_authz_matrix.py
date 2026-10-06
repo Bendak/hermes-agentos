@@ -11,11 +11,20 @@ actually runs.
 
 import pytest
 
+import backend.cron as cron_mod
+
 READS = [
     ("GET", "/api/tasks"),
     ("GET", "/api/config"),
     ("GET", "/api/workflows"),
-    ("GET", "/api/cron"),
+    pytest.param(
+        "GET",
+        "/api/cron",
+        marks=pytest.mark.skipif(
+            not cron_mod.HAVE_STORE,
+            reason="cron endpoints answer 503 without the Hermes store",
+        ),
+    ),
     ("GET", "/api/profiles"),
 ]
 
@@ -80,7 +89,8 @@ def test_viewer_self_password_not_blocked(client, viewer_headers):
 
 
 def test_no_token_is_401_everywhere(client):
-    for method, path in READS + MUTATIONS:
+    for entry in READS + MUTATIONS:
+        method, path = getattr(entry, "values", entry)  # unwrap pytest.param
         r = client.request(method, path, json={})
         assert r.status_code == 401, f"{method} {path} -> {r.status_code}"
 
