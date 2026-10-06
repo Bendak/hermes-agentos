@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 from backend.profile_discovery import (  # noqa: E402  (M10-16 single source)
     DEFAULT_PROFILE_ID,
     PROFILES_DIR,
+    iter_sub_profile_ids,
 )
 
 
@@ -47,7 +48,7 @@ def _config_path(profile_id: str) -> str:
 
 def _sanitize_id(profile_id: str) -> str:
     """Validate profile_id is a safe directory name (no path traversal)."""
-    if profile_id == DEFAULT_PROFILE_ID:
+    if profile_id.lower() == DEFAULT_PROFILE_ID:  # M12-1b: case-insensitive
         raise HTTPException(status_code=400,
                             detail="'default' is reserved for the root config profile")
     if not re.match(r"^[a-zA-Z0-9_-]+$", profile_id):
@@ -171,8 +172,8 @@ def _to_summary(profile_id: str, cfg: dict[str, Any]) -> dict[str, Any]:
         "fallback_providers": cfg.get("fallback_providers", []) or [],
         "toolsets": cfg.get("toolsets", []) or [],
         "toolsets_count": len(cfg.get("toolsets", []) or []),
-        "max_turns": agent.get("max_turns", 150),
-        "gateway_timeout": agent.get("gateway_timeout", 1800),
+        "max_turns": agent.get("max_turns", _AGENT_DEFAULTS["max_turns"]),
+        "gateway_timeout": agent.get("gateway_timeout", _AGENT_DEFAULTS["gateway_timeout"]),
     }
 
 
@@ -310,8 +311,9 @@ def _checked_kv(section: str, data: Any, spec: dict[str, tuple]) -> dict[str, An
         if not any(type(v) is t for t in allowed):
             names = "/".join(t.__name__ for t in allowed)
             raise HTTPException(status_code=400, detail=f"{section}.{k} must be {names}")
-        if isinstance(v, (int, float)) and v < 0:
-            raise HTTPException(status_code=400, detail=f"{section}.{k} must be >= 0")
+        if isinstance(v, (int, float)) and not (0 <= v <= 10**7):
+            raise HTTPException(status_code=400,
+                                detail=f"{section}.{k} must be between 0 and 10000000")
         out[k] = v
     return out
 
@@ -362,10 +364,8 @@ async def list_profiles() -> list[dict[str, Any]]:
     if not os.path.isdir(PROFILES_DIR):
         return []
     results = []
-    for entry in sorted(os.listdir(PROFILES_DIR)):
+    for entry in iter_sub_profile_ids():  # M10-16 single source (M12-1)
         dir_path = os.path.join(PROFILES_DIR, entry)
-        if not os.path.isdir(dir_path):
-            continue
         cfg_path = os.path.join(dir_path, "config.yaml")
         if not os.path.isfile(cfg_path):
             continue

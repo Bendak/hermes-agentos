@@ -151,7 +151,7 @@ function validate(form: EditForm, isCreate: boolean): Record<string, string> {
     else if (!/^[a-z0-9-]+$/.test(form.id)) errors.id = 'Lowercase letters, numbers, hyphens only'
   }
   if (!form.model) errors.model = 'Model name is required'
-  if (form.max_turns < 1) errors.max_turns = 'Must be > 0'
+  if (form.max_turns < 0) errors.max_turns = 'Must be >= 0 (0 = unlimited)'
   if (form.gateway_timeout < 1) errors.gateway_timeout = 'Must be > 0'
   return errors
 }
@@ -185,15 +185,15 @@ function defaultForm(): EditForm {
     base_url: '',
     fallback_providers: '',
     toolsets: ['hermes-cli'],
-    max_turns: 150,
+    max_turns: 0,  // gateway default is None = unlimited; 0 is the form's equivalent
     gateway_timeout: 1800,
-    restart_drain_timeout: 180,
+    restart_drain_timeout: 0,
     api_max_retries: 3,
     tool_use_enforcement: 'auto',
     task_completion_guidance: true,
     parallel_tool_call_guidance: true,
-    verify_on_stop: true,
-    clarify_timeout: 600,
+    verify_on_stop: false,
+    clarify_timeout: 3600,
     description: '',
   }
 }
@@ -206,15 +206,15 @@ function formFromDetail(d: ProfileDetail): EditForm {
     base_url: d.model.base_url || '',
     fallback_providers: (d.fallback_providers || []).join(', '),
     toolsets: d.toolsets || [],
-    max_turns: d.agent.max_turns ?? 150,
+    max_turns: d.agent.max_turns ?? 0,  // 0 = unlimited (gateway: None / <=0)
     gateway_timeout: d.agent.gateway_timeout ?? 1800,
-    restart_drain_timeout: d.agent.restart_drain_timeout ?? 180,
+    restart_drain_timeout: d.agent.restart_drain_timeout ?? 0,
     api_max_retries: d.agent.api_max_retries ?? 3,
     tool_use_enforcement: d.agent.tool_use_enforcement || 'auto',
     task_completion_guidance: d.agent.task_completion_guidance ?? true,
     parallel_tool_call_guidance: d.agent.parallel_tool_call_guidance ?? true,
-    verify_on_stop: d.agent.verify_on_stop ?? true,
-    clarify_timeout: d.agent.clarify_timeout ?? 600,
+    verify_on_stop: d.agent.verify_on_stop ?? false,
+    clarify_timeout: d.agent.clarify_timeout ?? 3600,
     description: d.description || '',
   }
 }
