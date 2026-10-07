@@ -762,3 +762,20 @@ def test_ts_helpers_normalize_milliseconds():
     assert _sec(None) is None
     assert _ts_to_iso(1783466246000) == _ts_to_iso(1783466246)  # display equal
     assert _format_date(1783466246000) == _format_date(1783466246)
+
+
+def test_orphan_profile_dir_without_config_is_not_an_agent(tmp_path, monkeypatch):
+    """WI-4 residual (bug report do Mauricio 06/10): delete sem purge preserva
+    dados duráveis (M10-03) e o dir com logs/ sobrevive — mas sem config.yaml
+    NÃO é um agente: não pode renderizar card 'unknown'/'unknown' no dashboard."""
+    import backend.agents as ag
+    prof = tmp_path / "profiles"
+    (prof / "gemeni" / "logs").mkdir(parents=True)          # órfão pós-delete
+    (prof / "gemeni" / "logs" / "agent.log").write_text("x")
+    (prof / "nexus").mkdir(parents=True)                     # vivo
+    (prof / "nexus" / "config.yaml").write_text("model:\n  default: glm-5.3\n  provider: ollama-cloud\n")
+    monkeypatch.setattr(ag, "PROFILES_DIR", str(prof))
+    monkeypatch.setattr(ag, "_discover_profile_ids", lambda: ["default", "gemeni", "nexus"])
+    ids = [x["id"] for x in ag.get_profiles()]
+    assert "gemeni" not in ids, ids
+    assert "nexus" in ids and "default" in ids, ids
