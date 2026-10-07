@@ -17,7 +17,8 @@ _SCHEMA = """
 CREATE TABLE sessions (
     id TEXT PRIMARY KEY, source TEXT, model TEXT, title TEXT,
     started_at TEXT, ended_at TEXT, message_count INTEGER,
-    tool_call_count INTEGER, chat_type TEXT, archived INTEGER
+    tool_call_count INTEGER, chat_type TEXT, archived INTEGER,
+    hidden INTEGER DEFAULT 0
 );
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,
@@ -266,3 +267,23 @@ def test_straddle_identity_paints_once(tmp_path, monkeypatch):
     assert 60 not in [m["id"] for m in res["messages"]]        # réplica legacy suprimida
     total = asyncio.run(sessions_mod.get_session_message_count("s4"))
     assert total == len(res["messages"]) == 3                  # count==list por construção
+
+
+def test_list_sessions_filters_hidden_by_default(tmp_path, monkeypatch):
+    """F-M3-07: sessions.hidden (Bot Mode) fora da lista por default;
+    include_hidden=True mostra."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "state.db"))
+    conn.execute("INSERT INTO sessions (id, source, model, title, started_at, message_count, hidden)"
+                 " VALUES ('s_vis', 'cli', 'm', 'Visível', '2026-10-01T00:00:00', 0, 0)")
+    conn.execute("INSERT INTO sessions (id, source, model, title, started_at, message_count, hidden)"
+                 " VALUES ('s_hid', 'cli', 'm', 'Bot', '2026-10-01T00:00:00', 0, 1)")
+    conn.commit()
+    conn.close()
+    import backend.sessions as sm
+    res = asyncio.run(sm.list_sessions())
+    ids = [s["id"] for s in res["sessions"]]
+    assert "s_vis" in ids and "s_hid" not in ids, ids
+    res2 = asyncio.run(sm.list_sessions(include_hidden=True))
+    assert "s_hid" in [s["id"] for s in res2["sessions"]]

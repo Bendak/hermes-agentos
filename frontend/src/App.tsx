@@ -1902,7 +1902,7 @@ function SessionDetailPage() {
 
             <div className="rounded-lg border border-border bg-surface/30 p-4">
               <p className="text-h4 font-semibold text-text-primary mb-3">Messages</p>
-              <MessagesSection sessionId={data.id} />
+              <MessagesSection key={data.id} sessionId={data.id} />
             </div>
           </>
         )}
