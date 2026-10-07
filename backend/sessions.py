@@ -326,7 +326,7 @@ async def get_session(session_id: str) -> Optional[dict]:
                 input_tokens, output_tokens, billing_provider,
                 chat_type, archived, git_branch, cwd, chat_id
             FROM sessions
-            WHERE id = ?
+            WHERE id = ? AND hidden = 0
             """,
             (session_id,),
         ) as cursor:
@@ -538,7 +538,7 @@ async def _search_sessions_fts_run(query: str, limit: int = 20) -> list[dict]:
             FROM messages_fts
             JOIN messages m ON m.rowid = messages_fts.rowid
             JOIN sessions s ON s.id = m.session_id
-            WHERE messages_fts MATCH ?{_display_where('m')}
+            WHERE messages_fts MATCH ? AND s.hidden = 0{_display_where('m')}
             GROUP BY s.id
             ORDER BY COUNT(messages_fts.rowid) DESC
             LIMIT ?

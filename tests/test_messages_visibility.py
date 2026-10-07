@@ -18,7 +18,10 @@ CREATE TABLE sessions (
     id TEXT PRIMARY KEY, source TEXT, model TEXT, title TEXT,
     started_at TEXT, ended_at TEXT, message_count INTEGER,
     tool_call_count INTEGER, chat_type TEXT, archived INTEGER,
-    hidden INTEGER DEFAULT 0
+    hidden INTEGER DEFAULT 0,
+    user_id TEXT, end_reason TEXT, input_tokens INTEGER,
+    output_tokens INTEGER, billing_provider TEXT,
+    git_branch TEXT, cwd TEXT, chat_id TEXT
 );
 CREATE TABLE messages (
     id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,
@@ -287,3 +290,6 @@ def test_list_sessions_filters_hidden_by_default(tmp_path, monkeypatch):
     assert "s_vis" in ids and "s_hid" not in ids, ids
     res2 = asyncio.run(sm.list_sessions(include_hidden=True))
     assert "s_hid" in [s["id"] for s in res2["sessions"]]
+    # M23-1: detalhe e FTS também respeitam sessions.hidden
+    assert asyncio.run(sm.get_session("s_hid")) is None
+    assert asyncio.run(sm.get_session("s_vis")) is not None
