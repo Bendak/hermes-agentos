@@ -821,3 +821,26 @@ def test_kanban_running_tasks_claim_freshness_and_newest_wins(tmp_path, monkeypa
     monkeypatch.setattr(tasks_mod, "DB_PATH", str(db))
     m = ag._kanban_running_tasks()
     assert m == {"coder": "nova", "nexus": "sem-claim"}, m
+
+
+def test_kanban_status_works_on_self_created_schema(tmp_path, monkeypatch):
+    """H-B (closure WI-7): o CREATE TABLE self-created (tasks.py) não tem
+    claim_expires — o filtro M25-2 não pode quebrar nesse schema (antes:
+    OperationalError -> fail-soft -> 🔨 nunca aparecia)."""
+    import sqlite3 as _sq, time as _t
+    import backend.agents as ag
+    import backend.tasks as tasks_mod
+    db = tmp_path / "kanban.db"
+    con = _sq.connect(db)
+    # schema EXATO do backend/tasks.py (14 cols, sem claim_expires)
+    con.execute("CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, title TEXT NOT NULL,"
+                " body TEXT, assignee TEXT, status TEXT NOT NULL DEFAULT 'todo',"
+                " priority INTEGER DEFAULT 2, created_by TEXT, created_at INTEGER,"
+                " started_at INTEGER, completed_at INTEGER, workspace_kind TEXT,"
+                " workspace_path TEXT, session_id TEXT, project_id TEXT)")
+    con.execute("INSERT INTO tasks (id, title, assignee, status, started_at)"
+                " VALUES ('t1', 'rodando', 'coder', 'running', ?)", (int(_t.time()),))
+    con.commit(); con.close()
+    monkeypatch.setattr(tasks_mod, "DB_PATH", str(db))
+    m = ag._kanban_running_tasks()
+    assert m == {"coder": "rodando"}, m

@@ -106,10 +106,17 @@ def _kanban_running_tasks() -> dict:
         from backend.tasks import DB_PATH as KANBAN_DB  # noqa: PLC0415
         conn = sqlite3.connect(f"file:{KANBAN_DB}?mode=ro", uri=True)
         try:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+            # H-B: o CREATE TABLE self-created (backend/tasks.py, WI-12) não tem
+            # claim_expires — filtro só quando a coluna existe; senão o
+            # OperationalError derrubava o fail-soft e o 🔨 nunca aparecia.
+            fresh = (
+                " AND (claim_expires IS NULL OR claim_expires > CAST(strftime('%s','now') AS INTEGER))"
+                if "claim_expires" in cols else ""
+            )
             rows = conn.execute(
                 "SELECT assignee, title, started_at FROM tasks"
-                " WHERE status = 'running'"
-                " AND (claim_expires IS NULL OR claim_expires > CAST(strftime('%s','now') AS INTEGER))"
+                " WHERE status = 'running'" + fresh +
                 " ORDER BY started_at DESC"  # M25-3: mais recente vence por assignee
             ).fetchall()
         finally:
