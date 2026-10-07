@@ -553,13 +553,16 @@ function DashboardPage() {
 
 function NotFoundPage() {
   return (
-    <div className="flex flex-col items-center justify-center py-24 text-center">
+    <>
+      <NavBar />
+      <div className="flex flex-col items-center justify-center py-24 text-center">
       <div className="text-6xl font-bold text-text-tertiary mb-4">404</div>
       <p className="text-body text-text-secondary mb-6">This page doesn't exist.</p>
       <Link to="/" className="px-4 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors text-sm font-medium">
         Back to Dashboard
       </Link>
-    </div>
+      </div>
+    </>
   )
 }
 
