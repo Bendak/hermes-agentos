@@ -224,3 +224,45 @@ def test_legacy_group_sorts_at_min_id_position(tmp_path, monkeypatch):
     assert contents == ["primeiro", "cópia antiga", "entre as cópias"], contents
     ids = [m["id"] for m in res["messages"]]
     assert ids[1] == 33  # representante vivo
+
+
+# ── WI-6 batch 3.5 (M22-2/3/6 + fallback OperationalError) ───────────────────
+
+def test_fts_residual_syntax_never_500(tmp_path, monkeypatch):
+    """M22-2 ('a AND OR b') e M22-3 (NUL): degradam para resultado — nunca
+    500. Fallback = paridade Hermes (hermes_state_search ~1103)."""
+    _sandbox_db(tmp_path, monkeypatch)
+    for q in ("a AND OR b", "nul\x00x", "AND OR NOT", "x AND AND y", "a OR OR OR b"):
+        try:
+            res = asyncio.run(sessions_mod.search_sessions_fts(q, limit=5))
+            assert isinstance(res, list)
+        except Exception as e:  # noqa: BLE001
+            raise AssertionError(f"FTS query {q!r} raised {e!r}")
+
+
+def test_straddle_identity_paints_once(tmp_path, monkeypatch):
+    """M22-6: cópia legacy + gêmea indexada da mesma identidade pintam 1x
+    (a indexada vence). Indexadas legítimas com conteúdo igual NÃO colapsam."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "state.db"))
+    conn.execute("INSERT INTO sessions (id, source, model, title, started_at, message_count)"
+                 " VALUES ('s4', 'cli', 'm', 'Straddle', '2026-10-01T00:00:00', 4)")
+    rows = [
+        (60, "dup identidade", None, 1, 1),   # réplica legacy (pintada antes do fix = 2x)
+        (61, "dup identidade", 70, 1, 0),     # gêmea indexada (vence)
+        (62, "dup identidade", 80, 1, 0),     # indexada legítima, mesmo conteúdo — MANTIDA
+        (63, "outra", 90, 1, 0),
+    ]
+    for mid, content, dor, active, compacted in rows:
+        conn.execute("INSERT INTO messages (id, session_id, role, content, display_order, active, compacted)"
+                     " VALUES (?, 's4', 'user', ?, ?, ?, ?)", (mid, content, dor, active, compacted))
+    conn.commit()
+    conn.close()
+
+    res = asyncio.run(sessions_mod.get_session_messages("s4", limit=50))
+    contents = [m["content"] for m in res["messages"]]
+    assert contents.count("dup identidade") == 2, contents   # indexadas 61+62, legacy 60 fora
+    assert 60 not in [m["id"] for m in res["messages"]]        # réplica legacy suprimida
+    total = asyncio.run(sessions_mod.get_session_message_count("s4"))
+    assert total == len(res["messages"]) == 3                  # count==list por construção
