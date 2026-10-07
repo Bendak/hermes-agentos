@@ -51,7 +51,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         body: JSON.stringify({ refresh_token: refreshTok }),
       })
       if (!res.ok) {
-        clearAuth()
+        // M11-04: só rejeição definitiva de auth mata a sessão; 5xx/timeout
+        // transitório mantém (comum em foldable trocando Wi-Fi/5G)
+        if (res.status === 401 || res.status === 403) clearAuth()
         return null
       }
       const data = await res.json()
@@ -64,7 +66,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setToken(data.access_token)
       return data.access_token
     } catch {
-      clearAuth()
+      // M11-04: erro de rede != sessão inválida
       return null
     }
   }, [clearAuth])
@@ -85,14 +87,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const data = await res.json()
           setUser(data.user)
           setToken(storedToken)
-        } else {
+        } else if (res.status === 401 || res.status === 403) {
+          // M11-04: só rejeição definitiva de auth
           const refreshed = await doRefresh()
           if (!refreshed) {
             clearAuth()
           }
         }
+        // M11-04: 5xx em /api/auth/me — sessão mantida; interceptor revalida
       } catch {
-        clearAuth()
+        // M11-04: erro de rede != sessão inválida — mantém o token
       }
       setIsLoading(false)
     }
@@ -136,9 +140,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const headers = new Headers(init?.headers)
               headers.set('Authorization', `Bearer ${data.access_token}`)
               res = await originalFetch(input, { ...init, headers })
-            } else {
+            } else if (refreshRes.status === 401 || refreshRes.status === 403) {
               clearAuth()
             }
+            // M11-04: 5xx na renovação — mantém a sessão; o retry revalida
           } catch {
             clearAuth()
           }

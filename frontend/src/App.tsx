@@ -281,8 +281,9 @@ export function NavBar() {
             <Link to="/" className="flex items-center gap-2 text-text-primary font-bold text-lg tracking-tight group shrink-0">
               <img src={theme === 'light' ? '/logo-light.svg' : '/logo.svg'} alt="AgentOS" className="h-7 w-auto" />
             </Link>
-            {/* Desktop nav links */}
-            <div className="hidden sm:flex items-center gap-1 ml-2">
+            {/* Desktop nav links — M11-01: inline só quando cabe de verdade (xl);
+                abaixo disso o hamburger cobre 640–1280px (Z Fold 768px clipava os links) */}
+            <div className="hidden xl:flex items-center gap-1 ml-2">
               {navLink('/', 'Dashboard')}
               {navLink('/chat', 'Chat')}
               {navLink('/sessions', 'Sessions')}
@@ -332,7 +333,7 @@ export function NavBar() {
             )}
             {/* Mobile hamburger */}
             <button
-              className="sm:hidden p-2 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface/60 transition-colors"
+              className="xl:hidden p-2 rounded-md text-text-secondary hover:text-text-primary hover:bg-surface/60 transition-colors"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
             >
@@ -343,9 +344,10 @@ export function NavBar() {
       </nav>
       {/* Mobile menu dropdown */}
       {mobileMenuOpen && (
-        <div className="sm:hidden border-b border-border bg-bg-elevated/95 backdrop-blur-md px-4 py-3 sticky top-[53px] z-40">
+        <div className="xl:hidden border-b border-border bg-bg-elevated/95 backdrop-blur-md px-4 py-3 sticky top-[53px] z-40">
           <div className="flex flex-col gap-1">
             {navLink('/', 'Dashboard')}
+            {navLink('/chat', 'Chat')}
             {navLink('/sessions', 'Sessions')}
             {navLink('/tasks', 'Tasks')}
             {navLink('/config', 'Config')}
@@ -362,6 +364,18 @@ export function NavBar() {
               >
                 🔍 Search
               </button>
+            )}
+            {user && (
+              <div className="flex items-center justify-between px-3 py-1.5 mt-1 border-t border-border pt-2">
+                <span className="text-xs text-text-tertiary font-mono">{user.username}</span>
+                <button
+                  onClick={() => { setMobileMenuOpen(false); logout() }}
+                  className="px-2 py-1 text-xs rounded text-text-tertiary hover:text-error hover:bg-error-subtle/50 transition-colors"
+                  title="Sign out"
+                >
+                  Sign out
+                </button>
+              </div>
             )}
           </div>
         </div>
@@ -536,6 +550,18 @@ function DashboardPage() {
 }
 
 /* ── Health ────────────────────────────────────────── */
+
+function NotFoundPage() {
+  return (
+    <div className="flex flex-col items-center justify-center py-24 text-center">
+      <div className="text-6xl font-bold text-text-tertiary mb-4">404</div>
+      <p className="text-body text-text-secondary mb-6">This page doesn't exist.</p>
+      <Link to="/" className="px-4 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors text-sm font-medium">
+        Back to Dashboard
+      </Link>
+    </div>
+  )
+}
 
 function HealthPage() {
   const [healthData, setHealthData] = useState<{ status: string; version: string } | null>(null)
@@ -4989,7 +5015,8 @@ function AppInner() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
           <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
-          <Route path="/health" element={<ProtectedRoute><HealthPage /></ProtectedRoute>} />
+          {/* M11-02: /health pertence ao backend (monitoring) — a SPA vive em /system-health */}
+          <Route path="/system-health" element={<ProtectedRoute><HealthPage /></ProtectedRoute>} />
           <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
           <Route path="/sessions/:id" element={<ProtectedRoute><SessionDetailPage /></ProtectedRoute>} />
           <Route path="/tasks" element={<ProtectedRoute><KanbanBoardPage /></ProtectedRoute>} />
@@ -5002,6 +5029,7 @@ function AppInner() {
           <Route path="/profiles" element={<ProtectedRoute><ProfilesPage /></ProtectedRoute>} />
           <Route path="/analytics" element={<ProtectedRoute><AnalyticsPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
+          <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
         </Routes>
         <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
         <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
