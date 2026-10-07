@@ -45,12 +45,19 @@ def _representative_clause(alias: str = "", key_alias: str = "c") -> str:
     pfx = f"{alias}." if alias else ""
     k = f"{key_alias}."
     return (
-        f" AND {pfx}id = (SELECT {k}id FROM messages {k.rstrip('.')}"
+        # Perf (fix urgente pós-7ee00be): casar display_order DIRETO deixa o
+        # subquery fazer seek no índice parcial idx_messages_display_page
+        # (session_id, display_order, active DESC, id DESC). A forma anterior
+        # COALESCE(display_order, id) derrotava o índice → O(n²) (probe estourou
+        # 300s na maior sessão). Ramo legacy (display_order NULL) não deduplica:
+        # cópias protected-tail sempre compartilham display_order (trigger do
+        # Hermes), então NULL = row única = mostrar direto é o comportamento fiel.
+        f" AND ({pfx}display_order IS NULL OR {pfx}id = (SELECT {k}id FROM messages {k.rstrip('.')}"
         f" WHERE {k}session_id = {pfx}session_id"
-        f" AND COALESCE({k}display_order, {k}id) = COALESCE({pfx}display_order, {pfx}id)"
+        f" AND {k}display_order = {pfx}display_order"
         f" AND {k}role IN ('user', 'assistant', 'tool')"
         + _display_where(key_alias) +
-        f" ORDER BY {k}active DESC, {k}id DESC LIMIT 1)"
+        f" ORDER BY {k}active DESC, {k}id DESC LIMIT 1))"
     )
 
 # model-to-profile mapping fallback when sessions table lacks `profile` column
