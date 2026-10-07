@@ -40,25 +40,45 @@ def _display_text_expr(alias: str = "") -> str:
 
 
 def _representative_clause(alias: str = "", key_alias: str = "c") -> str:
-    """F-M3-10: one representative row per display group (protected-tail copies
-    share display_order). The canonical pick is active DESC, id DESC."""
+    """F-M3-10 + M20-2: one representative row per display group.
+
+    Indexed rows (display_order set): protected-tail copies share display_order
+    (Hermes trigger) — pick active DESC, id DESC via the display index (fast
+    path, see perf note below). Legacy rows (display_order NULL = pre-index
+    stores, 71 of 179 real sessions): dedup by exact payload identity
+    (role, content, timestamp, tool_call_id, tool_calls, tool_name) exactly
+    like the Hermes legacy branch in _display_rows_sql — via ROW_NUMBER()
+    (one sort pass, never the O(n²) of a correlated COALESCE join).
+
+    Perf (fix urgente pós-7ee00be): casar display_order DIRETO deixa o
+    subquery fazer seek no índice parcial idx_messages_display_page
+    (session_id, display_order, active DESC, id DESC). A forma anterior
+    COALESCE(display_order, id) derrotava o índice → O(n²) (probe estourou
+    300s na maior sessão).
+    """
     pfx = f"{alias}." if alias else ""
     k = f"{key_alias}."
     return (
-        # Perf (fix urgente pós-7ee00be): casar display_order DIRETO deixa o
-        # subquery fazer seek no índice parcial idx_messages_display_page
-        # (session_id, display_order, active DESC, id DESC). A forma anterior
-        # COALESCE(display_order, id) derrotava o índice → O(n²) (probe estourou
-        # 300s na maior sessão). Ramo legacy (display_order NULL) não deduplica:
-        # cópias protected-tail sempre compartilham display_order (trigger do
-        # Hermes), então NULL = row única = mostrar direto é o comportamento fiel.
-        f" AND ({pfx}display_order IS NULL OR {pfx}id = (SELECT {k}id FROM messages {k.rstrip('.')}"
+        f" AND (({pfx}display_order IS NOT NULL AND {pfx}id = (SELECT {k}id FROM messages {k.rstrip('.')}"
         f" WHERE {k}session_id = {pfx}session_id"
         f" AND {k}display_order = {pfx}display_order"
         f" AND {k}role IN ('user', 'assistant', 'tool')"
         + _display_where(key_alias) +
         f" ORDER BY {k}active DESC, {k}id DESC LIMIT 1))"
+        f" OR ({pfx}display_order IS NULL AND {pfx}id IN ("
+        f" SELECT rid FROM (SELECT {k}id AS rid,"
+        f" ROW_NUMBER() OVER (PARTITION BY {k}role, {k}content, {k}timestamp,"
+        f" {k}tool_call_id, {k}tool_calls, {k}tool_name"
+        f" ORDER BY {k}active DESC, {k}id DESC) AS rn"
+        f" FROM messages {k.rstrip('.')}"
+        # M20-2 perf: sessão via parâmetro próprio (desacopla o subquery —
+        # correlacionado por m.session_id re-executava a window fn por row = O(n²))
+        f" WHERE {k}session_id = ? AND {k}display_order IS NULL"
+        f" AND {k}role IN ('user', 'assistant', 'tool')"
+        + _display_where(key_alias) +
+        f") WHERE rn = 1)))"
     )
+
 
 # model-to-profile mapping fallback when sessions table lacks `profile` column
 MODEL_TO_PROFILE: Dict[str, str] = {
@@ -178,8 +198,10 @@ async def list_sessions(
     params: list = []
 
     if search:
-        where_clauses.append("title LIKE ?")
-        params.append(f"%{search}%")
+        where_clauses.append("title LIKE ? ESCAPE '\\'")  # F-M3-06: % e _ são literais
+        params.append(
+            f"%{search.replace(chr(92), chr(92) * 2).replace('%', chr(92) + '%').replace('_', chr(92) + '_')}%"
+        )
     if source:
         where_clauses.append("source = ?")
         params.append(source)
@@ -305,7 +327,7 @@ async def get_session_message_count(session_id: str) -> int:
             WHERE m.session_id = ? AND m.role IN ('user', 'assistant', 'tool')
             {_display_where('m')}{_representative_clause('m')}
             """,
-            (session_id,),
+            (session_id, session_id),  # outer + subquery legado (desacoplado)
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
@@ -335,7 +357,7 @@ async def get_session_messages(session_id: str, limit: int = 100, offset: int = 
             ORDER BY COALESCE(m.display_order, m.id) ASC
             LIMIT ? OFFSET ?
             """,
-            (session_id, limit, offset),
+            (session_id, session_id, limit, offset),  # outer + subquery legado
         ) as cursor:
             rows = await cursor.fetchall()
             for row in rows:
@@ -379,6 +401,15 @@ async def get_session_messages(session_id: str, limit: int = 100, offset: int = 
     return {"messages": messages, "total": total, "limit": limit, "offset": offset}
 
 
+def _fts_quote(query: str) -> str:
+    """M20-3/F-M3-02: FTS5 parses user input as MATCH syntax ('foo AND',
+    '"unbalanced', 'NEAR(' -> sqlite3.OperationalError -> 500). Quote each
+    whitespace token as an FTS5 string literal: syntax becomes data, implicit
+    AND between tokens keeps recall."""
+    tokens = [t for t in query.split() if t]
+    return " ".join('"' + t.replace('"', '""') + '"' for t in tokens)
+
+
 async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:
     """Search sessions using FTS5 on messages_fts table.
 
@@ -387,6 +418,9 @@ async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:
     """
     if not os.path.exists(STATE_DB):
         return []
+    q = _fts_quote(query)
+    if not q:
+        return []  # M20-3: MATCH '' é sintaxe inválida no FTS5 — nada a buscar
 
     results: list[dict] = []
     async with aiosqlite.connect(STATE_DB) as db:
@@ -413,7 +447,7 @@ async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:
             ORDER BY COUNT(messages_fts.rowid) DESC
             LIMIT ?
             """,
-            (query, limit),
+            (_fts_quote(query), limit),  # M20-3: sintaxe FTS5 vira dado
         ) as cursor:
             rows = await cursor.fetchall()
 
