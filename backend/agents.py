@@ -120,6 +120,13 @@ def get_profiles() -> List[Dict[str, Any]]:
         soul_path = os.path.join(profile_dir, "SOUL.md")
         gateway_path = os.path.join(profile_dir, "gateway_state.json")
 
+        # WI-4 residual: diretório órfão pós-delete (o delete preserva dados
+        # duráveis por design — M10-03 — e o dir com logs/ sobrevive). Sem
+        # config.yaml não é um agente vivo: não renderizar como card
+        # 'unknown'/'unknown' no dashboard.
+        if profile_id != "default" and not os.path.exists(config_path):
+            continue
+
         name = "Hermes" if profile_id == "default" else profile_id.capitalize()
         model = "unknown"
         provider = "unknown"
