@@ -798,3 +798,26 @@ def test_kanban_working_agent_not_idle(tmp_path, monkeypatch):
     monkeypatch.setattr(ag, "_kanban_running_tasks", lambda: {})
     out2 = {x["id"]: x for x in ag.get_profiles()}
     assert out2["coder"]["status"] == "idle" and out2["coder"]["kanban_task"] is None
+
+
+def test_kanban_running_tasks_claim_freshness_and_newest_wins(tmp_path, monkeypatch):
+    """M25-2: claim expirado não mostra 🔨. M25-3: task mais recente vence
+    por assignee. Timestamps em SEGUNDOS (contrato do kanban.db)."""
+    import sqlite3 as _sq, time as _t
+    import backend.agents as ag
+    import backend.tasks as tasks_mod
+    db = tmp_path / "kanban.db"
+    con = _sq.connect(db)
+    con.execute("CREATE TABLE tasks (id TEXT, assignee TEXT, title TEXT, status TEXT,"
+                " started_at INTEGER, claim_expires INTEGER)")
+    now = int(_t.time())
+    con.executemany("INSERT INTO tasks VALUES (?,?,?,?,?,?)", [
+        ("t1", "coder", "antiga", "running", now - 100, now + 999),      # perde pra t2
+        ("t2", "coder", "nova", "running", now - 10, now + 999),          # vence
+        ("t3", "pixel", "expirada", "running", now - 5, now - 1),         # M25-2: fora
+        ("t4", "nexus", "sem-claim", "running", now - 5, None),           # NULL = ok
+    ])
+    con.commit(); con.close()
+    monkeypatch.setattr(tasks_mod, "DB_PATH", str(db))
+    m = ag._kanban_running_tasks()
+    assert m == {"coder": "nova", "nexus": "sem-claim"}, m

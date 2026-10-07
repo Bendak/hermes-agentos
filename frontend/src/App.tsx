@@ -79,6 +79,7 @@ interface AgentProfile {
 }
 
 interface SessionItem {
+  profile?: string | null
   id: string
   source: string
   model: string
@@ -877,6 +878,11 @@ function SessionsPage() {
                         <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${sourceBadge(s.source)}`}>
                           {sourceLabel(s.source)}
                         </span>
+                        {s.profile && s.profile !== 'default' && (
+                          <span className="ml-1 inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-surface-secondary text-text-secondary border border-border">
+                            {s.profile}
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-3 font-mono text-mono-sm text-text-secondary">{s.model}</td>
                       <td className="px-4 py-3 text-right tabular-nums text-text-secondary">{s.message_count}</td>
@@ -1860,6 +1866,11 @@ function SessionDetailPage() {
               <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${sourceBadge(data.source)}`}>
                 {sourceLabel(data.source)}
               </span>
+              {data.profile && data.profile !== 'default' && (
+                <span className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-surface-secondary text-text-secondary border border-border">
+                  {data.profile}
+                </span>
+              )}
               <span className="font-mono text-mono-sm text-text-secondary">{data.model}</span>
             </div>
 
