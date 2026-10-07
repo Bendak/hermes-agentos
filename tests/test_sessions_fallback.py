@@ -112,3 +112,80 @@ def test_multi_db_aggregation_profile_attribution(tmp_path, monkeypatch):
     profs = {x["id"]: x["profile"] for x in res["sessions"]}
     assert profs == {"r1": "default", "c1": "coder", "c2": "atlas"}, profs
     assert res["total"] == 3
+
+
+def test_m243_detail_messages_fts_cross_db(tmp_path, monkeypatch):
+    """M24-3: detalhe/messages/FTS acham sessões de sub-profiles (a lista
+    agregava mas o clique dava 404 e a busca era cega)."""
+    root = tmp_path
+    con = sqlite3.connect(root / "state.db")
+    con.execute("CREATE TABLE sessions (id TEXT, source TEXT, model TEXT, title TEXT,"
+                " started_at INTEGER, ended_at INTEGER, message_count INTEGER,"
+                " tool_call_count INTEGER, chat_type TEXT, archived INTEGER,"
+                " hidden INTEGER DEFAULT 0, profile_name TEXT,"
+                " user_id TEXT, end_reason TEXT, input_tokens INTEGER,"
+                " output_tokens INTEGER, billing_provider TEXT,"
+                " git_branch TEXT, cwd TEXT, chat_id TEXT)")
+    con.execute("INSERT INTO sessions VALUES ('r1','cli','m','root','100',NULL,0,0,NULL,0,0,'default',"
+                "NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)")
+    con.commit(); con.close()
+    (root / "profiles" / "coder").mkdir(parents=True)
+    (root / "profiles" / "coder" / "config.yaml").write_text("model: {}")
+    con = sqlite3.connect(root / "profiles" / "coder" / "state.db")
+    con.execute("CREATE TABLE sessions (id TEXT, source TEXT, model TEXT, title TEXT,"
+                " started_at INTEGER, ended_at INTEGER, message_count INTEGER,"
+                " tool_call_count INTEGER, chat_type TEXT, archived INTEGER,"
+                " hidden INTEGER DEFAULT 0, profile_name TEXT,"
+                " user_id TEXT, end_reason TEXT, input_tokens INTEGER,"
+                " output_tokens INTEGER, billing_provider TEXT,"
+                " git_branch TEXT, cwd TEXT, chat_id TEXT)")
+    con.execute("INSERT INTO sessions VALUES ('c9','cli','m','Adversarial WI-7','200',NULL,1,0,NULL,0,0,NULL,"
+                "NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)")
+    con.execute("CREATE TABLE messages (id INTEGER PRIMARY KEY, session_id TEXT, role TEXT, content TEXT,"
+                " display_order INTEGER, active INTEGER, compacted INTEGER, display_kind TEXT, display_text TEXT,"
+                " display_metadata TEXT,"
+                " timestamp REAL, tool_call_id TEXT, tool_calls TEXT, tool_name TEXT, model_only INTEGER DEFAULT 0,"
+                " reasoning_content TEXT, finish_reason TEXT, token_count INTEGER)")
+    con.execute("INSERT INTO messages (id, session_id, role, content, display_order, active, compacted)"
+                " VALUES (1,'c9','user','adversarial probe text',1,1,0)")
+    con.execute("CREATE VIRTUAL TABLE messages_fts USING fts5(content, content=messages, content_rowid=id)")
+    con.execute("INSERT INTO messages_fts(rowid, content) VALUES (1,'adversarial probe text')")
+    con.commit(); con.close()
+
+    monkeypatch.setattr(sessions_mod, "STATE_DB", str(root / "state.db"))
+    import asyncio
+    # detalhe vive no sub-db
+    det = asyncio.run(sessions_mod.get_session("c9"))
+    assert det is not None and det["id"] == "c9" and det["profile"] == "coder", det
+    assert asyncio.run(sessions_mod.get_session("nao-existe")) is None
+    # messages + count via db dono
+    res = asyncio.run(sessions_mod.get_session_messages("c9"))
+    assert res["total"] == 1 and res["messages"][0]["content"] == "adversarial probe text", res
+    # FTS agrega cross-db e ordena por relevância
+    hits = asyncio.run(sessions_mod.search_sessions_fts("adversarial", limit=10))
+    assert any(h["id"] == "c9" and h.get("profile") == "coder" for h in hits), hits
+
+
+def test_m241_broken_subdb_degrades_gracefully(tmp_path, monkeypatch):
+    """M24-1: sub-db sqlite válido SEM tabela sessions não derruba count/list
+    (antes: OperationalError → 500 no dashboard inteiro, incl. /api/agents)."""
+    root = tmp_path
+    con = sqlite3.connect(root / "state.db")
+    con.execute("CREATE TABLE sessions (id TEXT, source TEXT, model TEXT, title TEXT,"
+                " started_at INTEGER, ended_at INTEGER, message_count INTEGER,"
+                " tool_call_count INTEGER, chat_type TEXT, archived INTEGER,"
+                " hidden INTEGER DEFAULT 0, profile_name TEXT)")
+    con.execute("INSERT INTO sessions VALUES ('r1','cli','m','root','100',NULL,0,0,NULL,0,0,'default')")
+    con.commit(); con.close()
+    (root / "profiles" / "quebrado").mkdir(parents=True)
+    (root / "profiles" / "quebrado" / "config.yaml").write_text("model: {}")
+    con = sqlite3.connect(root / "profiles" / "quebrado" / "state.db")
+    con.execute("CREATE TABLE outra_coisa (x INTEGER)")  # sem tabela sessions
+    con.commit(); con.close()
+
+    monkeypatch.setattr(sessions_mod, "STATE_DB", str(root / "state.db"))
+    import asyncio
+    counts = asyncio.run(sessions_mod.count_sessions_by_profile())
+    assert counts == {"default": 1}, counts
+    res = asyncio.run(sessions_mod.list_sessions())
+    assert res["total"] == 1, res

@@ -192,6 +192,24 @@ def _state_db_files() -> list[tuple[str, str]]:
     return out
 
 
+async def _find_session_db(session_id: str) -> Optional[tuple]:
+    """M24-3: um session id vive em exatamente um state.db — achar o dono.
+    Db problemático é pulado (M24-1), nunca derruba a busca."""
+    for owner, path in _state_db_files():
+        if not os.path.exists(path):
+            continue
+        try:
+            async with aiosqlite.connect(path) as db:
+                async with db.execute(
+                    "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
+                ) as cur:
+                    if await cur.fetchone():
+                        return owner, path
+        except Exception:
+            continue
+    return None
+
+
 def _row_to_session(row: tuple) -> dict:
     """Map a sessions SELECT row to a session dict."""
     profile = row[10] if len(row) > 10 else None
@@ -237,29 +255,33 @@ async def count_sessions_by_profile() -> Dict[str, int]:
 
     COALESCE(profile_name, dono_do_db): sub-stores têm profile_name
     majoritariamente NULL = do próprio profile (flag do veredito M10).
-    Stores sem a coluna caem no mapeamento por modelo (M10-10: descarta
-    modelos fora do map)."""
+    Stores sem a coluna caem no mapeamento por modelo (M10-10: não-mapeados
+    vão para o bucket 'unknown', nunca somem). M24-1: db problemático
+    degrada só a si mesmo."""
     totals: Dict[str, int] = {}
     for owner, path in _state_db_files():
         if not os.path.exists(path):
             continue
-        async with aiosqlite.connect(path) as db:
-            cols = {r[1] for r in await (await db.execute(
-                "PRAGMA table_info(sessions)")).fetchall()}
-            if "profile_name" in cols:
-                async with db.execute(
-                    "SELECT COALESCE(profile_name, ?), COUNT(*) FROM sessions GROUP BY 1",
-                    (owner,),
-                ) as cursor:
-                    for pid, count in await cursor.fetchall():
-                        totals[pid] = totals.get(pid, 0) + count
-            else:
-                async with db.execute(
-                    "SELECT model, COUNT(*) FROM sessions GROUP BY model"
-                ) as cursor:
-                    for model, count in await cursor.fetchall():
-                        pid = MODEL_TO_PROFILE.get(model or "", "unknown")
-                        totals[pid] = totals.get(pid, 0) + count
+        try:
+            async with aiosqlite.connect(path) as db:
+                cols = {r[1] for r in await (await db.execute(
+                    "PRAGMA table_info(sessions)")).fetchall()}
+                if "profile_name" in cols:
+                    async with db.execute(
+                        "SELECT COALESCE(profile_name, ?), COUNT(*) FROM sessions GROUP BY 1",
+                        (owner,),
+                    ) as cursor:
+                        for pid, count in await cursor.fetchall():
+                            totals[pid] = totals.get(pid, 0) + count
+                else:
+                    async with db.execute(
+                        "SELECT model, COUNT(*) FROM sessions GROUP BY model"
+                    ) as cursor:
+                        for model, count in await cursor.fetchall():
+                            pid = MODEL_TO_PROFILE.get(model or "", "unknown")
+                            totals[pid] = totals.get(pid, 0) + count
+        except Exception:
+            continue  # M24-1: db corrupto/sem tabela não derruba o dashboard
     return totals
 
 
@@ -275,6 +297,7 @@ async def list_sessions(
     (WI-7). Each item carries `profile` = COALESCE(profile_name, owner).
 
     Returns: {"sessions": [...], "total": N, "limit": 50, "offset": 0}
+    M24-1: db problemático degrada só a si mesmo.
     """
     where_clauses: list[str] = []
     if not include_hidden:
@@ -301,21 +324,24 @@ async def list_sessions(
     for owner, path in _state_db_files():
         if not os.path.exists(path):
             continue
-        async with aiosqlite.connect(path) as db:
-            cols = {r[1] for r in await (await db.execute(
-                "PRAGMA table_info(sessions)")).fetchall()}
-            prof_expr = "COALESCE(profile_name, ?)" if "profile_name" in cols else "?"
-            sql = f"""
-                SELECT
-                    id, source, model, title, started_at, ended_at,
-                    message_count, tool_call_count, chat_type, archived,
-                    {prof_expr}
-                FROM sessions
-                {where_sql}
-                ORDER BY started_at DESC
-            """
-            async with db.execute(sql, [owner] + params) as cursor:
-                merged.extend(_row_to_session(r) for r in await cursor.fetchall())
+        try:
+            async with aiosqlite.connect(path) as db:
+                cols = {r[1] for r in await (await db.execute(
+                    "PRAGMA table_info(sessions)")).fetchall()}
+                prof_expr = "COALESCE(profile_name, ?)" if "profile_name" in cols else "?"
+                sql = f"""
+                    SELECT
+                        id, source, model, title, started_at, ended_at,
+                        message_count, tool_call_count, chat_type, archived,
+                        {prof_expr}
+                    FROM sessions
+                    {where_sql}
+                    ORDER BY started_at DESC
+                """
+                async with db.execute(sql, [owner] + params) as cursor:
+                    merged.extend(_row_to_session(r) for r in await cursor.fetchall())
+        except Exception:
+            continue  # M24-1: db corrupto não derruba a listagem inteira
 
     merged.sort(key=lambda x: x.get("started_at") or "", reverse=True)
     total = len(merged)
@@ -324,11 +350,14 @@ async def list_sessions(
 
 
 async def get_session(session_id: str) -> Optional[dict]:
-    """Return full session detail by id."""
-    if not os.path.exists(STATE_DB):
+    """Return full session detail by id. M24-3: varre todos os state.db —
+    o id vive em exatamente um (a lista agrega, o detalhe acompanha)."""
+    found = await _find_session_db(session_id)
+    if found is None:
         return None
+    owner, db_path = found
 
-    async with aiosqlite.connect(STATE_DB) as db:
+    async with aiosqlite.connect(db_path) as db:
         async with db.execute(
             """
             SELECT
@@ -395,15 +424,20 @@ async def get_session(session_id: str) -> Optional[dict]:
         "git_branch": git_branch,
         "cwd": cwd,
         "chat_id": chat_id,
+        "profile": owner,
     }
 
 
-async def get_session_message_count(session_id: str) -> int:
-    """Return total message count for a session (excluding session_meta)."""
-    if not os.path.exists(STATE_DB):
-        return 0
+async def get_session_message_count(session_id: str, db_path: Optional[str] = None) -> int:
+    """Return total message count for a session (excluding session_meta).
+    M24-3: resolve o db dono (ou usa o passado pelo caller)."""
+    if db_path is None:
+        found = await _find_session_db(session_id)
+        if found is None:
+            return 0
+        _owner, db_path = found
 
-    async with aiosqlite.connect(STATE_DB) as db:
+    async with aiosqlite.connect(db_path) as db:
         async with db.execute(
             f"SELECT COUNT(*) FROM ({_straddle_dedup_wrap(_messages_union_sql())})",
             (session_id, session_id, session_id),
@@ -417,13 +451,15 @@ async def get_session_messages(session_id: str, limit: int = 100, offset: int = 
 
     Returns: {"messages": [...], "total": N, "limit": 100, "offset": 0}
     """
-    if not os.path.exists(STATE_DB):
+    found = await _find_session_db(session_id)  # M24-3
+    if found is None:
         return {"messages": [], "total": 0, "limit": limit, "offset": offset}
+    _owner, db_path = found
 
-    total = await get_session_message_count(session_id)
+    total = await get_session_message_count(session_id, db_path=db_path)
     messages: list[dict] = []
 
-    async with aiosqlite.connect(STATE_DB) as db:
+    async with aiosqlite.connect(db_path) as db:
         async with db.execute(
             _straddle_dedup_wrap(_messages_union_sql())
             + " ORDER BY sort_key ASC, id ASC LIMIT ? OFFSET ?",
@@ -508,29 +544,50 @@ def _fts_quote(query: str) -> str:
 
 
 async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:
-    """Search sessions using FTS5 on messages_fts table.
+    """Search sessions using FTS5 on messages_fts table — WI-7/M24-3:
+    aggregated across ALL profile state.dbs (messages_fts exists in every
+    store), merged by relevance (match_count DESC).
 
-    Joins back to sessions to return session metadata.
-    Returns matching sessions with snippet of matched text.
     M22-2/M22-3 fallback: any residual MATCH syntax error degrades to an
     empty result — never a 500 (parity with hermes_state_search ~1103,
     'FTS5 syntax error despite sanitization' -> return []).
+    M24-1: a broken db skips only itself.
     """
-    try:
-        return await _search_sessions_fts_run(query, limit)
-    except aiosqlite.OperationalError:
-        return []
+    merged: list[dict] = []
+    for owner, path in _state_db_files():
+        if not os.path.exists(path):
+            continue
+        try:
+            rows = await _search_sessions_fts_run(query, limit, path)
+            for r in rows:
+                r.setdefault("profile", owner)
+            merged.extend(rows)
+        except aiosqlite.OperationalError:
+            continue  # M22-3: MATCH residual / db sem FTS -> só pula este db
+        except Exception:
+            continue  # M24-1
+    merged.sort(key=lambda r: r.get("match_count", 0), reverse=True)
+    seen: set = set()
+    out: list[dict] = []
+    for r in merged:  # ids são únicos entre dbs; dedup por segurança
+        if r["id"] not in seen:
+            seen.add(r["id"])
+            out.append(r)
+        if len(out) >= limit:
+            break
+    return out
 
 
-async def _search_sessions_fts_run(query: str, limit: int = 20) -> list[dict]:
-    if not os.path.exists(STATE_DB):
+async def _search_sessions_fts_run(query: str, limit: int = 20, db_path: Optional[str] = None) -> list[dict]:
+    db_path = db_path or STATE_DB
+    if not os.path.exists(db_path):
         return []
     q = _fts_quote(query)
     if not q:
         return []  # M20-3: MATCH '' é sintaxe inválida no FTS5 — nada a buscar
 
     results: list[dict] = []
-    async with aiosqlite.connect(STATE_DB) as db:
+    async with aiosqlite.connect(db_path) as db:
         # First gather matching session IDs with their best snippet
         async with db.execute(
             f"""
@@ -545,7 +602,8 @@ async def _search_sessions_fts_run(query: str, limit: int = 20) -> list[dict]:
                 s.tool_call_count,
                 s.chat_type,
                 s.archived,
-                {_display_text_expr('m')} AS content
+                {_display_text_expr('m')} AS content,
+                COUNT(messages_fts.rowid) AS match_count
             FROM messages_fts
             JOIN messages m ON m.rowid = messages_fts.rowid
             JOIN sessions s ON s.id = m.session_id
@@ -571,6 +629,7 @@ async def _search_sessions_fts_run(query: str, limit: int = 20) -> list[dict]:
                 chat_type,
                 archived,
                 snippet_text,
+                match_count,
             ) = row
 
             started_iso = _ts_to_iso(started_at)
@@ -596,6 +655,7 @@ async def _search_sessions_fts_run(query: str, limit: int = 20) -> list[dict]:
                     "archived": bool(archived),
                     "duration_seconds": duration,
                     "snippet": (snippet_text or "")[:200],
+                    "match_count": match_count,
                 }
             )
 
