@@ -255,6 +255,7 @@ async def list_sessions(
     search: Optional[str] = None,
     source: Optional[str] = None,
     model: Optional[str] = None,
+    include_hidden: bool = False,
 ) -> dict:
     """Return paginated session list from state.db.
 
@@ -264,6 +265,8 @@ async def list_sessions(
         return {"sessions": [], "total": 0, "limit": limit, "offset": offset}
 
     where_clauses: list[str] = []
+    if not include_hidden:
+        where_clauses.append("hidden = 0")  # F-M3-07: Bot Mode marca sessions hidden de propósito
     params: list = []
 
     if search:
