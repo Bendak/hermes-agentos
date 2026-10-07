@@ -66,3 +66,49 @@ def test_discovery_single_source_and_collision_safe(tmp_path, monkeypatch):
     ids = disc.discover_profile_ids(include_default=True)
     assert ids == ["default", "ok"], ids
     assert disc.iter_sub_profile_ids() == ["ok"]
+
+
+def test_multi_db_aggregation_profile_attribution(tmp_path, monkeypatch):
+    """WI-7 lote 1: counts e lista agregam todos os state.db; NULL = dono;
+    profile_name explícito vence; dir sem config.yaml (órfão) fica de fora."""
+    root = tmp_path
+    # root db: 1 sessão default
+    con = sqlite3.connect(root / "state.db")
+    con.execute("CREATE TABLE sessions (id TEXT, source TEXT, model TEXT, title TEXT,"
+                " started_at TEXT, ended_at TEXT, message_count INTEGER,"
+                " tool_call_count INTEGER, chat_type TEXT, archived INTEGER,"
+                " hidden INTEGER DEFAULT 0, profile_name TEXT)")
+    con.execute("INSERT INTO sessions VALUES ('r1','cli','m','root',100,NULL,0,0,NULL,0,0,'default')")
+    con.commit(); con.close()
+    # sub-profile vivo: 1 NULL (dono) + 1 com profile_name explícito
+    (root / "profiles" / "coder").mkdir(parents=True)
+    (root / "profiles" / "coder" / "config.yaml").write_text("model: {}")
+    con = sqlite3.connect(root / "profiles" / "coder" / "state.db")
+    con.execute("CREATE TABLE sessions (id TEXT, source TEXT, model TEXT, title TEXT,"
+                " started_at TEXT, ended_at TEXT, message_count INTEGER,"
+                " tool_call_count INTEGER, chat_type TEXT, archived INTEGER,"
+                " hidden INTEGER DEFAULT 0, profile_name TEXT)")
+    con.execute("INSERT INTO sessions VALUES ('c1','cli','m','nulo',200,NULL,0,0,NULL,0,0,NULL)")
+    con.execute("INSERT INTO sessions VALUES ('c2','cli','m','explicito',300,NULL,0,0,NULL,0,0,'atlas')")
+    con.commit(); con.close()
+    # órfão pós-delete: sem config.yaml → fora
+    (root / "profiles" / "gemeni").mkdir(parents=True)
+    con = sqlite3.connect(root / "profiles" / "gemeni" / "state.db")
+    con.execute("CREATE TABLE sessions (id TEXT, source TEXT, model TEXT, title TEXT,"
+                " started_at TEXT, ended_at TEXT, message_count INTEGER,"
+                " tool_call_count INTEGER, chat_type TEXT, archived INTEGER,"
+                " hidden INTEGER DEFAULT 0, profile_name TEXT)")
+    con.execute("INSERT INTO sessions VALUES ('g1','cli','m','orfao',400,NULL,0,0,NULL,0,0,NULL)")
+    con.commit(); con.close()
+
+    monkeypatch.setattr(sessions_mod, "STATE_DB", str(root / "state.db"))
+    import asyncio
+    counts = asyncio.run(sessions_mod.count_sessions_by_profile())
+    assert counts == {"default": 1, "coder": 1, "atlas": 1}, counts
+
+    res = asyncio.run(sessions_mod.list_sessions(limit=50))
+    ids = [x["id"] for x in res["sessions"]]
+    assert ids == ["c2", "c1", "r1"], ids          # started_at DESC cross-DB
+    profs = {x["id"]: x["profile"] for x in res["sessions"]}
+    assert profs == {"r1": "default", "c1": "coder", "c2": "atlas"}, profs
+    assert res["total"] == 3
