@@ -116,7 +116,68 @@ def test_representative_query_seeks_display_index(tmp_path, monkeypatch):
          f" AND m.role IN ('user', 'assistant', 'tool')"
          f"{_display_where('m')}{_representative_clause('m')}")
     conn = _sq.connect(str(tmp_path / "state.db"))
-    plan = "\n".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + q, ("s1",)))
+    plan = "\n".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + q, ("s1", "s1")))
     conn.close()
     assert "SCAN messages c" not in plan, plan
     assert "SEARCH" in plan, plan
+
+
+# ── WI-6 batch 2 (M20-2 legacy dedup, M20-3 FTS escape, F-M3-06 LIKE) ───────
+
+def test_legacy_identity_copies_dedupe(tmp_path, monkeypatch):
+    """M20-2: NULL display_order rows (pre-index stores) dedup by payload
+    identity — 3 copies -> 1 shown (44.398 duplicate rows live in 3 sessions)."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "state.db"))
+    dup = ("cópia de identidade",)
+    for i, (mid, active) in enumerate([(20, 0), (21, 1), (22, 1)]):
+        conn.execute(
+            "INSERT INTO messages (id, session_id, role, content, display_order, active, compacted)"
+            " VALUES (?, 's2', 'user', ?, NULL, ?, 1)",
+            (mid, dup[0], 0 if active == 0 else 1),
+        )
+    # ghost copy (0,0) de mesma identidade NÃO conta como visível
+    conn.execute(
+        "INSERT INTO messages (id, session_id, role, content, display_order, active, compacted)"
+        " VALUES (23, 's2', 'user', ?, NULL, 0, 0)", dup)
+    conn.execute("INSERT INTO sessions (id, source, model, title, started_at, message_count)"
+                 " VALUES ('s2', 'cli', 'm', 'Legado', '2026-10-01T00:00:00', 4)")
+    conn.commit()
+    conn.close()
+
+    res = asyncio.run(sessions_mod.get_session_messages("s2", limit=50))
+    ids = [m["id"] for m in res["messages"]]
+    assert res["total"] == 1 and len(ids) == 1       # 3 visíveis -> 1 representante
+    assert ids[0] == 22                              # active DESC, id DESC entre os vivos (mais novo vence)
+
+
+def test_fts_metacharacters_never_500(tmp_path, monkeypatch):
+    """M20-3/F-M3-02: 'foo AND', '"unbalanced', 'NEAR(' = data, not syntax."""
+    _sandbox_db(tmp_path, monkeypatch)
+    for q in ("foo AND", '"unbalanced', "(( NEAR(", "a-b OR", 'x"y', "   "):
+        try:
+            asyncio.run(sessions_mod.search_sessions_fts(q, limit=5))
+        except Exception as e:  # noqa: BLE001
+            raise AssertionError(f"FTS query {q!r} raised {e!r}")
+
+
+def test_title_like_wildcards_are_literal(tmp_path, monkeypatch):
+    """F-M3-06: % e _ no título do usuário não viram wildcard."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "state.db"))
+    conn.execute("INSERT INTO sessions (id, source, model, title, started_at, message_count)"
+                 " VALUES ('s_pct', 'cli', 'm', 'Relatório 100% pronto', '2026-10-01T00:00:00', 0)")
+    conn.execute("INSERT INTO sessions (id, source, model, title, started_at, message_count)"
+                 " VALUES ('s_und', 'cli', 'm', 'nota_x', '2026-10-01T00:00:00', 0)")
+    conn.commit()
+    conn.close()
+
+    import backend.sessions as sm
+    only = asyncio.run(sm.list_sessions(search="100%"))
+    assert [r["id"] for r in only["sessions"]] == ["s_pct"]   # não casou 'nota_x' nem tudo
+    only2 = asyncio.run(sm.list_sessions(search="nota_x"))
+    assert [r["id"] for r in only2["sessions"]] == ["s_und"]  # _ literal
+    none = asyncio.run(sm.list_sessions(search="100_"))
+    assert none["sessions"] == []                             # _ não é wildcard
