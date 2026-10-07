@@ -96,6 +96,26 @@ def _read_gateway_state(path: str) -> Dict[str, Any]:
         return defaults
 
 
+def _kanban_running_tasks() -> dict:
+    """M24-6: título da task em execução por assignee (kanban.db, status
+    'running'). Worker de kanban é processo efêmero sem gateway_state — sem
+    isto o dashboard mostra 'Idle' com o profile trabalhando. Leitura
+    read-only; qualquer falha vira mapa vazio (M24-1: nunca derruba)."""
+    try:
+        import sqlite3  # noqa: PLC0415
+        from backend.tasks import DB_PATH as KANBAN_DB  # noqa: PLC0415
+        conn = sqlite3.connect(f"file:{KANBAN_DB}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT assignee, title FROM tasks WHERE status = 'running'"
+            ).fetchall()
+        finally:
+            conn.close()
+        return {a: t for a, t in rows if a}
+    except Exception:
+        return {}
+
+
 def check_process_alive(pid: Optional[int]) -> bool:
     """Check if a process with the given PID exists in this namespace."""
     if pid is None:
@@ -109,6 +129,7 @@ def check_process_alive(pid: Optional[int]) -> bool:
 def get_profiles() -> List[Dict[str, Any]]:
     """Discover all profiles dynamically and return a list of summary dicts."""
     profile_ids = _discover_profile_ids()
+    running_tasks = _kanban_running_tasks()  # M24-6
     profiles = []
     for profile_id in profile_ids:
         # Default profile lives at the data root, sub-profiles in profiles/
@@ -141,6 +162,7 @@ def get_profiles() -> List[Dict[str, Any]]:
         pid = gateway.get("pid")
         process_alive = check_process_alive(pid)
 
+        kanban_task = running_tasks.get(profile_id)  # M24-6
         profiles.append(
             {
                 "id": profile_id,
@@ -151,6 +173,12 @@ def get_profiles() -> List[Dict[str, Any]]:
                 "gateway_state": gateway["gateway_state"],
                 "pid": pid,
                 "process_alive": process_alive,
+                "kanban_task": kanban_task,
+                "status": (
+                    "working" if kanban_task
+                    else "active" if process_alive
+                    else "idle"
+                ),
             }
         )
     return profiles

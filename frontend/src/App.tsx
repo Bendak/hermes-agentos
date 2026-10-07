@@ -73,6 +73,8 @@ interface AgentProfile {
   gateway_state: string
   pid: number | null
   process_alive: boolean
+  kanban_task?: string | null
+  status?: string
   sessions: number
 }
 
@@ -396,7 +398,7 @@ function AgentCard({ agent }: { agent: AgentProfile }) {
         </span>
       </div>
       <div className="flex items-center justify-between text-caption text-text-tertiary">
-        <span className="font-mono">{agent.process_alive ? `PID: ${agent.pid}` : 'Idle'}</span>
+        <span className="font-mono">{agent.kanban_task ? `🔨 ${agent.kanban_task.length > 42 ? agent.kanban_task.slice(0, 42) + '…' : agent.kanban_task}` : agent.process_alive ? `PID: ${agent.pid}` : 'Idle'}</span>
         <span>Sessions: {agent.sessions}</span>
       </div>
     </div>
@@ -458,7 +460,7 @@ function DashboardPage() {
     },
   })
 
-  const activeCount = data?.filter((a) => a.process_alive).length ?? 0
+  const activeCount = data?.filter((a) => a.process_alive || a.kanban_task).length ?? 0
   const totalSessions = data?.reduce((sum, a) => sum + a.sessions, 0) ?? 0
 
   return (

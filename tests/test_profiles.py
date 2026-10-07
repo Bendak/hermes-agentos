@@ -779,3 +779,22 @@ def test_orphan_profile_dir_without_config_is_not_an_agent(tmp_path, monkeypatch
     ids = [x["id"] for x in ag.get_profiles()]
     assert "gemeni" not in ids, ids
     assert "nexus" in ids and "default" in ids, ids
+
+
+def test_kanban_working_agent_not_idle(tmp_path, monkeypatch):
+    """M24-6: agente com task running no kanban não aparece Idle —
+    card ganha kanban_task + status 'working'; contagem de ativos inclui."""
+    import backend.agents as ag
+    prof = tmp_path / "profiles"
+    (prof / "coder").mkdir(parents=True)
+    (prof / "coder" / "config.yaml").write_text("model:\n  default: glm-5.3\n")
+    monkeypatch.setattr(ag, "PROFILES_DIR", str(prof))
+    monkeypatch.setattr(ag, "_discover_profile_ids", lambda: ["coder"])
+    monkeypatch.setattr(ag, "_kanban_running_tasks", lambda: {"coder": "Adversarial WI-7 batch 2"})
+    out = {x["id"]: x for x in ag.get_profiles()}
+    assert out["coder"]["kanban_task"] == "Adversarial WI-7 batch 2"
+    assert out["coder"]["status"] == "working"
+    # resiliência: mapa vazio (kanban.db fora) → idle normal, nada quebra
+    monkeypatch.setattr(ag, "_kanban_running_tasks", lambda: {})
+    out2 = {x["id"]: x for x in ag.get_profiles()}
+    assert out2["coder"]["status"] == "idle" and out2["coder"]["kanban_task"] is None
