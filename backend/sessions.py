@@ -174,8 +174,28 @@ def _ts_to_iso(ts: Optional[float]) -> Optional[str]:
         return None
 
 
+def _state_db_files() -> list[tuple[str, str]]:
+    """WI-7: todos os state.db — root ('default') + sub-profiles.
+
+    Perfil vivo = diretório com config.yaml (órfãos pós-delete ficam de fora,
+    consistente com get_profiles/efa44da). O dir de profiles é DERIVADO do
+    local do STATE_DB (<raiz>/profiles/*) — mantém sandboxes de teste
+    isolados sem monkeypatch extra."""
+    out: list[tuple[str, str]] = [("default", STATE_DB)]
+    prof_root = os.path.join(os.path.dirname(STATE_DB), "profiles")
+    if os.path.isdir(prof_root):
+        for pid in sorted(os.listdir(prof_root)):
+            cfg = os.path.join(prof_root, pid, "config.yaml")
+            db = os.path.join(prof_root, pid, "state.db")
+            if os.path.isfile(cfg) and os.path.isfile(db):
+                out.append((pid, db))
+    return out
+
+
 def _row_to_session(row: tuple) -> dict:
     """Map a sessions SELECT row to a session dict."""
+    profile = row[10] if len(row) > 10 else None
+    row = row[:10]
     (
         sid,
         source,
@@ -208,45 +228,39 @@ def _row_to_session(row: tuple) -> dict:
         "chat_type": chat_type,
         "archived": bool(archived),
         "duration_seconds": duration,
+        "profile": profile,
     }
 
 
 async def count_sessions_by_profile() -> Dict[str, int]:
-    """Return session counts per profile from state.db.
+    """M10-04/WI-7: sessões por profile em TODOS os state.db.
 
-    Tries `SELECT profile_name, COUNT(*) FROM sessions` first.
-    Falls back to grouping by model name and mapping to profiles.
-    """
-    if not os.path.exists(STATE_DB):
-        return {}
-
-    try:
-        async with aiosqlite.connect(STATE_DB) as db:
-            # Attempt the ideal query first
-            try:
+    COALESCE(profile_name, dono_do_db): sub-stores têm profile_name
+    majoritariamente NULL = do próprio profile (flag do veredito M10).
+    Stores sem a coluna caem no mapeamento por modelo (M10-10: descarta
+    modelos fora do map)."""
+    totals: Dict[str, int] = {}
+    for owner, path in _state_db_files():
+        if not os.path.exists(path):
+            continue
+        async with aiosqlite.connect(path) as db:
+            cols = {r[1] for r in await (await db.execute(
+                "PRAGMA table_info(sessions)")).fetchall()}
+            if "profile_name" in cols:
                 async with db.execute(
-                    "SELECT profile_name, COUNT(*) FROM sessions WHERE profile_name IS NOT NULL GROUP BY profile_name"
+                    "SELECT COALESCE(profile_name, ?), COUNT(*) FROM sessions GROUP BY 1",
+                    (owner,),
                 ) as cursor:
-                    rows = await cursor.fetchall()
-                    if rows:
-                        return {row[0]: row[1] for row in rows}
-            except Exception:
-                pass
-
-            # Fallback: use model column mapping
-            async with db.execute(
-                "SELECT model, COUNT(*) FROM sessions GROUP BY model"
-            ) as cursor:
-                rows = await cursor.fetchall()
-            result: Dict[str, int] = {}
-            for model, cnt in rows:
-                # Unmapped models must NOT vanish (M10-10) — conserve the count
-                # in an explicit bucket instead of silently dropping it.
-                profile = MODEL_TO_PROFILE.get(model, "unknown")
-                result[profile] = result.get(profile, 0) + cnt
-            return result
-    except Exception:
-        return {}
+                    for pid, count in await cursor.fetchall():
+                        totals[pid] = totals.get(pid, 0) + count
+            else:
+                async with db.execute(
+                    "SELECT model, COUNT(*) FROM sessions GROUP BY model"
+                ) as cursor:
+                    for model, count in await cursor.fetchall():
+                        pid = MODEL_TO_PROFILE.get(model or "", "unknown")
+                        totals[pid] = totals.get(pid, 0) + count
+    return totals
 
 
 async def list_sessions(
@@ -257,13 +271,11 @@ async def list_sessions(
     model: Optional[str] = None,
     include_hidden: bool = False,
 ) -> dict:
-    """Return paginated session list from state.db.
+    """Return paginated session list, aggregated across ALL profile state.dbs
+    (WI-7). Each item carries `profile` = COALESCE(profile_name, owner).
 
     Returns: {"sessions": [...], "total": N, "limit": 50, "offset": 0}
     """
-    if not os.path.exists(STATE_DB):
-        return {"sessions": [], "total": 0, "limit": limit, "offset": offset}
-
     where_clauses: list[str] = []
     if not include_hidden:
         where_clauses.append("hidden = 0")  # F-M3-07: Bot Mode marca sessions hidden de propósito
@@ -285,30 +297,29 @@ async def list_sessions(
     if where_clauses:
         where_sql = "WHERE " + " AND ".join(where_clauses)
 
-    total = 0
-    sessions = []
+    merged: list[dict] = []
+    for owner, path in _state_db_files():
+        if not os.path.exists(path):
+            continue
+        async with aiosqlite.connect(path) as db:
+            cols = {r[1] for r in await (await db.execute(
+                "PRAGMA table_info(sessions)")).fetchall()}
+            prof_expr = "COALESCE(profile_name, ?)" if "profile_name" in cols else "?"
+            sql = f"""
+                SELECT
+                    id, source, model, title, started_at, ended_at,
+                    message_count, tool_call_count, chat_type, archived,
+                    {prof_expr}
+                FROM sessions
+                {where_sql}
+                ORDER BY started_at DESC
+            """
+            async with db.execute(sql, [owner] + params) as cursor:
+                merged.extend(_row_to_session(r) for r in await cursor.fetchall())
 
-    async with aiosqlite.connect(STATE_DB) as db:
-        # Count total
-        count_sql = f"SELECT COUNT(*) FROM sessions {where_sql}"
-        async with db.execute(count_sql, params) as cursor:
-            row = await cursor.fetchone()
-            total = row[0] if row else 0
-
-        # Select paginated rows
-        select_sql = f"""
-            SELECT
-                id, source, model, title, started_at, ended_at,
-                message_count, tool_call_count, chat_type, archived
-            FROM sessions
-            {where_sql}
-            ORDER BY started_at DESC
-            LIMIT ? OFFSET ?
-        """
-        async with db.execute(select_sql, params + [limit, offset]) as cursor:
-            rows = await cursor.fetchall()
-            sessions = [_row_to_session(r) for r in rows]
-
+    merged.sort(key=lambda x: x.get("started_at") or "", reverse=True)
+    total = len(merged)
+    sessions = merged[offset:offset + limit]
     return {"sessions": sessions, "total": total, "limit": limit, "offset": offset}
 
 
