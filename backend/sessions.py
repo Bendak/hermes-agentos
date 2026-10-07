@@ -174,6 +174,19 @@ def _ts_to_iso(ts: Optional[float]) -> Optional[str]:
         return None
 
 
+_SCHEMA_COL_CACHE: dict = {}  # M24-5: PRAGMA por db; schema não muda em runtime
+
+
+async def _has_profile_name(db, path: str) -> bool:
+    cached = _SCHEMA_COL_CACHE.get(path)
+    if cached is None:
+        cols = {r[1] for r in await (await db.execute(
+            "PRAGMA table_info(sessions)")).fetchall()}
+        cached = "profile_name" in cols
+        _SCHEMA_COL_CACHE[path] = cached
+    return cached
+
+
 def _state_db_files() -> list[tuple[str, str]]:
     """WI-7: todos os state.db — root ('default') + sub-profiles.
 
@@ -194,6 +207,11 @@ def _state_db_files() -> list[tuple[str, str]]:
 
 async def _find_session_db(session_id: str) -> Optional[tuple]:
     """M24-3: um session id vive em exatamente um state.db — achar o dono.
+
+    CONTRATO DE OWNERSHIP (M25-4): se o mesmo id existir em dois stores
+    (não ocorre nos dbs reais — 333 ids, 0 dups), o PRIMEIRO db na ordem
+    `_state_db_files()` (root + sorted(listdir)) vence — determinístico; as
+    mensagens do outro store ficam inalcançáveis enquanto o dono tiver o id.
     Db problemático é pulado (M24-1), nunca derruba a busca."""
     for owner, path in _state_db_files():
         if not os.path.exists(path):
@@ -264,9 +282,7 @@ async def count_sessions_by_profile() -> Dict[str, int]:
             continue
         try:
             async with aiosqlite.connect(path) as db:
-                cols = {r[1] for r in await (await db.execute(
-                    "PRAGMA table_info(sessions)")).fetchall()}
-                if "profile_name" in cols:
+                if await _has_profile_name(db, path):
                     async with db.execute(
                         "SELECT COALESCE(profile_name, ?), COUNT(*) FROM sessions GROUP BY 1",
                         (owner,),
@@ -326,9 +342,7 @@ async def list_sessions(
             continue
         try:
             async with aiosqlite.connect(path) as db:
-                cols = {r[1] for r in await (await db.execute(
-                    "PRAGMA table_info(sessions)")).fetchall()}
-                prof_expr = "COALESCE(profile_name, ?)" if "profile_name" in cols else "?"
+                prof_expr = "COALESCE(profile_name, ?)" if await _has_profile_name(db, path) else "?"
                 sql = f"""
                     SELECT
                         id, source, model, title, started_at, ended_at,

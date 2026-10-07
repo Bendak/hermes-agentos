@@ -107,11 +107,18 @@ def _kanban_running_tasks() -> dict:
         conn = sqlite3.connect(f"file:{KANBAN_DB}?mode=ro", uri=True)
         try:
             rows = conn.execute(
-                "SELECT assignee, title FROM tasks WHERE status = 'running'"
+                "SELECT assignee, title, started_at FROM tasks"
+                " WHERE status = 'running'"
+                " AND (claim_expires IS NULL OR claim_expires > CAST(strftime('%s','now') AS INTEGER))"
+                " ORDER BY started_at DESC"  # M25-3: mais recente vence por assignee
             ).fetchall()
         finally:
             conn.close()
-        return {a: t for a, t in rows if a}
+        out: dict = {}
+        for a, t, _sa in rows:
+            if a:
+                out.setdefault(a, t)  # M25-3: primeiro da DESC = mais recente
+        return out
     except Exception:
         return {}
 
