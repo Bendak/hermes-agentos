@@ -27,6 +27,8 @@ CREATE TABLE messages (
     display_order INTEGER, active INTEGER, compacted INTEGER
 );
 CREATE VIRTUAL TABLE messages_fts USING fts5(content, content_rowid='id');
+CREATE INDEX idx_messages_display_page ON messages(session_id, display_order, active DESC, id DESC)
+    WHERE active = 1 OR compacted = 1;
 """
 
 
@@ -101,3 +103,20 @@ def test_search_does_not_leak_ghosts_or_hidden(tmp_path, monkeypatch):
     assert hidden == []
     ok = asyncio.run(sessions_mod.search_sessions_fts("visível", limit=5))
     assert ok and ok[0]["id"] == "s1"
+
+
+def test_representative_query_seeks_display_index(tmp_path, monkeypatch):
+    """Perf regression guard (pós-7ee00be): the representative subquery must
+    SEEK idx_messages_display_page — the COALESCE form defeated the index and
+    timed out (>300s) on the largest live session (~74k rows)."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import sqlite3 as _sq
+    from backend.sessions import _display_where, _representative_clause
+    q = (f"SELECT COUNT(*) FROM messages m WHERE m.session_id = ?"
+         f" AND m.role IN ('user', 'assistant', 'tool')"
+         f"{_display_where('m')}{_representative_clause('m')}")
+    conn = _sq.connect(str(tmp_path / "state.db"))
+    plan = "\n".join(r[3] for r in conn.execute("EXPLAIN QUERY PLAN " + q, ("s1",)))
+    conn.close()
+    assert "SCAN messages c" not in plan, plan
+    assert "SEARCH" in plan, plan
