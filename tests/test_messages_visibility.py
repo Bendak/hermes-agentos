@@ -181,3 +181,46 @@ def test_title_like_wildcards_are_literal(tmp_path, monkeypatch):
     assert [r["id"] for r in only2["sessions"]] == ["s_und"]  # _ literal
     none = asyncio.run(sm.list_sessions(search="100_"))
     assert none["sessions"] == []                             # _ não é wildcard
+
+
+# ── WI-6 batch 3 (M21-1/3/4/6) ──────────────────────────────────────────────
+
+def test_fts_trailing_quote_and_operators(tmp_path, monkeypatch):
+    """M21-1: token 'a"' nunca deixa literal aberta. M21-6: AND/OR/NOT
+    preservados como operadores (recall paridade Hermes); dangling dropado."""
+    _sandbox_db(tmp_path, monkeypatch)
+    for q in ('a"', 'x""y', '"', 'foo OR', 'OR foo', 'foo OR bar', 'AND'):
+        try:
+            asyncio.run(sessions_mod.search_sessions_fts(q, limit=5))
+        except Exception as e:  # noqa: BLE001
+            raise AssertionError(f"FTS query {q!r} raised {e!r}")
+    from backend.sessions import _fts_quote
+    assert '"' not in _fts_quote('a"').replace('"a"', "")   # aspa interna sumiu
+    assert _fts_quote("foo OR bar") == '"foo" OR "bar"'      # operador no meio
+    assert _fts_quote("foo OR") == '"foo"'                   # dangling dropado
+    assert _fts_quote("AND") == '"AND"'                      # solo = literal
+
+
+def test_legacy_group_sorts_at_min_id_position(tmp_path, monkeypatch):
+    """M21-3/M21-4: grupo legado ordena na posição do MIN(id) da identidade
+    (sort_id do Hermes legacy), não na posição do representante vivo."""
+    _sandbox_db(tmp_path, monkeypatch)
+    import sqlite3 as _sq
+    conn = _sq.connect(str(tmp_path / "state.db"))
+    conn.execute("INSERT INTO sessions (id, source, model, title, started_at, message_count)"
+                 " VALUES ('s3', 'cli', 'm', 'Ordem', '2026-10-01T00:00:00', 4)")
+    # linha normal id 30; cópias legadas ids 31 (min) e 33 (rep vivo); linha 32 entre elas
+    rows = [(30, "primeiro", None, 1, 0), (31, "cópia antiga", None, 0, 1),
+            (32, "entre as cópias", None, 1, 0), (33, "cópia antiga", None, 1, 0)]
+    for mid, content, dor, active, compacted in rows:
+        conn.execute("INSERT INTO messages (id, session_id, role, content, display_order, active, compacted)"
+                     " VALUES (?, 's3', 'user', ?, ?, ?, ?)", (mid, content, dor, active, compacted))
+    conn.commit()
+    conn.close()
+
+    res = asyncio.run(sessions_mod.get_session_messages("s3", limit=50))
+    contents = [m["content"] for m in res["messages"]]
+    # grupo (31/33) ordena na posição do min id (31) → ANTES de 'entre as cópias'
+    assert contents == ["primeiro", "cópia antiga", "entre as cópias"], contents
+    ids = [m["id"] for m in res["messages"]]
+    assert ids[1] == 33  # representante vivo
