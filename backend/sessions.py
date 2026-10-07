@@ -39,23 +39,63 @@ def _display_text_expr(alias: str = "") -> str:
     )
 
 
-def _legacy_rep_join() -> str:
-    """M21-3/M21-4: materialized legacy representative set WITH the identity
-    group's MIN(id) — the Hermes legacy sort key (sort_id = MIN(id) OVER
-    identity). Joined once (uncorrelated), never per-row."""
-    k = "c."
-    ident = (f"{k}role, {k}content, {k}timestamp, {k}tool_call_id,"
-             f" {k}tool_calls, {k}tool_name")
-    return (
-        " LEFT JOIN (SELECT rid, grp_min FROM (SELECT c.id AS rid,"
-        f" MIN(c.id) OVER (PARTITION BY {ident}) AS grp_min,"
-        f" ROW_NUMBER() OVER (PARTITION BY {ident}"
-        f" ORDER BY {k}active DESC, {k}id DESC) AS rn"
-        f" FROM messages c WHERE c.session_id = ? AND c.display_order IS NULL"
-        f" AND c.role IN ('user', 'assistant', 'tool')"
-        + _display_where("c") +
-        ") WHERE rn = 1) L ON L.rid = m.id"
-    )
+def _messages_union_sql() -> str:
+    """The two-branch display union (WI-6 batch 3): indexed rows (display_order
+    set, pick per group via the display index) UNION ALL legacy reps (identity
+    dedup, MIN(id) as sort_key = Hermes legacy sort_id). Legacy branch drives
+    via CROSS JOIN (rowid seeks). 13th col `legacy_flag` feeds the M22-6
+    straddle dedup wrapper. Bindings: 3x session_id (outer idx, legacy window,
+    legacy outer)."""
+    return f"""
+                SELECT
+                    m.id, m.session_id, m.role, {_display_text_expr('m')} AS content, m.tool_name,
+                    m.timestamp, m.tool_calls, m.tool_call_id, m.finish_reason, m.token_count,
+                    m.reasoning_content, m.compacted,
+                    m.display_order AS sort_key, 0 AS legacy_flag
+                FROM messages m
+                WHERE m.session_id = ? AND m.role IN ('user', 'assistant', 'tool')
+                  AND m.display_order IS NOT NULL
+                  AND m.id = (SELECT c.id FROM messages c
+                              WHERE c.session_id = m.session_id AND c.display_order = m.display_order
+                                AND c.role IN ('user', 'assistant', 'tool')
+                                {_display_where('c')}
+                              ORDER BY c.active DESC, c.id DESC LIMIT 1)
+                  {_display_where('m')}
+                UNION ALL
+                SELECT
+                    m.id, m.session_id, m.role, {_display_text_expr('m')} AS content, m.tool_name,
+                    m.timestamp, m.tool_calls, m.tool_call_id, m.finish_reason, m.token_count,
+                    m.reasoning_content, m.compacted,
+                    L.grp_min AS sort_key, 1 AS legacy_flag
+                FROM (SELECT rid, grp_min FROM (SELECT c.id AS rid,
+                     MIN(c.id) OVER (PARTITION BY c.role, c.content, c.timestamp, c.tool_call_id, c.tool_calls, c.tool_name) AS grp_min,
+                     ROW_NUMBER() OVER (PARTITION BY c.role, c.content, c.timestamp, c.tool_call_id, c.tool_calls, c.tool_name
+                                        ORDER BY c.active DESC, c.id DESC) AS rn
+                     FROM messages c WHERE c.session_id = ? AND c.display_order IS NULL
+                       AND c.role IN ('user', 'assistant', 'tool') {_display_where('c')}
+                ) WHERE rn = 1) L
+                CROSS JOIN messages m
+                WHERE m.id = L.rid AND m.session_id = ? AND m.role IN ('user', 'assistant', 'tool')
+                  {_display_where('m')}
+            """
+
+
+def _straddle_dedup_wrap(union_sql: str) -> str:
+    """M22-6: a legacy rep whose identity ALSO has indexed copies is painted
+    twice (once per branch). Drop only the legacy twin: indexed rows never
+    collapse among themselves (legit duplicate content is kept as distinct
+    display groups). Count and list share this wrapper = consistent by
+    construction."""
+    ident = "role, content, timestamp, tool_call_id, tool_calls, tool_name"
+    return f"""
+            SELECT id, session_id, role, content, tool_name, timestamp, tool_calls,
+                   finish_reason, token_count, reasoning_content, compacted, sort_key
+            FROM (
+                SELECT *, SUM(CASE WHEN legacy_flag = 0 THEN 1 ELSE 0 END)
+                       OVER (PARTITION BY {ident}) AS idx_cnt
+                FROM ({union_sql})
+            ) WHERE NOT (legacy_flag = 1 AND idx_cnt > 0)
+        """
 
 
 def _representative_clause(alias: str = "", key_alias: str = "c", legacy_via: str = "") -> str:
@@ -351,12 +391,8 @@ async def get_session_message_count(session_id: str) -> int:
 
     async with aiosqlite.connect(STATE_DB) as db:
         async with db.execute(
-            f"""
-            SELECT COUNT(*) FROM messages m
-            WHERE m.session_id = ? AND m.role IN ('user', 'assistant', 'tool')
-            {_display_where('m')}{_representative_clause('m')}
-            """,
-            (session_id, session_id),  # outer + subquery legado (desacoplado)
+            f"SELECT COUNT(*) FROM ({_straddle_dedup_wrap(_messages_union_sql())})",
+            (session_id, session_id, session_id),
         ) as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
@@ -375,46 +411,8 @@ async def get_session_messages(session_id: str, limit: int = 100, offset: int = 
 
     async with aiosqlite.connect(STATE_DB) as db:
         async with db.execute(
-            f"""
-            SELECT * FROM (
-                SELECT
-                    m.id, m.session_id, m.role, {_display_text_expr('m')} AS content, m.tool_name,
-                    m.timestamp, m.tool_calls, m.finish_reason, m.token_count,
-                    m.reasoning_content, m.compacted,
-                    m.display_order AS sort_key
-                FROM messages m
-                WHERE m.session_id = ? AND m.role IN ('user', 'assistant', 'tool')
-                  AND m.display_order IS NOT NULL
-                  AND m.id = (SELECT c.id FROM messages c
-                              WHERE c.session_id = m.session_id AND c.display_order = m.display_order
-                                AND c.role IN ('user', 'assistant', 'tool')
-                                {_display_where('c')}
-                              ORDER BY c.active DESC, c.id DESC LIMIT 1)
-                  {_display_where('m')}
-                UNION ALL
-                SELECT
-                    m.id, m.session_id, m.role, {_display_text_expr('m')} AS content, m.tool_name,
-                    m.timestamp, m.tool_calls, m.finish_reason, m.token_count,
-                    m.reasoning_content, m.compacted,
-                    L.grp_min AS sort_key
-                FROM (SELECT rid, grp_min FROM (SELECT c.id AS rid,
-                     MIN(c.id) OVER (PARTITION BY c.role, c.content, c.timestamp, c.tool_call_id, c.tool_calls, c.tool_name) AS grp_min,
-                     ROW_NUMBER() OVER (PARTITION BY c.role, c.content, c.timestamp, c.tool_call_id, c.tool_calls, c.tool_name
-                                        ORDER BY c.active DESC, c.id DESC) AS rn
-                     FROM messages c WHERE c.session_id = ? AND c.display_order IS NULL
-                       AND c.role IN ('user', 'assistant', 'tool') {_display_where('c')}
-                ) WHERE rn = 1) L
-                CROSS JOIN messages m
-                WHERE m.id = L.rid AND m.session_id = ? AND m.role IN ('user', 'assistant', 'tool')
-                  {_display_where('m')}
-            )
-            ORDER BY sort_key ASC, id ASC
-            LIMIT ? OFFSET ?
-            """,
-            # M21-3/4: UNION ALL dos dois ramos + sort_key = display_order (indexadas)
-            # ou grp_min = MIN(id) da identidade (legado, igual ao sort_id do Hermes).
-            # CROSS JOIN força L (4k reps) a dirigir com seek por rowid em m — o
-            # LEFT JOIN natural escolhia messages (62k) como outer = 7.3s.
+            _straddle_dedup_wrap(_messages_union_sql())
+            + " ORDER BY sort_key ASC, id ASC LIMIT ? OFFSET ?",
             (session_id, session_id, session_id, limit, offset),
         ) as cursor:
             rows = await cursor.fetchall()
@@ -475,7 +473,7 @@ def _fts_quote(query: str) -> str:
     """
     tokens = []
     for t in query.split():
-        t = t.replace('"', "")
+        t = t.replace('"', "").replace("\x00", "")  # M22-3: NUL quebra o literal
         if t:
             tokens.append(t)
     ops = {"AND", "OR", "NOT"}
@@ -487,6 +485,8 @@ def _fts_quote(query: str) -> str:
         if t.upper() in ops:
             if i == 0 or i == len(tokens) - 1:
                 continue  # M21-6: operador pendurado = sintaxe inválida
+            if kept and kept[-1].upper() in ops:
+                continue  # M22-2: operador adjacente ('a AND OR b') = sintaxe inválida
             kept.append(t)
         else:
             kept.append('"' + t + '"')
@@ -498,7 +498,17 @@ async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:
 
     Joins back to sessions to return session metadata.
     Returns matching sessions with snippet of matched text.
+    M22-2/M22-3 fallback: any residual MATCH syntax error degrades to an
+    empty result — never a 500 (parity with hermes_state_search ~1103,
+    'FTS5 syntax error despite sanitization' -> return []).
     """
+    try:
+        return await _search_sessions_fts_run(query, limit)
+    except aiosqlite.OperationalError:
+        return []
+
+
+async def _search_sessions_fts_run(query: str, limit: int = 20) -> list[dict]:
     if not os.path.exists(STATE_DB):
         return []
     q = _fts_quote(query)
