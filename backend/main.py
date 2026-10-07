@@ -845,7 +845,7 @@ index_html = os.path.join(dist_path, "index.html")
 async def spa_fallback(full_path: str):
     """Serve static assets or index.html for SPA routes.
 
-    Handles browser refreshes on React Router paths (/sessions, /health, etc.)
+    Handles browser refreshes on React Router paths (/sessions, /system-health, etc.)
     which would otherwise 404 since the backend has no such routes.
     """
     # API routes get proper 404 JSON

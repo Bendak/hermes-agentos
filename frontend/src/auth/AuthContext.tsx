@@ -43,7 +43,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const doRefresh = useCallback(async (): Promise<string | null> => {
     const refreshTok = localStorage.getItem(REFRESH_KEY)
-    if (!refreshTok) return null
+    if (!refreshTok) {
+      // definitivo: token rejeitado e sem como renovar
+      clearAuth()
+      return null
+    }
     try {
       const res = await fetch('/api/auth/refresh', {
         method: 'POST',
@@ -88,11 +92,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(data.user)
           setToken(storedToken)
         } else if (res.status === 401 || res.status === 403) {
-          // M11-04: só rejeição definitiva de auth
-          const refreshed = await doRefresh()
-          if (!refreshed) {
-            clearAuth()
-          }
+          // M11-04/M26-01: doRefresh mesmo decide o que é definitivo (401/403
+          // ou sem refresh token -> clearAuth lá dentro); falha transitória
+          // não pode deslogar daqui
+          await doRefresh()
         }
         // M11-04: 5xx em /api/auth/me — sessão mantida; interceptor revalida
       } catch {
@@ -145,7 +148,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
             // M11-04: 5xx na renovação — mantém a sessão; o retry revalida
           } catch {
-            clearAuth()
+            // M26-01: throw aqui é erro de rede (refresh fetch offline) —
+            // transitório; deslogar era o último caminho do bug M11-04
           }
         }
       }
@@ -173,15 +177,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const logout = useCallback(() => {
-    // WI-3: revoke every outstanding server-side token, then clear locally
+    // WI-3: revoke every outstanding server-side token, then clear locally.
+    // M26-03: estado local é limpo ANTES do POST — o interceptor não tem mais
+    // token que renovar; o revoke segue fire-and-forget com o token capturado
     const currentToken = localStorage.getItem(TOKEN_KEY)
+    clearAuth()
     if (currentToken) {
       fetch('/api/auth/logout', {
         method: 'POST',
         headers: { Authorization: 'Bearer ' + currentToken },
       }).catch(() => {})
     }
-    clearAuth()
   }, [clearAuth])
 
   const refreshToken = useCallback(async () => {
