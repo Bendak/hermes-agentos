@@ -1,4 +1,6 @@
 import { isAdmin } from "./lib/admin"
+import { apiErrorMessage } from "./lib/api"
+import { ToastProvider, useToast } from "./lib/toast"
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
@@ -2012,6 +2014,7 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(false)
+  const toast = useToast()
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -2031,7 +2034,7 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onMutate: () => { setSaving(true); setError(null) },
@@ -2041,7 +2044,7 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
       onSaved()
       onClose()
     },
-    onError: (err: Error) => { setError(err.message); setSaving(false) },
+    onError: (err: Error) => { setError(err.message); setSaving(false); toast(err.message || 'Request failed', 'error') },
   })
 
   // ESC to close
@@ -2575,7 +2578,7 @@ function KanbanBoardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onMutate: async ({ taskId, status }) => {
@@ -2606,7 +2609,7 @@ function KanbanBoardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onSettled: () => {
@@ -2623,7 +2626,7 @@ function KanbanBoardPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: taskIds, updates: { status } }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onSettled: () => {
@@ -2689,6 +2692,7 @@ function KanbanBoardPage() {
               <span>+</span> New Task
             </button>
             )}
+            {isAdmin() && (
             <button
               onClick={() => setCreateTriageModalOpen(true)}
               className="flex items-center gap-2 px-4 py-2 bg-purple-subtle text-purple border border-purple/30 rounded-lg hover:bg-purple/20 transition-colors text-sm font-medium"
@@ -2696,6 +2700,7 @@ function KanbanBoardPage() {
             >
               <span>+</span> New Triage Task
             </button>
+            )}
             {stats && (
               <div className="hidden sm:flex items-center gap-4 text-caption text-text-tertiary">
                 <span title="Total active tasks">{stats.total} total</span>
@@ -2934,7 +2939,7 @@ function TaskDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ body: commentText, author: commentAuthor }),
       })
-      if (!res.ok) throw new Error(await res.text())
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onSuccess: () => {
@@ -3934,6 +3939,7 @@ const workflowNodeTypes = { workflowNode: WorkflowNode }
 function WorkflowListPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const toast = useToast()
   const { data: workflows, isLoading } = useQuery<Workflow[]>({
     queryKey: ['workflows'],
     queryFn: async () => {
@@ -3964,15 +3970,17 @@ function WorkflowListPage() {
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
       navigate(`/workflows/${wf.id}`)
     },
+    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
   })
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
       const res = await fetch(`/api/workflows/${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Failed to delete workflow')
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workflows'] }),
+    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
   })
 
   const handleDelete = (e: React.MouseEvent, id: string, name: string) => {
@@ -4029,13 +4037,15 @@ function WorkflowListPage() {
               >
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-h4 font-semibold text-text-primary truncate flex-1 mr-2">{wf.name}</h3>
+                  {isAdmin() && (
                   <button
-                    onClick={(e) => isAdmin() && handleDelete(e, wf.id, wf.name)}
+                    onClick={(e) => handleDelete(e, wf.id, wf.name)}
                     className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 p-1.5 rounded-md hover:bg-error-subtle text-text-tertiary hover:text-error transition-all"
                     title="Delete workflow"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
                   </button>
+                  )}
                 </div>
                 <p className="text-body-sm text-text-secondary mb-4 line-clamp-2">
                   {wf.description || 'No description'}
@@ -4359,13 +4369,13 @@ function WorkflowEditorPage() {
           >
             ⚙️
           </button>
-          <button
+          {isAdmin() && (<button
             onClick={() => saveMutation.mutate()}
             disabled={saveStatus === 'saving'}
             className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-accent text-text-inverse font-medium text-body-sm hover:bg-accent-hover transition-colors disabled:opacity-50"
           >
             {saveStatus === 'saving' ? 'Saving...' : 'Save'}
-          </button>
+          </button>)}
           <button
             onClick={() => runMutation.mutate()}
             disabled={runMutation.isPending}
@@ -5012,6 +5022,7 @@ function AppInner() {
   }, [navigate])
 
   return (
+    <ToastProvider>
     <QueryClientProvider client={queryClient}>
       <SearchContext.Provider value={{ openSearch: () => setSearchOpen(true) }}>
         <Routes>
@@ -5038,6 +5049,7 @@ function AppInner() {
         <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
       </SearchContext.Provider>
     </QueryClientProvider>
+    </ToastProvider>
   )
 }
 
@@ -5308,6 +5320,7 @@ function CronPage() {
   const [editJob, setEditJob] = useState<CronJob | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const queryClient = useQueryClient()
+  const toast = useToast()
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['cron-jobs'],
@@ -5329,6 +5342,7 @@ function CronPage() {
       queryClient.invalidateQueries({ queryKey: ['cron-jobs'] })
       setShowCreate(false)
     },
+    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
   })
 
   const updateMutation = useMutation({
@@ -5341,38 +5355,47 @@ function CronPage() {
       queryClient.invalidateQueries({ queryKey: ['cron-jobs'] })
       setEditJob(null)
     },
+    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
   })
 
   const deleteMutation = useMutation({
     mutationFn: async (jobId: string) => {
       const res = await fetch(`/api/cron/${jobId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
+    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
   })
 
   const pauseMutation = useMutation({
     mutationFn: async (jobId: string) => {
       const res = await fetch(`/api/cron/${jobId}/pause`, { method: 'POST' })
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
+    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
   })
 
   const resumeMutation = useMutation({
     mutationFn: async (jobId: string) => {
       const res = await fetch(`/api/cron/${jobId}/resume`, { method: 'POST' })
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
+    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
   })
 
   const runNowMutation = useMutation({
     mutationFn: async (jobId: string) => {
       const res = await fetch(`/api/cron/${jobId}/run`, { method: 'POST' })
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json() as Promise<{ status: string; message: string }>
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
+    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
   })
 
   const jobs = data?.jobs || []
@@ -5488,6 +5511,7 @@ function CronPage() {
                         {formatRelativeTime(job.next_run_at)}
                       </td>
                       <td className="px-4 py-3">
+                        {isAdmin() && (
                         <div className="flex items-center justify-end gap-1">
                           {/* Run Now */}
                           <button
@@ -5540,6 +5564,7 @@ function CronPage() {
                             {deleteMutation.isPending && deleteMutation.variables === job.id ? '...' : '✕'}
                           </button>
                         </div>
+                        )}
                       </td>
                     </tr>
                   )
