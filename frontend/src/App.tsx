@@ -2368,7 +2368,7 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: task.id, data: { task } })
+  } = useSortable({ id: task.id, data: { task }, disabled: !isAdmin() })
 
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
@@ -2424,7 +2424,7 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
         <div className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug flex-1 prose-kanban-card">
           <MarkdownRenderer content={task.title || 'Untitled'} />
         </div>
-        {onEdit && !isOverlay && (
+        {onEdit && !isOverlay && isAdmin() && (
           <div className="flex items-center gap-0.5 shrink-0">
             <button
               onClick={handleEditClick}
@@ -2535,6 +2535,7 @@ function KanbanColumn({ label, status, tasks, onEdit, onArchive, bulkSelectMode,
 }
 
 function KanbanBoardPage() {
+  const toast = useToast()
   const [showArchived, setShowArchived] = useState(false)
   const [draggedTask, setDraggedTask] = useState<TaskItem | null>(null)
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null)
@@ -2594,6 +2595,7 @@ function KanbanBoardPage() {
       if (context?.previousTasks) {
         queryClient.setQueryData(['tasks', 'all'], context.previousTasks)
       }
+      toast(_err instanceof Error ? _err.message : 'Move failed', 'error')  // M28-02
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
@@ -2612,6 +2614,7 @@ function KanbanBoardPage() {
       if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
+    onError: (e: Error) => toast(e.message || 'Archive failed', 'error'),  // M28-02
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
       queryClient.invalidateQueries({ queryKey: ['kanban', 'stats'] })
@@ -2629,6 +2632,7 @@ function KanbanBoardPage() {
       if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
+    onError: (e: Error) => toast(e.message || 'Bulk archive failed', 'error'),  // M28-02
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
       queryClient.invalidateQueries({ queryKey: ['kanban', 'stats'] })
@@ -2645,6 +2649,7 @@ function KanbanBoardPage() {
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     setDraggedTask(null)
+    if (!isAdmin()) return  // M28-01: viewer não move card (403 era silencioso)
     if (!over) return
     const taskId = active.id as string
     const newStatus = over.id as string
@@ -2707,13 +2712,15 @@ function KanbanBoardPage() {
                 <span title="Completed in last 7 days" className="text-success">{stats.recent_done_7d} done/7d</span>
               </div>
             )}
+            {isAdmin() && (
             <button
               onClick={() => { setBulkSelectMode(!bulkSelectMode); if (bulkSelectMode) setSelectedIds(new Set()) }}
               className={`rounded-md border px-3 py-1.5 text-sm transition ${bulkSelectMode ? 'bg-accent text-white border-accent' : 'bg-surface border-border text-text-primary hover:bg-surface-hover/80'}`}
             >
               {bulkSelectMode ? '✕ Cancel bulk' : 'Bulk select'}
             </button>
-            {bulkSelectMode && selectedIds.size > 0 && (
+            )}
+            {isAdmin() && bulkSelectMode && selectedIds.size > 0 && (
               <>
                 <span className="text-caption text-text-secondary">{selectedIds.size} selected</span>
                 <button
@@ -2966,7 +2973,7 @@ function TaskDetailPage() {
           >
             ← Back to tasks
           </button>
-          {data && (
+          {data && isAdmin() && (
             <div className="flex items-center gap-2">
               <button
                 onClick={() => {
@@ -3224,7 +3231,8 @@ function TaskDetailPage() {
             {/* Comments tab */}
             {activeTab === 'comments' && (
               <div data-testid="tab-panel-comments" className="rounded-lg border border-border bg-surface/30 p-4">
-                {/* Comment form */}
+{/* Comment form */}
+                {isAdmin() && (
                 <div className="mb-4 pb-4 border-b border-border">
                   <div className="flex gap-2 mb-2">
                     <input
@@ -3252,7 +3260,7 @@ function TaskDetailPage() {
                   {addCommentMutation.isError && (
                     <p className="mt-2 text-sm text-error">{(addCommentMutation.error as Error).message}</p>
                   )}
-                </div>
+                </div>)}
 
                 {/* Comment list */}
                 {data.comments.length === 0 && <p className="text-body-sm text-text-tertiary">No comments yet.</p>}
@@ -3977,7 +3985,7 @@ function WorkflowListPage() {
     mutationFn: async (id: string) => {
       const res = await fetch(`/api/workflows/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await apiErrorMessage(res))
-      return res.json()
+      return res.json().catch(() => null)  // M28-03: 2xx empty body = sucesso
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workflows'] }),
     onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
@@ -4077,6 +4085,7 @@ function WorkflowListPage() {
 }
 
 function WorkflowEditorPage() {
+  const toast = useToast()
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -4206,7 +4215,7 @@ function WorkflowEditorPage() {
       // Save first
       await saveMutation.mutateAsync()
       const res = await fetch(`/api/workflows/${id}/run`, { method: 'POST' })
-      if (!res.ok) throw new Error('Run failed')
+      if (!res.ok) throw new Error(await apiErrorMessage(res))  // M28-04
       return res.json()
     },
     onSuccess: (data: any) => {
@@ -4221,6 +4230,7 @@ function WorkflowEditorPage() {
         setRunResults(results)
       }
     },
+    onError: (e: Error) => toast(e.message || 'Run failed', 'error'),  // M28-04
   })
 
   // Run history query
@@ -5362,7 +5372,7 @@ function CronPage() {
     mutationFn: async (jobId: string) => {
       const res = await fetch(`/api/cron/${jobId}`, { method: 'DELETE' })
       if (!res.ok) throw new Error(await apiErrorMessage(res))
-      return res.json()
+      return res.json().catch(() => null)  // M28-03: 2xx empty body = sucesso
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
     onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
