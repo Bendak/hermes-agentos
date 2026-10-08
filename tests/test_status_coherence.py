@@ -93,3 +93,52 @@ def test_status_change_emits_audit_event_m30a(client, admin_headers, make_task):
     assert "running" in tos and "done" in tos
     for _, p in evs:
         assert "actor" in p and "from" in p
+
+
+def test_done_to_archived_keeps_completed_at_m3104(client, admin_headers, make_task):
+    task = make_task({})
+    tid = task["id"]
+    client.patch(f"/api/tasks/{tid}", json={"status": "done"}, headers=admin_headers)
+    r = client.patch(f"/api/tasks/{tid}", json={"status": "archived"}, headers=admin_headers)
+    body = r.json()
+    assert body["status"] == "archived"
+    assert body["completed_at"] is not None, (
+        "M31-04 regression: done→archived apagou completed_at (histórico perdido)"
+    )
+
+
+def test_coerced_request_emits_event_even_when_status_unchanged_m3106(client, admin_headers, make_task):
+    """M31-06: o REQUEST coagido audita — é o shape exato do incidente
+    (usuário pede 'ready', worker vivo, status continua 'running')."""
+    task = make_task({})
+    tid = task["id"]
+    _set_claim(tid, fresh=True)
+    client.patch(f"/api/tasks/{tid}", json={"status": "running"}, headers=admin_headers)
+    r = client.patch(f"/api/tasks/{tid}", json={"status": "ready"}, headers=admin_headers)
+    assert r.json()["status"] == "running"
+    evs = _events(tid)
+    coerced = [p for _, p in evs if p.get("coerced") and p.get("requested") == "ready"]
+    assert coerced, f"M31-06 regression: request coagido sem evento ({evs})"
+    assert coerced[0]["to"] == "running"
+    assert coerced[0]["actor"]  # quem pediu fica registrado
+
+
+def test_millisecond_claim_normalized_m3103(client, admin_headers, make_task):
+    """M31-03: claim em milissegundos (writer legado corrompido) não pode
+    parecer fresco pra sempre."""
+    import sqlite3
+    from backend.tasks import DB_PATH
+
+    task = make_task({})
+    tid = task["id"]
+    db = sqlite3.connect(DB_PATH)
+    db.execute(
+        "UPDATE tasks SET claim_lock=?, claim_expires=?, worker_pid=? WHERE id=?",
+        ("l", (int(time.time()) - 1800) * 1000, 1, tid),  # ms EXPIRADO
+    )
+    db.commit()
+    db.close()
+    r = client.patch(f"/api/tasks/{tid}", json={"status": "ready"}, headers=admin_headers)
+    assert r.json()["status"] == "ready", (
+        "M31-03 regression: claim em ms expirado foi tratado como fresco"
+    )

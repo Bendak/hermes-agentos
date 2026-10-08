@@ -1,10 +1,13 @@
 import json
+import logging
 import os
 from datetime import datetime, timezone
 
 import aiosqlite
 
 from backend.config import settings
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(settings.AGENTOS_DATA_DIR, "kanban.db")
 
@@ -427,8 +430,14 @@ async def _apply_status_change(db, task_id: str, new_status: str, now: int, acto
             "SELECT claim_expires FROM tasks WHERE id = ?", (task_id,)
         ) as cur:
             claim = await cur.fetchone()
-        if claim and claim[0] and int(claim[0]) > now:
-            effective = "running"
+        if claim and claim[0]:
+            claim_exp = int(claim[0])
+            # M31-03: contrato canônico = SEGUNDOS; um claim em ms (resto de
+            # writer legado) pareceria fresco pra sempre — normaliza.
+            if claim_exp > 10 ** 12:
+                claim_exp //= 1000
+            if claim_exp > now:
+                effective = "running"
 
     if effective == "running":
         await db.execute(
@@ -440,13 +449,24 @@ async def _apply_status_change(db, task_id: str, new_status: str, now: int, acto
             "UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?",
             (effective, now, task_id),
         )
+    elif effective == "archived":
+        # M31-04: arquivar MANTÉM a história — done→archived não pode
+        # apagar completed_at (métrica done/7d + detail page)
+        await db.execute(
+            "UPDATE tasks SET status = ? WHERE id = ?",
+            (effective, task_id),
+        )
     else:
         await db.execute(
             "UPDATE tasks SET status = ?, completed_at = NULL WHERE id = ?",
             (effective, task_id),
         )
 
-    if old_status != effective:
+    # M31-06: o REQUEST audita mesmo quando coagido pra o mesmo status
+    # (from=running,to=running,requested=ready,coerced=true) — sem isso o
+    # trace fica mudo exatamente no caso do incidente.
+    coerced = effective != new_status
+    if old_status != effective or coerced:
         try:
             await db.execute(
                 "INSERT INTO task_events (task_id, kind, payload, created_at) "
@@ -454,13 +474,20 @@ async def _apply_status_change(db, task_id: str, new_status: str, now: int, acto
                 (
                     task_id,
                     json.dumps(
-                        {"from": old_status, "to": effective, "requested": new_status, "actor": actor}
+                        {
+                            "status": effective,  # M31-08: shape canônico do store
+                            "from": old_status,
+                            "to": effective,
+                            "requested": new_status,
+                            "coerced": coerced,
+                            "actor": actor,
+                        }
                     ),
                     now,
                 ),
             )
-        except Exception:
-            pass  # auditoria nunca derruba a mutação
+        except Exception as e:  # M31-07: mutação nunca quebra, mas nunca em silêncio
+            logger.warning("task_events audit insert failed for %s: %s", task_id, e)
     return effective
 
 
