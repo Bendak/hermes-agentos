@@ -1,0 +1,21 @@
+{
+  "source": "saved",
+  "recipe": {
+    "name": "AgentOS (FastAPI + React)",
+    "kind": "fastapi",
+    "bootstrap": [
+      "env PYTHONPATH= uv pip install --python .venv/bin/python -e ."
+    ],
+    "build": [],
+    "test": [
+      "env PYTHONPATH= AGENTOS_PROFILES_DIR=/tmp/agentos-verify .venv/bin/python -m pytest -q"
+    ],
+    "start": "env PYTHONPATH= .venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000",
+    "port": 8000,
+    "readinessPath": "/",
+    "evidence": [
+      "Saved manifest: commands wrap env PYTHONPATH= (Hermes 0.26.1 exports its native 3.14 venv via PYTHONPATH; without the scrub the 3.13 venv resolves fastapi/pydantic_core from the 3.14 site-packages and crashes with ModuleNotFoundError: pydantic_core._pydantic_core)",
+      "Real ASGI app is backend.main:app (the detector guessed main:app)"
+    ]
+  }
+}
