@@ -1302,6 +1302,124 @@ function getLanguageFromExt(ext: string): string {
   return map[ext] || 'text'
 }
 
+function encodeArtifactPath(p: string) {
+  return p.split('/').map(encodeURIComponent).join('/')
+}
+
+type ArtNode = { folders: Map<string, ArtNode>; files: any[] }
+
+function buildArtifactTree(files: any[]): ArtNode {
+  const root: ArtNode = { folders: new Map(), files: [] }
+  for (const f of files) {
+    const rel: string = f.relpath || f.name
+    const parts = rel.split('/')
+    let node = root
+    for (let i = 0; i < parts.length - 1; i++) {
+      let next = node.folders.get(parts[i])
+      if (!next) {
+        next = { folders: new Map(), files: [] }
+        node.folders.set(parts[i], next)
+      }
+      node = next
+    }
+    node.files.push({ ...f, relpath: rel })
+  }
+  return root
+}
+
+function countArtFiles(node: ArtNode): number {
+  let n = node.files.length
+  for (const child of node.folders.values()) n += countArtFiles(child)
+  return n
+}
+
+function ArtifactFileRow({ file, taskId, previewFile, setPreviewFile }: {
+  file: any; taskId: string; previewFile: string | null; setPreviewFile: (v: string | null) => void
+}) {
+  return (
+    <div>
+      <div className="flex items-center gap-3 p-2 rounded hover:bg-surface/40 group">
+        <span className="text-lg">{fileIcon(file.type)}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm text-text-primary truncate">{file.name}</p>
+          <p className="text-xs text-text-tertiary">{formatFileSize(file.size)} • {formatTime(file.modified)}</p>
+        </div>
+        <button
+          onClick={async () => {
+            const res = await fetch(`/api/tasks/${taskId}/artifacts/${encodeArtifactPath(file.relpath)}`)
+            if (!res.ok) return
+            const url = URL.createObjectURL(await res.blob())
+            const a = document.createElement('a')
+            a.href = url
+            a.download = file.name
+            a.click()
+            URL.revokeObjectURL(url)
+          }}
+          className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-xs text-accent hover:text-accent-hover transition"
+        >
+          ⬇ Download
+        </button>
+        <button
+          onClick={() => setPreviewFile(previewFile === file.relpath ? null : file.relpath)}
+          className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-xs text-accent hover:text-accent-hover transition"
+        >
+          {previewFile === file.relpath ? '✕ Close' : '👁 Preview'}
+        </button>
+      </div>
+      {previewFile === file.relpath && (
+        <ArtifactPreview filename={file.relpath} taskId={taskId} />
+      )}
+    </div>
+  )
+}
+
+function ArtifactFolderNode({ name, node, taskId, previewFile, setPreviewFile }: {
+  name: string; node: ArtNode; taskId: string; previewFile: string | null; setPreviewFile: (v: string | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div>
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center gap-2 p-2 rounded hover:bg-surface/40 text-left transition"
+        aria-expanded={open}
+      >
+        <span className="text-xs text-text-tertiary w-3">{open ? '▾' : '▸'}</span>
+        <span className="text-lg">{open ? '📂' : '📁'}</span>
+        <span className="text-sm text-text-primary flex-1 truncate">{name}</span>
+        <span className="text-xs text-text-tertiary">{countArtFiles(node)} file{countArtFiles(node) === 1 ? '' : 's'}</span>
+      </button>
+      {open && (
+        <div className="ml-4 pl-2 border-l border-border">
+          <ArtifactTreeNodes node={node} taskId={taskId} previewFile={previewFile} setPreviewFile={setPreviewFile} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ArtifactTreeNodes({ node, taskId, previewFile, setPreviewFile }: {
+  node: ArtNode; taskId: string; previewFile: string | null; setPreviewFile: (v: string | null) => void
+}) {
+  return (
+    <>
+      {[...node.folders.entries()].map(([name, child]) => (
+        <ArtifactFolderNode key={name} name={name} node={child} taskId={taskId} previewFile={previewFile} setPreviewFile={setPreviewFile} />
+      ))}
+      {node.files.map((f: any) => (
+        <ArtifactFileRow key={f.relpath} file={f} taskId={taskId} previewFile={previewFile} setPreviewFile={setPreviewFile} />
+      ))}
+    </>
+  )
+}
+
+function ArtifactTree({ files, taskId, previewFile, setPreviewFile }: {
+  files: any[]; taskId: string; previewFile: string | null; setPreviewFile: (v: string | null) => void
+}) {
+  const root = useMemo(() => buildArtifactTree(files), [files])
+  return <ArtifactTreeNodes node={root} taskId={taskId} previewFile={previewFile} setPreviewFile={setPreviewFile} />
+}
+
 function ArtifactPreview({ filename, taskId }: { filename: string; taskId: string }) {
   const [mode, setMode] = useState<'preview' | 'raw'>('preview')
   const ext = getFileExtension(filename)
@@ -1317,7 +1435,7 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
   // URLs leak via logs/referrers/history. Binary previews load through the
   // authenticated fetch (global interceptor) + blob object URLs instead of the
   // old ?token= query-param pattern.
-  const previewUrl = `/api/tasks/${taskId}/artifacts/${encodeURIComponent(filename)}?preview=true`
+  const previewUrl = `/api/tasks/${taskId}/artifacts/${filename.split('/').map(encodeURIComponent).join('/')}?preview=true`
 
   // Artifact bytes must NEVER be refetched: the app's QueryClient has a
   // global refetchInterval of 5s (live data default), and a refetch here
@@ -3328,43 +3446,12 @@ function TaskDetailPage() {
                 {artifacts?.files.length > 0 && (
                   <div className="space-y-1">
                     <p className="text-xs text-text-tertiary mb-2">{artifacts.workspace_path}</p>
-                    {artifacts.files.map((file: any) => (
-                      <div key={file.name}>
-                        <div className="flex items-center gap-3 p-2 rounded hover:bg-surface/40 group">
-                          <span className="text-lg">{fileIcon(file.type)}</span>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm text-text-primary truncate">{file.name}</p>
-                            <p className="text-xs text-text-tertiary">{formatFileSize(file.size)} • {formatTime(file.modified)}</p>
-                          </div>
-                          <button
-                            onClick={async () => {
-                              // WI-3 (F-M4-02): authenticated fetch + blob download —
-                              // a bare <a href> carried no Authorization header (401)
-                              const res = await fetch(`/api/tasks/${id}/artifacts/${encodeURIComponent(file.name)}`)
-                              if (!res.ok) return
-                              const url = URL.createObjectURL(await res.blob())
-                              const a = document.createElement('a')
-                              a.href = url
-                              a.download = file.name
-                              a.click()
-                              URL.revokeObjectURL(url)
-                            }}
-                            className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-xs text-accent hover:text-accent-hover transition"
-                          >
-                            ⬇ Download
-                          </button>
-                          <button
-                            onClick={() => setPreviewFile(previewFile === file.name ? null : file.name)}
-                            className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-xs text-accent hover:text-accent-hover transition"
-                          >
-                            {previewFile === file.name ? '✕ Close' : '👁 Preview'}
-                          </button>
-                        </div>
-                        {previewFile === file.name && id && (
-                          <ArtifactPreview filename={file.name} taskId={id} />
-                        )}
-                      </div>
-                    ))}
+                    <ArtifactTree
+                      files={artifacts.files}
+                      taskId={id!}
+                      previewFile={previewFile}
+                      setPreviewFile={setPreviewFile}
+                    />
                   </div>
                 )}
               </div>

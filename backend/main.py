@@ -429,26 +429,35 @@ async def list_task_artifacts(task_id: str, user: dict = Depends(require_auth)):
 
     files = []
     try:
-        entries = list(os.scandir(real_workspace))
+        for dirpath, dirnames, filenames in os.walk(real_workspace):
+            # Artifacts em subfolders (relato do usuário, 07/10/26): varredura
+            # recursiva com relpath como handle canônico. Dirnames ocultos
+            # (.git etc.) são podados — só poluem a árvore.
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+            for fname in sorted(filenames):
+                fpath = os.path.join(dirpath, fname)
+                try:
+                    stat = os.stat(fpath)
+                except OSError:
+                    continue
+                rel = os.path.relpath(fpath, real_workspace).replace(os.sep, "/")
+                files.append({
+                    "name": fname,
+                    "relpath": rel,
+                    "path": fpath,
+                    "size": stat.st_size,
+                    "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "type": _guess_content_type(fname),
+                })
     except OSError:
         # F-M4-16: workspace_path may point at a file or vanish — never 500.
         return {"files": [], "workspace_path": None}
-    for entry in entries:
-        if entry.is_file():
-            stat = entry.stat()
-            files.append({
-                "name": entry.name,
-                "path": entry.path,
-                "size": stat.st_size,
-                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                "type": _guess_content_type(entry.name),
-            })
 
-    files.sort(key=lambda f: f["modified"], reverse=True)
+    files.sort(key=lambda f: f["relpath"])
     return {"files": files, "workspace_path": workspace_path}
 
 
-@app.get("/api/tasks/{task_id}/artifacts/{filename}")
+@app.get("/api/tasks/{task_id}/artifacts/{filename:path}")
 async def get_task_artifact(task_id: str, filename: str, user: dict = Depends(require_auth), preview: bool = False):
     """Serve a file from task workspace."""
     task = await get_task(task_id)
@@ -487,7 +496,7 @@ async def get_task_artifact(task_id: str, filename: str, user: dict = Depends(re
     disposition = "inline" if preview else "attachment"
     return FileResponse(
         file_path,
-        filename=filename,
+        filename=os.path.basename(filename),
         media_type=content_type,
         content_disposition_type=disposition,
         headers={
