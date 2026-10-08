@@ -11,7 +11,7 @@ import ProfilesPage from './pages/Profiles'
 import AnalyticsPage from './pages/Analytics'
 import ChatPage from './pages/Chat'
 import { useQuery, useMutation, useQueryClient, QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { DndContext, DragOverlay, useDroppable, closestCorners, PointerSensor, useSensor, useSensors } from '@dnd-kit/core'
+import { DndContext, DragOverlay, useDroppable, closestCorners, MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core'
 import { useSortable } from '@dnd-kit/sortable'
 import type { DragStartEvent, DragEndEvent } from '@dnd-kit/core'
 import { CSS } from '@dnd-kit/utilities'
@@ -2672,9 +2672,16 @@ function KanbanBoardPage() {
   const queryClient = useQueryClient()
 
   const sensors = useSensors(
-    useSensor(PointerSensor, {
+    // Mouse: arraste imediato após 5px (comportamento de desktop preservado).
+    useSensor(MouseSensor, {
       activationConstraint: { distance: 5 },
-    })
+    }),
+    // Touch: toque longo (200ms) ativa o drag; swipe rápido rola a coluna.
+    // Sem isso qualquer rolagem que aterrissa num card o arranca (relato do
+    // device check no Z Fold). tolerance=8 ignora o tremor do dedo.
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 200, tolerance: 8 },
+    }),
   )
 
   const { data, isLoading, error } = useQuery<TaskItem[]>({
@@ -2737,7 +2744,7 @@ function KanbanBoardPage() {
 
   const archiveMutation = useMutation({
     mutationFn: async ({ taskId, archive }: { taskId: string; archive: boolean }) => {
-      const status = archive ? 'archived' : 'todo'
+      const status = archive ? 'archived' : 'ready'  // spec: unarchive → ready (M30-b coage p/ running c/ worker)
       const res = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -2755,7 +2762,7 @@ function KanbanBoardPage() {
 
   const bulkArchiveMutation = useMutation({
     mutationFn: async ({ taskIds, archive }: { taskIds: string[]; archive: boolean }) => {
-      const status = archive ? 'archived' : 'todo'
+      const status = archive ? 'archived' : 'ready'  // spec: unarchive → ready (M30-b coage p/ running c/ worker)
       const res = await fetch('/api/tasks/bulk', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
