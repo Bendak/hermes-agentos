@@ -2492,6 +2492,10 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging && !isOverlay ? 0.25 : 1,
+    // Touch: without this the browser consumes pointermove for scrolling and
+    // PointerSensor (distance: 5) never completes activation on touch devices
+    // (tablet / Z Fold drag-and-drop silently did nothing).
+    touchAction: 'none',
   }
 
   const handleClick = (_e: React.MouseEvent) => {
