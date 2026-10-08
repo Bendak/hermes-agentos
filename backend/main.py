@@ -433,8 +433,10 @@ async def list_task_artifacts(task_id: str, user: dict = Depends(require_auth)):
             # Artifacts em subfolders (relato do usuário, 07/10/26): varredura
             # recursiva com relpath como handle canônico. Dirnames ocultos
             # (.git etc.) são podados — só poluem a árvore.
-            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
-            for fname in sorted(filenames):
+            dirnames[:] = sorted(
+                d for d in dirnames if not d.startswith(".") and d != "__pycache__"
+            )
+            for fname in sorted(f for f in filenames if not f.endswith(".pyc")):
                 fpath = os.path.join(dirpath, fname)
                 try:
                     stat = os.stat(fpath)
@@ -872,8 +874,16 @@ async def spa_fallback(full_path: str):
         and candidate.startswith(dist_root + os.sep)
         and os.path.isfile(candidate)
     ):
-        return FileResponse(candidate)
+        # M11-10: assets com hash no nome = cache eterno; o resto (qualquer
+        # rota SPA, incluindo index.html) revalida sempre — pós-redeploy o
+        # navegador não serve mais bundle velho com backend novo.
+        cache = (
+            "public, max-age=31536000, immutable"
+            if "/assets/" in full_path
+            else "no-cache"
+        )
+        return FileResponse(candidate, headers={"Cache-Control": cache})
     # Fallback to index.html for SPA routing
     if os.path.isfile(index_html):
-        return FileResponse(index_html)
+        return FileResponse(index_html, headers={"Cache-Control": "no-cache"})
     raise HTTPException(status_code=404, detail="Frontend not built")

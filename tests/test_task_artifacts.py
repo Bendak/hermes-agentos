@@ -38,14 +38,16 @@ def test_listing_is_recursive_with_relpaths(client, admin_headers, make_task):
         assert "modified" in f and "type" in f
 
 
-def test_listing_prunes_hidden_dirs(client, admin_headers, make_task):
+def test_listing_prunes_hidden_dirs_and_pycache(client, admin_headers, make_task):
     task = make_task({})
     _nested_ws(task, ".git", "config", content="nope")
+    _nested_ws(task, "__pycache__", "mod.cpython-313.pyc", content="junk")
     _nested_ws(task, "sub", "ok.txt", content="yes")
+    _nested_ws(task, "sub", "stray.pyc", content="junk")
 
     r = client.get(f"/api/tasks/{task['id']}/artifacts", headers=admin_headers)
     rels = {f["relpath"] for f in r.json()["files"]}
-    assert rels == {"sub/ok.txt"}  # .git/* nunca aparece
+    assert rels == {"sub/ok.txt"}  # .git/*, __pycache__/* e *.pyc nunca aparecem
 
 
 def test_download_subpath_n2(client, admin_headers, make_task):
