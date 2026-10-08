@@ -248,3 +248,38 @@ def test_matching_admin_claim_stays_admin(users):
     tok = auth.create_access_token(adm["id"], "admin")
     user = _auth_with(tok)
     assert user["role"] == "admin"
+
+
+def test_register_rejects_downscoped_token_m3002(users, client):
+    """M30-02: a viewer-CLAIM token over a DB-admin user must NOT create
+    new users (the register gate used to read the DB role and ignore the
+    claim — reopening the issue #1 vector by another route)."""
+    adm = auth.get_user_by_username("zz_admin")
+    tok = auth.create_access_token(adm["id"], "viewer")
+    r = client.post(
+        "/api/auth/register",
+        json={"username": "zz_esc", "password": "pw-esc-" + "x" * 12, "role": "admin"},
+        headers={"Authorization": f"Bearer {tok}"},
+    )
+    assert r.status_code == 403
+    assert auth.get_user_by_username("zz_esc") is None  # nada criado
+
+
+def test_register_accepts_real_admin(users, client):
+    adm = auth.get_user_by_username("zz_admin")
+    tok = auth.create_access_token(adm["id"], "admin")
+    r = client.post(
+        "/api/auth/register",
+        json={"username": "zz_ok", "password": "pw-ok-" + "x" * 12, "role": "viewer"},
+        headers={"Authorization": f"Bearer {tok}"},
+    )
+    assert r.status_code in (200, 201)
+
+
+def test_arbitrary_claim_role_never_escapes_m3003(users):
+    """M30-03: claim='editor' (or any non-vocabulary string) resolves to
+    least privilege ('viewer'), never propagates verbatim."""
+    adm = auth.get_user_by_username("zz_admin")
+    tok = auth.create_access_token(adm["id"], "editor")
+    user = _auth_with(tok)
+    assert user["role"] == "viewer"

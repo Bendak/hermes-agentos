@@ -127,8 +127,12 @@ async def update_config(patches: list[dict]) -> dict | None:
     if not os.path.exists(CONFIG_PATH):
         return None
 
+    # M30-01: se config.yaml for symlink, o rename substituiria o LINK e
+    # deixaria o alvo real órfão — o write mira sempre o arquivo real.
+    target_path = os.path.realpath(CONFIG_PATH)
+
     # Read current config (WITHOUT redaction — we need real values for read-modify-write)
-    with open(CONFIG_PATH, "r") as f:
+    with open(target_path, "r") as f:
         config = yaml.safe_load(f)
 
     if not isinstance(config, dict):
@@ -150,7 +154,7 @@ async def update_config(patches: list[dict]) -> dict | None:
         config = _apply_patch(config, path, value)
 
     # Atomic write: write to temp, then rename
-    config_dir = os.path.dirname(CONFIG_PATH)
+    config_dir = os.path.dirname(target_path)
     fd, tmp_path = tempfile.mkstemp(dir=config_dir, suffix=".yaml.tmp")
     try:
         with os.fdopen(fd, "w") as f:
@@ -160,12 +164,12 @@ async def update_config(patches: list[dict]) -> dict | None:
         # (issue #1: mkstemp creates as the service euid — root — and a
         # root-owned replacement locks the gateway user out of its own
         # config, killing every new agent turn)
-        orig_stat = os.stat(CONFIG_PATH)
-        shutil.copymode(CONFIG_PATH, tmp_path)
+        orig_stat = os.stat(target_path)
+        shutil.copymode(target_path, tmp_path)
         _preserve_owner(tmp_path, orig_stat)
 
         # Atomic rename
-        os.rename(tmp_path, CONFIG_PATH)
+        os.rename(tmp_path, target_path)
     except Exception:
         # Clean up temp file on error
         if os.path.exists(tmp_path):
