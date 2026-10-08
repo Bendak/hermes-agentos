@@ -830,7 +830,7 @@ export default function ProfilesPage() {
               <div
                 key={p.id}
                 className="bg-bg-elevated border border-border rounded-xl p-5 hover:border-accent/50 transition cursor-pointer"
-                onClick={() => setEditing(p.id)}
+                onClick={() => { if (isAdmin()) setEditing(p.id) }}
               >
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-h5 font-semibold text-text-primary">{p.name}</h3>
@@ -861,6 +861,7 @@ export default function ProfilesPage() {
                     <span className="text-text-primary">{p.fallback_providers?.length ?? 0}</span>
                   </div>
                 </div>)}
+                {isAdmin() && (
                 <div className="flex gap-2 mt-4 pt-4 border-t border-border">
                   <button
                     onClick={(e) => { e.stopPropagation(); setEditing(p.id) }}
@@ -881,6 +882,7 @@ export default function ProfilesPage() {
                     Delete
                   </button>
                 </div>
+                )}
               </div>
             ))}
           </div>
@@ -888,7 +890,7 @@ export default function ProfilesPage() {
       </main>
 
       {/* Edit Dialog */}
-      {(editing && detail) && (
+      {isAdmin() && (editing && detail) && (
         <ProfileEditDialog
           profile={detail}
           onSave={(data) => updateMut.mutate(data)}
@@ -898,7 +900,7 @@ export default function ProfilesPage() {
       )}
 
       {/* Repair Dialog — broken config.yaml (M10-08) */}
-      {(editing && !detail && !detailLoading && detailError) && (
+      {isAdmin() && (editing && !detail && !detailLoading && detailError) && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-bg-elevated border border-border rounded-xl p-6 max-w-md w-full">
             <h3 className="text-h5 font-bold text-text-primary mb-2">⚠ Invalid config.yaml</h3>
