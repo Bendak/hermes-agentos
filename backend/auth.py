@@ -343,6 +343,11 @@ async def require_auth(request: Request) -> dict:
     role = claimed or user["role"]
     if user["role"] != "admin" and role == "admin":
         role = user["role"]
+    # M30-03: claim é string não-validada — nunca propagar role fora do
+    # vocabulário real (um claim 'editor'/'superuser' herdaria spoof em
+    # qualquer check futuro '!= admin'). Desconhecido = menor privilégio.
+    if role not in ("admin", "viewer"):
+        role = "viewer"
     return {"user_id": user["id"], "username": user["username"], "role": role}
 
 

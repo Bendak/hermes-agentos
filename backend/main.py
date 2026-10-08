@@ -111,21 +111,13 @@ async def auth_register(body: dict, request: Request):
     if not users_exist():
         pass  # proceed without requiring admin
     else:
-        # Verify admin auth
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer "):
-            raise HTTPException(status_code=401, detail="Authentication required")
-        try:
-            payload = verify_token(auth_header[7:])
-            if payload.get("type") != "access":
-                raise HTTPException(status_code=401, detail="Invalid token type")
-            admin_user = get_user_by_id(int(payload["sub"]))
-            if not admin_user or admin_user["role"] != "admin":
-                raise HTTPException(status_code=403, detail="Admin access required")
-            if payload.get("ver") != admin_user["token_version"]:
-                raise HTTPException(status_code=401, detail="Token revoked")
-        except ValueError as e:
-            raise HTTPException(status_code=401, detail=str(e))
+        # M30-02: o gate do register precisa herdar a semântica de CLAIM do
+        # require_auth — o bloco manual antigo lia o role do DB e ignorava a
+        # claim, reabrindo o vetor do issue #1 por outra rota (token
+        # down-scoped criando um admin novo). Bootstrap continua sem auth.
+        admin_user = await require_auth(request)
+        if admin_user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Admin access required")
 
     username = body.get("username", "")
     password = body.get("password", "")

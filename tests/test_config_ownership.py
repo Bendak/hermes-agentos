@@ -82,3 +82,21 @@ def test_preserve_owner_tolerates_failed_chown_when_owner_matches(tmp_path, monk
 
     monkeypatch.setattr(config_viewer.os, "chown", boom)
     _preserve_owner(str(tmp), SimpleNamespace(st_uid=st.st_uid, st_gid=st.st_gid))
+
+
+def test_update_config_preserves_symlink_m3001(tmp_path, monkeypatch):
+    """M30-01: when config.yaml is a SYMLINK, the write must land on the
+    real target and leave the link intact (the old rename replaced the
+    link and orphaned the target)."""
+    real = tmp_path / "real.yaml"
+    real.write_text(CONFIG_BODY)
+    os.chmod(real, 0o600)
+    link = tmp_path / "config.yaml"
+    link.symlink_to(real)
+    monkeypatch.setattr(config_viewer, "CONFIG_PATH", str(link))
+
+    result = asyncio.run(update_config([{"path": ["model", "default"], "value": "linked"}]))
+    assert result is not None
+
+    assert link.is_symlink(), "M30-01 regression: the symlink was replaced by a regular file"
+    assert "linked" in real.read_text(), "the write must land on the symlink TARGET"
