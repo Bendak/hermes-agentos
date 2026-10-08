@@ -93,6 +93,26 @@ def _apply_patch(config: dict, path: list[str], value: Any) -> dict:
     return config
 
 
+def _preserve_owner(tmp_path: str, orig: os.stat_result) -> None:
+    """Stamp the original file's uid:gid onto the temp file before replace.
+
+    The service runs as root, so mkstemp produces root-owned files; the
+    gateway runs as a different user and must keep read/write access to
+    its config. If ownership cannot be preserved and the temp file's owner
+    differs from the original's, FAIL LOUDLY — never swap in a file the
+    gateway cannot read (issue #1).
+    """
+    try:
+        os.chown(tmp_path, orig.st_uid, orig.st_gid)
+    except (OSError, NotImplementedError) as e:
+        cur = os.stat(tmp_path)
+        if (cur.st_uid, cur.st_gid) != (orig.st_uid, orig.st_gid):
+            raise RuntimeError(
+                f"refusing to replace config: cannot preserve owner "
+                f"{orig.st_uid}:{orig.st_gid} on the temp file ({e})"
+            ) from e
+
+
 async def update_config(patches: list[dict]) -> dict | None:
     """Apply patches to config.yaml atomically.
 
@@ -136,8 +156,13 @@ async def update_config(patches: list[dict]) -> dict | None:
         with os.fdopen(fd, "w") as f:
             yaml.safe_dump(config, f, default_flow_style=False, sort_keys=False, allow_unicode=True, width=1000)
 
-        # Preserve permissions from original file
+        # Preserve permissions AND ownership from the original file
+        # (issue #1: mkstemp creates as the service euid — root — and a
+        # root-owned replacement locks the gateway user out of its own
+        # config, killing every new agent turn)
+        orig_stat = os.stat(CONFIG_PATH)
         shutil.copymode(CONFIG_PATH, tmp_path)
+        _preserve_owner(tmp_path, orig_stat)
 
         # Atomic rename
         os.rename(tmp_path, CONFIG_PATH)
