@@ -16,6 +16,10 @@ dependencies = [
     "python-multipart>=0.0.9",
     # used by the Hermes cron store for next_run_at computation (WI-1)
     "croniter>=2",
+    # Hermes 0.26.1+: importing the cron store (/opt/hermes/cron/jobs.py) pulls
+    # utils -> hermes_yaml -> ruamel.yaml. Without it the store import fails and
+    # /api/cron answers 503 ("Hermes cron store not available").
+    "ruamel.yaml>=0.18",
 ]
 
 [project.optional-dependencies]
