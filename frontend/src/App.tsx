@@ -2494,8 +2494,9 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
     opacity: isDragging && !isOverlay ? 0.25 : 1,
     // Touch: without this the browser consumes pointermove for scrolling and
     // PointerSensor (distance: 5) never completes activation on touch devices
-    // (tablet / Z Fold drag-and-drop silently did nothing).
-    touchAction: 'none',
+    // (tablet / Z Fold drag-and-drop silently did nothing). Only applied when
+    // the card is actually draggable — viewer cards keep scroll-by-card.
+    touchAction: isAdmin() ? 'none' : 'auto',
   }
 
   const handleClick = (_e: React.MouseEvent) => {
@@ -2713,6 +2714,13 @@ function KanbanBoardPage() {
       })
       return { previousTasks }
     },
+    onSuccess: (data: any, vars: { taskId: string; status: string }) => {
+      // M30-b: o backend pode coagir o status (claim vivo → running) —
+      // avisar em vez de o card "pular" de volta silenciosamente
+      if (data?.status && vars?.status && data.status !== vars.status) {
+        toast(`Worker ativo nesta task — status real: "${data.status}"`, 'info')
+      }
+    },
     onError: (_err, _vars, context) => {
       if (context?.previousTasks) {
         queryClient.setQueryData(['tasks', 'all'], context.previousTasks)
@@ -2774,7 +2782,16 @@ function KanbanBoardPage() {
     if (!isAdmin()) return  // M28-01: viewer não move card (403 era silencioso)
     if (!over) return
     const taskId = active.id as string
-    const newStatus = over.id as string
+    // M30-04: closestCorners também retorna CARDS como droppable — over.id
+    // pode ser o id de outra task (o PATCH saía com status=<task-id> →
+    // 404 + rollback em touch e mouse). Só colunas são alvo direto; drop
+    // em card resolve pra coluna em que o card está.
+    let newStatus = over.id as string
+    if (!COLUMN_META.some((c) => c.status === newStatus)) {
+      const overTask = data?.find((t) => t.id === newStatus)
+      if (!overTask) return
+      newStatus = columnForStatus(overTask.status)
+    }
     const task = data?.find((t) => t.id === taskId)
     if (!task || task.status === newStatus) return
     updateMutation.mutate({ taskId, status: newStatus })

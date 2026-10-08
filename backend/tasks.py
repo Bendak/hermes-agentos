@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timezone
 
@@ -396,7 +397,74 @@ def _contained_path(child: str, parent: str) -> bool:
         return False
 
 
-async def update_task_status(task_id: str, new_status: str) -> dict | None:
+async def _has_claim_cols(db) -> bool:
+    """H-B discipline: never assume the schema has claim columns."""
+    async with db.execute("PRAGMA table_info(tasks)") as cur:
+        cols = {r[1] for r in await cur.fetchall()}
+    return "claim_expires" in cols
+
+
+async def _apply_status_change(db, task_id: str, new_status: str, now: int, actor: str = "api") -> str:
+    """Status change with coherent bookkeeping + audit (M30-b/M30-05/M30-a).
+
+    - M30-b: a FRESH claim (claim_expires > now) + a queue target
+      (todo/ready) is incoherent — the worker is still alive. Coerce to
+      'running' (the truth) so the dispatcher cannot double-spawn and the
+      unarchive flow returns the card to its real state.
+    - M30-05: leaving 'done' clears completed_at (no orphan timestamps);
+      entering 'done' stamps it; entering 'running' stamps started_at.
+    - M30-a: every status change emits a 'status' task_event with
+      from/to/actor — without this the archive actor was unrecoverable
+      (the 07/10 incident).
+    """
+    async with db.execute("SELECT status FROM tasks WHERE id = ?", (task_id,)) as cur:
+        row = await cur.fetchone()
+    old_status = row[0] if row else None
+
+    effective = new_status
+    if new_status in ("todo", "ready") and await _has_claim_cols(db):
+        async with db.execute(
+            "SELECT claim_expires FROM tasks WHERE id = ?", (task_id,)
+        ) as cur:
+            claim = await cur.fetchone()
+        if claim and claim[0] and int(claim[0]) > now:
+            effective = "running"
+
+    if effective == "running":
+        await db.execute(
+            "UPDATE tasks SET status = ?, started_at = COALESCE(started_at, ?) WHERE id = ?",
+            (effective, now, task_id),
+        )
+    elif effective == "done":
+        await db.execute(
+            "UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?",
+            (effective, now, task_id),
+        )
+    else:
+        await db.execute(
+            "UPDATE tasks SET status = ?, completed_at = NULL WHERE id = ?",
+            (effective, task_id),
+        )
+
+    if old_status != effective:
+        try:
+            await db.execute(
+                "INSERT INTO task_events (task_id, kind, payload, created_at) "
+                "VALUES (?, 'status', ?, ?)",
+                (
+                    task_id,
+                    json.dumps(
+                        {"from": old_status, "to": effective, "requested": new_status, "actor": actor}
+                    ),
+                    now,
+                ),
+            )
+        except Exception:
+            pass  # auditoria nunca derruba a mutação
+    return effective
+
+
+async def update_task_status(task_id: str, new_status: str, actor: str = "api") -> dict | None:
     """Update a task's status and related timestamps. Returns the updated task or None.
 
     Kept for backwards compatibility with the Phase 5 PATCH endpoint that only
@@ -416,38 +484,14 @@ async def update_task_status(task_id: str, new_status: str) -> dict | None:
                 return None
 
         now = int(datetime.now(timezone.utc).timestamp())
-
-        if new_status == "running":
-            await db.execute(
-                """
-                UPDATE tasks
-                SET status = ?, started_at = COALESCE(started_at, ?)
-                WHERE id = ?
-                """,
-                (new_status, now, task_id),
-            )
-        elif new_status == "done":
-            await db.execute(
-                """
-                UPDATE tasks
-                SET status = ?, completed_at = ?
-                WHERE id = ?
-                """,
-                (new_status, now, task_id),
-            )
-        else:
-            await db.execute(
-                "UPDATE tasks SET status = ? WHERE id = ?",
-                (new_status, task_id),
-            )
-
+        await _apply_status_change(db, task_id, new_status, now, actor)
         await db.commit()
 
     # Return updated task via get_task
     return await get_task(task_id)
 
 
-async def update_task(task_id: str, updates: dict) -> dict | None:
+async def update_task(task_id: str, updates: dict, actor: str = "api") -> dict | None:
     """Apply a partial update to a task. ``updates`` is a dict of field→value.
 
     Only fields in ``EDITABLE_FIELDS`` are considered. When ``status`` is
@@ -492,24 +536,11 @@ async def update_task(task_id: str, updates: dict) -> dict | None:
 
         now = int(datetime.now(timezone.utc).timestamp())
 
-        # Special-case status so we keep started_at/completed_at consistent.
+        # Special-case status: M30-b claim coercion + M30-05 timestamps
+        # + M30-a audit event, all via the shared helper.
         new_status = filtered.pop("status", None)
         if new_status is not None:
-            if new_status == "running":
-                await db.execute(
-                    "UPDATE tasks SET status = ?, started_at = COALESCE(started_at, ?) WHERE id = ?",
-                    (new_status, now, task_id),
-                )
-            elif new_status == "done":
-                await db.execute(
-                    "UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?",
-                    (new_status, now, task_id),
-                )
-            else:
-                await db.execute(
-                    "UPDATE tasks SET status = ? WHERE id = ?",
-                    (new_status, task_id),
-                )
+            await _apply_status_change(db, task_id, new_status, now, actor)
 
         # Apply any remaining editable columns.
         if filtered:
@@ -555,7 +586,7 @@ async def add_comment(task_id: str, author: str, body: str) -> dict | None:
     }
 
 
-async def bulk_update(task_ids: list[str], updates: dict) -> dict:
+async def bulk_update(task_ids: list[str], updates: dict, actor: str = "api") -> dict:
     """Apply the same partial update to many tasks at once.
 
     Returns ``{"updated": N, "skipped": M, "ids": [...]}`` where ``ids`` lists
@@ -567,7 +598,7 @@ async def bulk_update(task_ids: list[str], updates: dict) -> dict:
     updated_ids: list[str] = []
     skipped = 0
     for tid in task_ids:
-        result = await update_task(tid, updates)
+        result = await update_task(tid, updates, actor)
         if result is None:
             skipped += 1
         else:
