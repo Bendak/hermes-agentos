@@ -84,3 +84,22 @@ def test_download_traversal_blocked_despite_path_route(client, admin_headers, ma
     )
     assert r.status_code in (403, 404)
     assert b"evil" not in r.content
+
+
+def test_listing_skips_symlinks_dotfiles_and_venv(client, admin_headers, make_task):
+    """M29-02/03/05: symlink (metadado não vaza), dot-file, venv/node_modules."""
+    task = make_task({})
+    ws = Path(task["workspace_path"])
+    _nested_ws(task, "sub", "real.txt", content="ok")
+    _nested_ws(task, ".hidden.txt", content="nope")
+    _nested_ws(task, "venv", "lib", "x.py", content="nope")
+    _nested_ws(task, "node_modules", "pkg", "index.js", content="nope")
+    target = ws / "sub" / "real.txt"
+    link = ws / "sub" / "leak.txt"
+    if link.is_symlink() or link.exists():
+        link.unlink()
+    link.symlink_to(target)
+
+    r = client.get(f"/api/tasks/{task['id']}/artifacts", headers=admin_headers)
+    rels = {f["relpath"] for f in r.json()["files"]}
+    assert rels == {"sub/real.txt"}

@@ -16,7 +16,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const push = useCallback((message: string, kind: ToastKind = 'info') => {
     const id = Date.now() + Math.random()
-    setToasts(t => [...t, { id, kind, message }])
+    setToasts(t => {
+      // M29-01: erro persistente sem teto virava pilha infinita — dedupe
+      // por mensagem e cap de 5 (descarta os mais antigos)
+      const withoutDup = t.filter(x => !(x.message === message && x.kind === kind))
+      return [...withoutDup, { id, kind, message }].slice(-5)
+    })
     // M28-05: erro persiste até clique (5s era pouco p/ detalhe longo);
     // não-erros somem em 5s
     if (kind !== 'error') {
