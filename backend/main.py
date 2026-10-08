@@ -433,11 +433,20 @@ async def list_task_artifacts(task_id: str, user: dict = Depends(require_auth)):
             # Artifacts em subfolders (relato do usuário, 07/10/26): varredura
             # recursiva com relpath como handle canônico. Dirnames ocultos
             # (.git etc.) são podados — só poluem a árvore.
+            # M29-03/M29-05: lixo estrutural nunca entra na árvore
             dirnames[:] = sorted(
-                d for d in dirnames if not d.startswith(".") and d != "__pycache__"
+                d for d in dirnames
+                if not d.startswith(".")
+                and d not in ("__pycache__", "venv", "node_modules")
             )
-            for fname in sorted(f for f in filenames if not f.endswith(".pyc")):
+            for fname in sorted(
+                f for f in filenames if not f.endswith(".pyc") and not f.startswith(".")
+            ):
                 fpath = os.path.join(dirpath, fname)
+                # M29-02: symlink não é arquivo do workspace — metadado não
+                # vaza (o download já 403ava via _contained_path)
+                if os.path.islink(fpath):
+                    continue
                 try:
                     stat = os.stat(fpath)
                 except OSError:

@@ -4299,8 +4299,13 @@ function WorkflowEditorPage() {
   const runMutation = useMutation({
     mutationFn: async () => {
       setRunResults({})  // Q4-3: stale overlays never survive into a new run
-      // Save first
-      await saveMutation.mutateAsync()
+      // Save first — M29-04: falha de save não pode ser mascarada como
+      // falha de run (o usuário precisa saber QUAL etapa morreu)
+      try {
+        await saveMutation.mutateAsync()
+      } catch (e) {
+        throw new Error('Save before run failed: ' + (e instanceof Error ? e.message : 'unknown error'))
+      }
       const res = await fetch(`/api/workflows/${id}/run`, { method: 'POST' })
       if (!res.ok) throw new Error(await apiErrorMessage(res))  // M28-04
       return res.json()
@@ -4473,6 +4478,7 @@ function WorkflowEditorPage() {
           >
             {saveStatus === 'saving' ? 'Saving...' : 'Save'}
           </button>)}
+          {isAdmin() && (
           <button
             onClick={() => runMutation.mutate()}
             disabled={runMutation.isPending}
@@ -4480,6 +4486,7 @@ function WorkflowEditorPage() {
           >
             {runMutation.isPending ? '⏳ Running...' : '▶ Run Now'}
           </button>
+          )}
         </div>
       </div>
 
