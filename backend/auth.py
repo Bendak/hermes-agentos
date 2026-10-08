@@ -334,7 +334,16 @@ async def require_auth(request: Request) -> dict:
     if payload.get("ver") != user["token_version"]:
         raise HTTPException(status_code=401, detail="Token revoked")
 
-    return {"user_id": user["id"], "username": user["username"], "role": user["role"]}
+    # Issue #1 (gates): the token's role claim is the authority — a
+    # down-scoped ("viewer") token must never act as the user's full DB
+    # role. The DB can only DOWNGRADE: a demotion takes effect immediately
+    # even on outstanding tokens (admin requires BOTH the claim and the
+    # current DB role).
+    claimed = payload.get("role")
+    role = claimed or user["role"]
+    if user["role"] != "admin" and role == "admin":
+        role = user["role"]
+    return {"user_id": user["id"], "username": user["username"], "role": role}
 
 
 async def require_admin(user: dict = Depends(require_auth)) -> dict:

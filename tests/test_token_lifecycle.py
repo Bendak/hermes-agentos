@@ -206,3 +206,45 @@ def test_refresh_rotation_single_use_under_concurrency(client, fresh_user):
 
     assert codes.count(200) == 1, f"winners={codes.count(200)} codes={codes}"
     assert codes.count(401) == 7, f"codes={codes}"
+
+
+# ── issue #1 (gates): token role claims are the authority ──────────────
+
+
+def _auth_with(token):
+    """Build a minimal Starlette Request carrying the bearer token."""
+    import asyncio
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/",
+        "headers": [(b"authorization", f"Bearer {token}".encode())],
+    }
+    return asyncio.run(auth.require_auth(Request(scope)))
+
+
+def test_claimed_viewer_token_does_not_escalate_to_db_admin(users):
+    """A down-scoped token minted with role='viewer' for an ADMIN user
+    must act as viewer (the exact path of the issue #1 incident)."""
+    adm = auth.get_user_by_username("zz_admin")
+    tok = auth.create_access_token(adm["id"], "viewer")
+    user = _auth_with(tok)
+    assert user["role"] == "viewer"
+
+
+def test_db_demotion_downgrades_outstanding_admin_token(users):
+    """Admin requires BOTH the claim and the current DB role: if the DB
+    says non-admin, an old admin token is downgraded immediately."""
+    viewer = auth.get_user_by_username("zz_viewer")
+    tok = auth.create_access_token(viewer["id"], "admin")
+    user = _auth_with(tok)
+    assert user["role"] == "viewer"
+
+
+def test_matching_admin_claim_stays_admin(users):
+    adm = auth.get_user_by_username("zz_admin")
+    tok = auth.create_access_token(adm["id"], "admin")
+    user = _auth_with(tok)
+    assert user["role"] == "admin"
