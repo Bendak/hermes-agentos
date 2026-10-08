@@ -334,10 +334,10 @@ async def update_task_endpoint(task_id: str, body: dict, user: dict = Depends(re
     # If the only field present is "status" we route through the legacy helper
     # so existing DnD callers keep working unchanged.
     if body.get("status") and len(body) == 1:
-        result = await update_task_status(task_id, body["status"])
+        result = await update_task_status(task_id, body["status"], actor=user["username"])
     else:
         try:
-            result = await update_task(task_id, body)
+            result = await update_task(task_id, body, actor=user["username"])
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     if result is None:
@@ -538,7 +538,7 @@ async def tasks_bulk(body: dict, user: dict = Depends(require_admin)):
         raise HTTPException(status_code=400, detail="'ids' must be a non-empty list")
     if not isinstance(updates, dict) or not updates:
         raise HTTPException(status_code=400, detail="'updates' must be a non-empty object")
-    return await bulk_update(ids, updates)
+    return await bulk_update(ids, updates, actor=user["username"])
 
 
 @app.get("/api/kanban/stats")
