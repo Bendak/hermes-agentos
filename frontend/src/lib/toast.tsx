@@ -17,7 +17,11 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const push = useCallback((message: string, kind: ToastKind = 'info') => {
     const id = Date.now() + Math.random()
     setToasts(t => [...t, { id, kind, message }])
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 5000)
+    // M28-05: erro persiste até clique (5s era pouco p/ detalhe longo);
+    // não-erros somem em 5s
+    if (kind !== 'error') {
+      setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 5000)
+    }
   }, [])
 
   return (
@@ -27,7 +31,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map(t => (
           <div
             key={t.id}
-            role="status"
+            role={t.kind === 'error' ? 'alert' : 'status'}
             className={`rounded-lg border px-4 py-2.5 text-sm shadow-lg backdrop-blur-md cursor-pointer ${
               t.kind === 'error'
                 ? 'bg-semantic-error/15 border-semantic-error/30 text-semantic-error'

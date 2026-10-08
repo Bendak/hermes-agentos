@@ -2,10 +2,12 @@
 // {"detail":"..."}) nunca vira mensagem de UI.
 export async function apiErrorMessage(res: Response): Promise<string> {
   const text = await res.text().catch(() => '')
+  const fallback = `Request failed (${res.status})`
+  if (text.trimStart().startsWith('<')) return fallback  // corpo HTML (ex.: 502 do Caddy)
   try {
     const data = JSON.parse(text)
-    return data?.detail || data?.message || text || `Request failed (${res.status})`
+    return data?.detail || data?.message || text || fallback
   } catch {
-    return text || `Request failed (${res.status})`
+    return text || fallback
   }
 }
