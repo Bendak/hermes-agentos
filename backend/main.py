@@ -879,7 +879,7 @@ async def spa_fallback(full_path: str):
         # navegador não serve mais bundle velho com backend novo.
         cache = (
             "public, max-age=31536000, immutable"
-            if "/assets/" in full_path
+            if full_path.startswith("assets/")
             else "no-cache"
         )
         return FileResponse(candidate, headers={"Cache-Control": cache})
