@@ -211,9 +211,33 @@ async def list_skills() -> list[dict]:
     return skills
 
 
+# M7-08: teto de leitura de SKILL.md (o detail lia o arquivo inteiro sem
+# limite; docs infladas não podem estourar memória do worker).
+_SKILL_MD_MAX_BYTES = 512 * 1024
+
+
+def _safe_skill_dir(slug: str) -> str | None:
+    """M7-04: slug → dir DENTRO de SKILLS_DIR, ou None.
+
+    O join cru (`os.path.join(SKILLS_DIR, slug)`) deixava `..` alcançar o
+    resolver de paths (um slug podia apontar qualquer arquivo do host para o
+    detail). Defesa em duas camadas: vocabulário do slug (sem separadores,
+    sem `..`) + contenção realpath/commonpath (o mesmo padrão dos artifacts).
+    """
+    if not slug or slug in (".", "..") or "/" in slug or "\\" in slug or ".." in slug:
+        return None
+    skill_dir = os.path.realpath(os.path.join(SKILLS_DIR, slug))
+    root = os.path.realpath(SKILLS_DIR)
+    if os.path.commonpath([root, skill_dir]) != root:
+        return None
+    return skill_dir
+
+
 async def get_skill_detail(slug: str) -> dict | None:
     """Get full detail of a skill including SKILL.md content."""
-    skill_dir = os.path.join(SKILLS_DIR, slug)
+    skill_dir = _safe_skill_dir(slug)
+    if skill_dir is None:
+        return None
     skill_path = os.path.join(skill_dir, "SKILL.md")
 
     if not os.path.isfile(skill_path):
@@ -224,7 +248,7 @@ async def get_skill_detail(slug: str) -> dict | None:
         return None
 
     with open(skill_path, "r", encoding="utf-8") as f:
-        full_content = f.read()
+        full_content = f.read(_SKILL_MD_MAX_BYTES)
 
     files = []
     for root, dirs, filenames in os.walk(skill_dir):

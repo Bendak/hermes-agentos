@@ -15,7 +15,9 @@ import backend.cron as cron_mod
 
 READS = [
     ("GET", "/api/tasks"),
-    ("GET", "/api/config"),
+    # M7-09 (WI-10): GET /api/config saiu dos reads de viewer — o config.yaml
+    # carrega campos secret-shaped (ex: `secret:`); leitura virou admin-only
+    # (coberto em test_skills_security.py::test_config_reads_are_admin_only).
     ("GET", "/api/workflows"),
     pytest.param(
         "GET",
