@@ -5835,7 +5835,7 @@ function SkillsHubPage() {
   const filtered = useMemo(() => {
     if (!skills) return []
     let result = skills.filter((s: Skill) => {
-      const matchesSearch = !search || s.name.toLowerCase().includes(search.toLowerCase()) || s.description.toLowerCase().includes(search.toLowerCase())
+      const matchesSearch = !search || (s.name || '').toLowerCase().includes(search.toLowerCase()) || (s.description || '').toLowerCase().includes(search.toLowerCase())
       const matchesCategory = category === 'all' || s.category?.toLowerCase() === category.toLowerCase()
       return matchesSearch && matchesCategory
     })
