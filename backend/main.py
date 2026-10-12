@@ -617,7 +617,7 @@ async def skills_list(user: dict = Depends(require_auth)):
     return await list_skills()
 
 
-@app.get("/api/skills/{slug}")
+@app.get("/api/skills/{slug:path}")  # M7-01: slugs aninhados (devops/kanban-worker)
 async def skill_detail(slug: str, user: dict = Depends(require_admin)):
     result = await get_skill_detail(slug)
     if result is None:
