@@ -6,6 +6,7 @@ from typing import Dict, Optional
 import aiosqlite
 
 from backend.config import settings
+from backend.state_dbs import state_db_files
 
 STATE_DB = os.path.join(settings.AGENTOS_DATA_DIR, "state.db")
 
@@ -190,19 +191,13 @@ async def _has_profile_name(db, path: str) -> bool:
 def _state_db_files() -> list[tuple[str, str]]:
     """WI-7: todos os state.db — root ('default') + sub-profiles.
 
-    Perfil vivo = diretório com config.yaml (órfãos pós-delete ficam de fora,
-    consistente com get_profiles/efa44da). O dir de profiles é DERIVADO do
-    local do STATE_DB (<raiz>/profiles/*) — mantém sandboxes de teste
-    isolados sem monkeypatch extra."""
-    out: list[tuple[str, str]] = [("default", STATE_DB)]
-    prof_root = os.path.join(os.path.dirname(STATE_DB), "profiles")
-    if os.path.isdir(prof_root):
-        for pid in sorted(os.listdir(prof_root)):
-            cfg = os.path.join(prof_root, pid, "config.yaml")
-            db = os.path.join(prof_root, pid, "state.db")
-            if os.path.isfile(cfg) and os.path.isfile(db):
-                out.append((pid, db))
-    return out
+    Delegado ao helper compartilhado (backend/state_dbs.py — M5-01/05);
+    a semântica (profile vivo = config.yaml + state.db, dir derivado do
+    STATE_DB) vive lá. Nome interno mantido para os callers WI-7.
+
+    Passa o STATE_DB do MÓDULO (não o global do state_dbs): os testes fazem
+    monkeypatch em sessions.STATE_DB e esse seam precisa continuar vivo."""
+    return state_db_files(STATE_DB)
 
 
 async def _find_session_db(session_id: str) -> Optional[tuple]:
