@@ -256,77 +256,136 @@ async def create_task(
     os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 
     async with aiosqlite.connect(DB_PATH) as db:
-        # Create tables if they don't exist (first run)
+        # WI-12: schema CANÔNICO — espelha o DDL real do kanban.db do Hermes.
+        # O CREATE antigo era um SUBSET (14 de 37 colunas em tasks; 10 de 16 em
+        # task_runs) — fresh install sem kanban.db pré-existente quebrava em
+        # runtime (queries em claim_lock/goal_mode/… → OperationalError).
         await db.execute("""
             CREATE TABLE IF NOT EXISTS tasks (
-                id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
-                body TEXT,
-                assignee TEXT,
-                status TEXT NOT NULL DEFAULT 'todo',
-                priority INTEGER DEFAULT 2,
-                created_by TEXT,
-                created_at INTEGER,
-                started_at INTEGER,
-                completed_at INTEGER,
-                workspace_kind TEXT,
-                workspace_path TEXT,
-                session_id TEXT,
-                project_id TEXT
+                id                   TEXT PRIMARY KEY,
+                title                TEXT NOT NULL,
+                body                 TEXT,
+                assignee             TEXT,
+                status               TEXT NOT NULL,
+                priority             INTEGER DEFAULT 0,
+                created_by           TEXT,
+                created_at           INTEGER NOT NULL,
+                started_at           INTEGER,
+                completed_at         INTEGER,
+                workspace_kind       TEXT NOT NULL DEFAULT 'scratch',
+                workspace_path       TEXT,
+                branch_name          TEXT,
+                claim_lock           TEXT,
+                claim_expires        INTEGER,
+                tenant               TEXT,
+                result               TEXT,
+                idempotency_key      TEXT,
+                consecutive_failures INTEGER NOT NULL DEFAULT 0,
+                worker_pid           INTEGER,
+                last_failure_error   TEXT,
+                max_runtime_seconds  INTEGER,
+                last_heartbeat_at    INTEGER,
+                current_run_id       INTEGER,
+                workflow_template_id TEXT,
+                current_step_key     TEXT,
+                skills               TEXT,
+                model_override       TEXT,
+                max_retries          INTEGER,
+                session_id           TEXT,
+                goal_mode            INTEGER NOT NULL DEFAULT 0,
+                goal_max_turns       INTEGER,
+                project_id           TEXT,
+                block_kind           TEXT,
+                block_recurrences    INTEGER NOT NULL DEFAULT 0,
+                provider_override    TEXT,
+                reasoning_effort     TEXT,
+                completion_contract  TEXT,
+                worker_started_at    INTEGER
             )
         """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS task_runs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id TEXT NOT NULL,
-                profile TEXT,
-                step_key TEXT,
-                status TEXT,
-                started_at INTEGER,
-                ended_at INTEGER,
-                outcome TEXT,
-                summary TEXT,
-                metadata TEXT,
-                error TEXT,
-                worker_started_at INTEGER
+                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id             TEXT NOT NULL,
+                profile             TEXT,
+                step_key            TEXT,
+                status              TEXT NOT NULL,
+                claim_lock          TEXT,
+                claim_expires       INTEGER,
+                worker_pid          INTEGER,
+                max_runtime_seconds INTEGER,
+                last_heartbeat_at   INTEGER,
+                started_at          INTEGER NOT NULL,
+                ended_at            INTEGER,
+                outcome             TEXT,
+                summary             TEXT,
+                metadata            TEXT,
+                error               TEXT,
+                worker_started_at   INTEGER
             )
         """)
-        # N3: columns added after the original CREATE — get_task SELECTs
-        # metadata/error, so a fresh DB 500s on create_task's read-back.
-        # Migrate pre-existing DBs too (mirrors the users-table migration).
-        for _ddl in (
-            "ALTER TABLE task_runs ADD COLUMN metadata TEXT",
-            "ALTER TABLE task_runs ADD COLUMN error TEXT",
-            "ALTER TABLE task_runs ADD COLUMN worker_started_at INTEGER",
-        ):
-            try:
-                await db.execute(_ddl)
-            except Exception:
-                pass  # column already exists
+        # Migração de DBs criados pelo schema antigo (subset) — ALTER por
+        # coluna ausente. DEFAULTs divergentes (status/priority/created_at)
+        # não são retrofixáveis sem rebuild de tabela; inserts da API sempre
+        # setam esses campos explicitamente (documentado no finding WI-12).
+        async def _table_cols(table: str) -> set[str]:
+            async with db.execute(f"PRAGMA table_info({table})") as cur:
+                return {r[1] for r in await cur.fetchall()}
+
+        _missing = {
+            "tasks": [
+                "branch_name TEXT", "claim_lock TEXT", "claim_expires INTEGER",
+                "tenant TEXT", "result TEXT", "idempotency_key TEXT",
+                "consecutive_failures INTEGER NOT NULL DEFAULT 0",
+                "worker_pid INTEGER", "last_failure_error TEXT",
+                "max_runtime_seconds INTEGER", "last_heartbeat_at INTEGER",
+                "current_run_id INTEGER", "workflow_template_id TEXT",
+                "current_step_key TEXT", "skills TEXT", "model_override TEXT",
+                "max_retries INTEGER", "goal_mode INTEGER NOT NULL DEFAULT 0",
+                "goal_max_turns INTEGER", "block_kind TEXT",
+                "block_recurrences INTEGER NOT NULL DEFAULT 0",
+                "provider_override TEXT", "reasoning_effort TEXT",
+                "completion_contract TEXT", "worker_started_at INTEGER",
+            ],
+            "task_runs": [
+                "claim_lock TEXT", "claim_expires INTEGER", "worker_pid INTEGER",
+                "max_runtime_seconds INTEGER", "last_heartbeat_at INTEGER",
+                "metadata TEXT", "error TEXT", "worker_started_at INTEGER",
+            ],
+        }
+        for _table, _cols in _missing.items():
+            have = await _table_cols(_table)
+            for _coldef in _cols:
+                _cname = _coldef.split()[0]
+                if _cname not in have:
+                    try:
+                        await db.execute(f"ALTER TABLE {_table} ADD COLUMN {_coldef}")
+                    except Exception:
+                        pass  # corrida benigna entre workers
         await db.execute("""
             CREATE TABLE IF NOT EXISTS task_comments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id TEXT NOT NULL,
-                author TEXT,
-                body TEXT,
-                created_at INTEGER
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id    TEXT NOT NULL,
+                author     TEXT NOT NULL,
+                body       TEXT NOT NULL,
+                created_at INTEGER NOT NULL
             )
         """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS task_links (
-                parent_id TEXT NOT NULL,
-                child_id TEXT NOT NULL,
+                parent_id  TEXT NOT NULL,
+                child_id   TEXT NOT NULL,
                 PRIMARY KEY (parent_id, child_id)
             )
         """)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS task_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id TEXT,
-                run_id TEXT,
-                kind TEXT,
-                payload TEXT,
-                created_at INTEGER
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id    TEXT NOT NULL,
+                run_id     INTEGER,
+                kind       TEXT NOT NULL,
+                payload    TEXT,
+                created_at INTEGER NOT NULL
             )
         """)
 
