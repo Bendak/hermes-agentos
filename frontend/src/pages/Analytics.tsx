@@ -20,7 +20,10 @@ interface TokenByModel {
   input_tokens: number
   output_tokens: number
   cache_read_tokens: number
+  cache_write_tokens: number
   reasoning_tokens: number
+  total_tokens: number
+  estimated_cost_usd: number
   session_count: number
 }
 
@@ -30,6 +33,7 @@ interface TokenTrend {
   input_tokens: number
   output_tokens: number
   cache_read_tokens: number
+  cache_write_tokens: number
   reasoning_tokens: number
 }
 
@@ -37,18 +41,25 @@ interface TopSession {
   session_id: string
   display_name: string | null
   model: string
+  profile: string
   total_tokens: number
   input_tokens: number
   output_tokens: number
   cache_read_tokens: number
+  cache_write_tokens: number
   reasoning_tokens: number
+  estimated_cost_usd: number
 }
 
 interface TokenUsageResponse {
   by_model: TokenByModel[]
   trend: TokenTrend[]
   top_sessions: TopSession[]
-  totals: { input_tokens: number; output_tokens: number; cache_read_tokens: number; reasoning_tokens: number }
+  totals: {
+    input_tokens: number; output_tokens: number; cache_read_tokens: number
+    cache_write_tokens: number; reasoning_tokens: number; total_tokens: number
+    estimated_cost_usd: number; api_call_count: number
+  }
 }
 
 interface HeatmapEntry { day: string; hour: number; count: number }
@@ -113,6 +124,7 @@ function TokenUsageSection() {
     input: m.input_tokens,
     output: m.output_tokens,
     cache: m.cache_read_tokens,
+    cacheWrite: m.cache_write_tokens,
     reasoning: m.reasoning_tokens,
   }))
 
@@ -132,16 +144,18 @@ function TokenUsageSection() {
   return (
     <div className="space-y-8">
       {/* Summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {[
-          { label: 'Input Tokens', value: data.totals.input_tokens, color: 'text-accent' },
-          { label: 'Output Tokens', value: data.totals.output_tokens, color: 'text-purple-400' },
-          { label: 'Cache Read', value: data.totals.cache_read_tokens, color: 'text-semantic-success' },
-          { label: 'Reasoning', value: data.totals.reasoning_tokens, color: 'text-yellow-400' },
+          { label: 'Input Tokens', value: data.totals.input_tokens, color: 'text-accent', fmt: formatTokens },
+          { label: 'Output Tokens', value: data.totals.output_tokens, color: 'text-purple-400', fmt: formatTokens },
+          { label: 'Cache Read', value: data.totals.cache_read_tokens, color: 'text-semantic-success', fmt: formatTokens },
+          { label: 'Cache Write', value: data.totals.cache_write_tokens, color: 'text-sky-400', fmt: formatTokens },
+          { label: 'Reasoning', value: data.totals.reasoning_tokens, color: 'text-yellow-400', fmt: formatTokens },
+          { label: 'Custo Estimado', value: data.totals.estimated_cost_usd, color: 'text-semantic-warning', fmt: (v: number) => `$${v.toFixed(2)}` },
         ].map((c) => (
           <div key={c.label} className="rounded-xl border border-border bg-surface/40 p-5">
             <p className="text-caption text-text-tertiary uppercase tracking-wider mb-1">{c.label}</p>
-            <p className={`text-h3 font-bold ${c.color} tabular-nums`}>{formatTokens(c.value)}</p>
+            <p className={`text-h3 font-bold ${c.color} tabular-nums`}>{c.fmt(c.value)}</p>
           </div>
         ))}
       </div>
@@ -163,6 +177,7 @@ function TokenUsageSection() {
               <Bar dataKey="input" stackId="a" fill="#0ea5e9" name="Input" radius={[0, 0, 0, 0]} />
               <Bar dataKey="output" stackId="a" fill="#a855f7" name="Output" />
               <Bar dataKey="cache" stackId="a" fill="#22c55e" name="Cache Read" />
+              <Bar dataKey="cacheWrite" stackId="a" fill="#38bdf8" name="Cache Write" />
               <Bar dataKey="reasoning" stackId="a" fill="#f59e0b" name="Reasoning" radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
@@ -197,11 +212,13 @@ function TokenUsageSection() {
             <thead>
               <tr className="border-b border-border text-text-tertiary text-left">
                 <th className="pb-2 pr-4 font-medium">Session</th>
+                <th className="pb-2 pr-4 font-medium">Profile</th>
                 <th className="pb-2 pr-4 font-medium">Model</th>
                 <th className="pb-2 pr-4 font-medium text-right">Total</th>
                 <th className="pb-2 pr-4 font-medium text-right">Input</th>
                 <th className="pb-2 pr-4 font-medium text-right">Output</th>
-                <th className="pb-2 font-medium text-right">Cache</th>
+                <th className="pb-2 pr-4 font-medium text-right">Cache</th>
+                <th className="pb-2 font-medium text-right">Custo</th>
               </tr>
             </thead>
             <tbody>
@@ -210,11 +227,15 @@ function TokenUsageSection() {
                   <td className="py-2.5 pr-4 text-text-primary font-mono text-xs">
                     {s.display_name || s.session_id}
                   </td>
+                  <td className="py-2.5 pr-4 text-xs">
+                    <span className="rounded border border-border px-1.5 py-0.5 text-text-tertiary">{s.profile}</span>
+                  </td>
                   <td className="py-2.5 pr-4 text-text-secondary text-xs">{s.model}</td>
                   <td className="py-2.5 pr-4 text-right text-accent font-mono text-xs">{formatTokens(s.total_tokens)}</td>
                   <td className="py-2.5 pr-4 text-right text-text-secondary font-mono text-xs">{formatTokens(s.input_tokens)}</td>
                   <td className="py-2.5 pr-4 text-right text-text-secondary font-mono text-xs">{formatTokens(s.output_tokens)}</td>
-                  <td className="py-2.5 text-right text-text-secondary font-mono text-xs">{formatTokens(s.cache_read_tokens)}</td>
+                  <td className="py-2.5 pr-4 text-right text-text-secondary font-mono text-xs">{formatTokens(s.cache_read_tokens + s.cache_write_tokens)}</td>
+                  <td className="py-2.5 text-right text-text-secondary font-mono text-xs">${s.estimated_cost_usd.toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>

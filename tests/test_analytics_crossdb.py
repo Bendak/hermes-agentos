@@ -94,6 +94,34 @@ def test_cross_db_aggregation_and_profile_label(client, admin_headers, data_dir)
     assert models["m2"]["estimated_cost_usd"] == 1.5
 
 
+def test_tokens_response_contract_superset(client, admin_headers, data_dir):
+    """M5-04/08/10: /tokens é superconjunto de /by-model (cache_write+cost),
+    e o ranking de by_model é por consumo TOTAL (não in+out)."""
+    now = int(time.time())
+    _make_db(_state_db(data_dir),
+             [("s1", "s1", "big-cache", now, 0), ("s2", "s2", "small-io", now, 0)],
+             [
+                 # big-cache: in+out pequeno mas 380M de cache_read (o caso real M5-08)
+                 ("s1", "big-cache", 1, 1, 380_000_000, 0, 0, 1, 2.0, now, now),
+                 ("s2", "small-io", 24_000_000, 1, 0, 0, 0, 1, 0.5, now, now),
+             ])
+    r = client.get("/api/analytics/tokens", headers=admin_headers)
+    body = r.json()
+    t = body["totals"]
+    assert t["cache_write_tokens"] == 0 and "estimated_cost_usd" in t
+    assert abs(t["estimated_cost_usd"] - 2.5) < 1e-9
+    assert "api_call_count" in t
+    # M5-08: big-cache (380M total) vence small-io (24M) no ranking
+    assert body["by_model"][0]["model"] == "big-cache", (
+        f"M5-08: ranking por in+out ainda ({body['by_model']})"
+    )
+    assert body["by_model"][0]["total_tokens"] == 380_000_002
+    # campos presentes por modelo (contrato)
+    m0 = body["by_model"][0]
+    for k in ("cache_write_tokens", "estimated_cost_usd", "api_call_count", "total_tokens"):
+        assert k in m0, f"contrato: {k} ausente em by_model"
+
+
 def test_archived_sessions_excluded(client, admin_headers, data_dir):
     """F-M5-09: sessões arquivadas não contam em nenhum metric."""
     now = int(time.time())
