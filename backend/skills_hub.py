@@ -66,42 +66,82 @@ def _read_yaml(path: str) -> dict:
         return {}
 
 
+def _profile_names() -> list[str]:
+    """Perfis vivos: 'default' (main config) + sub-perfis com config.yaml."""
+    names: list[str] = []
+    if os.path.exists(MAIN_CONFIG):
+        names.append("default")
+    names.extend(
+        entry for entry in iter_sub_profile_ids()
+        if os.path.isfile(os.path.join(PROFILES_DIR, entry, "config.yaml"))
+    )
+    return names
+
+
+def _skill_roots() -> list[tuple[str, str]]:
+    """(slug_prefix, root_dir) — M7-02: inclui profiles/<p>/skills/, nunca
+    escaneados antes (27 SKILL.md viviam lá, 5 únicos)."""
+    roots: list[tuple[str, str]] = [("", SKILLS_DIR)]
+    for pname in _profile_names():
+        if pname == "default":
+            continue
+        d = os.path.join(PROFILES_DIR, pname, "skills")
+        if os.path.isdir(d):
+            roots.append((f"profiles/{pname}", d))
+    return roots
+
+
+def _walk_skill_dirs(root: str) -> dict[str, str]:
+    """{relpath: dir} recursivo (M7-01): qualquer dir com SKILL.md conta —
+    umbrella packs (blender-pack/skills/<name>/, mlops/<area>/<name>/…) eram
+    invisíveis num scan de um nível (inventário errado em ~6x). Poda dirs
+    ocultos/node_modules/__pycache__/venv (F-M7-13)."""
+    found: dict[str, str] = {}
+    if not os.path.isdir(root):
+        return found
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if not d.startswith(".") and d not in ("node_modules", "__pycache__", "venv")
+        )
+        if "SKILL.md" in filenames:
+            rel = os.path.relpath(dirpath, root)
+            if rel != ".":
+                found[rel.replace(os.sep, "/")] = dirpath
+    return found
+
+
+def discover_skills() -> dict[str, str]:
+    """{slug: skill_dir} — slug = relpath (shared) ou profiles/<p>/<relpath>
+    (skills de profile). ÚNICO ponto que transforma nomes em paths: o
+    resolver do detail consulta ESTE mapa, nunca faz join com input do
+    usuário (M7-04 — contenção estrutural, não por blacklist)."""
+    out: dict[str, str] = {}
+    for prefix, root in _skill_roots():
+        for rel, d in _walk_skill_dirs(root).items():
+            slug = f"{prefix}/{rel}" if prefix else rel
+            out[slug] = d
+    return out
+
+
 def get_profile_skills_map() -> dict[str, list[str]]:
     """Return {skill_slug: [profile_name, ...]} for every skill."""
-    # Gather all skill slugs from the skills directory
-    all_slugs: set[str] = set()
-    if os.path.isdir(SKILLS_DIR):
-        for entry in os.listdir(SKILLS_DIR):
-            if not entry.startswith(".") and os.path.isfile(
-                os.path.join(SKILLS_DIR, entry, "SKILL.md")
-            ):
-                all_slugs.add(entry)
+    # M7-01: descoberta recursiva (shared + profiles/<p>/skills)
+    all_slugs: set[str] = set(discover_skills().keys())
 
     # Also gather slugs from external dirs referenced by profiles or main config
     def _external_slugs(config: dict) -> set[str]:
         slugs: set[str] = set()
         for d in config.get("skills", {}).get("external_dirs", []) or []:
-            if os.path.isdir(d):
-                for entry in os.listdir(d):
-                    if not entry.startswith(".") and os.path.isfile(
-                        os.path.join(d, entry, "SKILL.md")
-                    ):
-                        slugs.add(entry)
+            # recursivo também: umbrella packs em external_dirs eram invisíveis
+            slugs.update(_walk_skill_dirs(d).keys())
         return slugs
 
     main_cfg = _read_yaml(MAIN_CONFIG)
     all_slugs |= _external_slugs(main_cfg)
     main_disabled: set[str] = set(main_cfg.get("skills", {}).get("disabled", []) or [])
 
-    # Discover profiles — single source (M13-1: this private loop used to
-    # serve 'default' twice plus case variants and no-config dirs)
-    profile_names: list[str] = []
-    if os.path.exists(MAIN_CONFIG):
-        profile_names.append("default")
-    profile_names.extend(
-        entry for entry in iter_sub_profile_ids()
-        if os.path.isfile(os.path.join(PROFILES_DIR, entry, "config.yaml"))
-    )
+    profile_names = _profile_names()  # M13-1: single source
 
     # Build map: slug -> list of profile names that have it enabled
     slug_profiles: dict[str, list[str]] = {s: [] for s in all_slugs}
@@ -188,24 +228,14 @@ def _parse_skill_md(skill_path: str) -> dict | None:
 
 async def list_skills() -> list[dict]:
     """List all installed skills with profile usage info."""
-    if not os.path.isdir(SKILLS_DIR):
-        return []
-
     profile_map = get_profile_skills_map()
 
     skills = []
-    for entry in sorted(os.listdir(SKILLS_DIR)):
-        if entry.startswith("."):
-            continue
-
-        skill_path = os.path.join(SKILLS_DIR, entry, "SKILL.md")
-        if not os.path.isfile(skill_path):
-            continue
-
-        info = _parse_skill_md(skill_path)
+    for slug, skill_dir in sorted(discover_skills().items()):
+        info = _parse_skill_md(os.path.join(skill_dir, "SKILL.md"))
         if info:
-            info["slug"] = entry
-            info["profiles"] = profile_map.get(entry, [])
+            info["slug"] = slug
+            info["profiles"] = profile_map.get(slug, [])
             skills.append(info)
 
     return skills
@@ -217,20 +247,17 @@ _SKILL_MD_MAX_BYTES = 512 * 1024
 
 
 def _safe_skill_dir(slug: str) -> str | None:
-    """M7-04: slug → dir DENTRO de SKILLS_DIR, ou None.
+    """M7-04: slug → skill_dir, ou None.
 
-    O join cru (`os.path.join(SKILLS_DIR, slug)`) deixava `..` alcançar o
-    resolver de paths (um slug podia apontar qualquer arquivo do host para o
-    detail). Defesa em duas camadas: vocabulário do slug (sem separadores,
-    sem `..`) + contenção realpath/commonpath (o mesmo padrão dos artifacts).
+    Contenção ESTRUTURAL: o slug só resolve via o mapa de descoberta
+    (chaves geradas pelo walk, não pelo usuário) — nunca é concatenado num
+    path. `..`, separadores soltos ou qualquer slug fora do inventário
+    simplesmente não existem no mapa. Caminhos aninhados (devops/kanban-worker)
+    funcionam porque o mapa é recursivo (M7-01).
     """
-    if not slug or slug in (".", "..") or "/" in slug or "\\" in slug or ".." in slug:
+    if not slug or "\x00" in slug or "\\" in slug:
         return None
-    skill_dir = os.path.realpath(os.path.join(SKILLS_DIR, slug))
-    root = os.path.realpath(SKILLS_DIR)
-    if os.path.commonpath([root, skill_dir]) != root:
-        return None
-    return skill_dir
+    return discover_skills().get(slug)
 
 
 async def get_skill_detail(slug: str) -> dict | None:
@@ -276,21 +303,10 @@ async def list_profiles_summary() -> list[dict]:
     main_cfg = _read_yaml(MAIN_CONFIG)
     main_disabled: set[str] = set(main_cfg.get("skills", {}).get("disabled", []) or [])
 
-    # Count total skills available (default dir + main external dirs)
-    all_slugs: set[str] = set()
-    if os.path.isdir(SKILLS_DIR):
-        for entry in os.listdir(SKILLS_DIR):
-            if not entry.startswith(".") and os.path.isfile(
-                os.path.join(SKILLS_DIR, entry, "SKILL.md")
-            ):
-                all_slugs.add(entry)
+    # Count total skills available (shared recursive + main external dirs)
+    all_slugs: set[str] = set(discover_skills().keys())
     for d in main_cfg.get("skills", {}).get("external_dirs", []) or []:
-        if os.path.isdir(d):
-            for entry in os.listdir(d):
-                if not entry.startswith(".") and os.path.isfile(
-                    os.path.join(d, entry, "SKILL.md")
-                ):
-                    all_slugs.add(entry)
+        all_slugs.update(_walk_skill_dirs(d).keys())
 
     profiles: list[dict] = []
 
@@ -318,15 +334,15 @@ async def list_profiles_summary() -> list[dict]:
         profile_disabled: set[str] = set(cfg.get("skills", {}).get("disabled", []) or [])
         combined_disabled = (main_disabled | profile_disabled) & all_slugs
 
-        # Also count extra skills from profile's own external dirs
+        # Also count extra skills from profile's own external dirs AND its
+        # own skills/ dir (M7-02: nunca contadas — 27 SKILL.md invisíveis)
         extra = set()
         for d in cfg.get("skills", {}).get("external_dirs", []) or []:
-            if os.path.isdir(d):
-                for e in os.listdir(d):
-                    if not e.startswith(".") and os.path.isfile(
-                        os.path.join(d, e, "SKILL.md")
-                    ):
-                        extra.add(e)
+            extra.update(_walk_skill_dirs(d).keys())
+        extra.update(
+            slug for slug in discover_skills()
+            if slug.startswith(f"profiles/{entry}/")
+        )
 
         total = len(all_slugs | extra)
 
