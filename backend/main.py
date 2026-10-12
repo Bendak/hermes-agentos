@@ -579,7 +579,7 @@ async def kanban_notify(body: dict, user: dict = Depends(require_auth)):
 # ── Config viewer endpoints ──────────────────────────────────────
 
 @app.get("/api/config")
-async def config_view(user: dict = Depends(require_auth)):
+async def config_view(user: dict = Depends(require_admin)):
     config = await get_config()
     if config is None:
         raise HTTPException(status_code=404, detail="Configuration file not found")
@@ -587,7 +587,7 @@ async def config_view(user: dict = Depends(require_auth)):
 
 
 @app.get("/api/config/raw")
-async def config_raw(user: dict = Depends(require_auth)):
+async def config_raw(user: dict = Depends(require_admin)):
     import yaml as yaml_lib
 
     config = await get_config()
@@ -618,7 +618,7 @@ async def skills_list(user: dict = Depends(require_auth)):
 
 
 @app.get("/api/skills/{slug}")
-async def skill_detail(slug: str, user: dict = Depends(require_auth)):
+async def skill_detail(slug: str, user: dict = Depends(require_admin)):
     result = await get_skill_detail(slug)
     if result is None:
         raise HTTPException(status_code=404, detail="Skill not found")
