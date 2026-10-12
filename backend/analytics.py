@@ -1,5 +1,6 @@
 """Analytics API — token usage, activity heatmap, hardware monitoring."""
 
+import logging
 import os
 import time
 from fastapi import APIRouter, Depends
@@ -8,9 +9,44 @@ from backend.config import settings
 
 import aiosqlite
 
+from backend.state_dbs import STATE_DB, open_ro, state_db_files
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
-STATE_DB = os.path.join(settings.AGENTOS_DATA_DIR, "state.db")
+# M5-03: fonte ÚNICA de timezone para todo bucket de dia — trend e heatmap
+# discordavam (trend em UTC, heatmap em BRT). Trocar aqui muda os dois.
+BRT_SQL_OFFSET = "-3 hours"
+
+# M5-05: padrão compartilhado de leitura dos state.db (root + profiles).
+# mode=ro (via open_ro) nunca cria db fantasma; db sem a tabela/shape esperado
+# é pulado com warning em vez de 500 — drift de schema entre profiles não pode
+# derrubar o endpoint.
+
+
+async def _query_each_db(sql: str) -> list[tuple[str, list]]:
+    """Run *sql* against every live state.db; return [(owner, rows), ...].
+
+    M5-01: o analytics lia SÓ o state.db do profile default (~24% do uso
+    invisível). Aqui o universo é root + sub-profiles (mesma semântica do
+    WI-7)."""
+    out: list[tuple[str, list]] = []
+    for owner, path in state_db_files():
+        if not os.path.exists(path):
+            continue
+        db = None
+        try:
+            db = await open_ro(path)
+            db.row_factory = aiosqlite.Row
+            rows = await db.execute_fetchall(sql)
+            out.append((owner, list(rows)))
+        except Exception as e:  # schema drift: pula o db, não o endpoint
+            logger.warning("analytics: skipping state.db %s (%s): %s", owner, path, e)
+        finally:
+            if db is not None:
+                await db.close()
+    return out
 
 # ── Hardware monitoring state ────────────────────────────────────────
 _cpu_prev: dict = {}
@@ -81,92 +117,104 @@ def _read_uptime():
 @router.get("/api/analytics/tokens")
 async def token_usage(user: dict = Depends(require_auth)):
     """Token usage summary: by model, trend (7 days), top sessions."""
-    async with aiosqlite.connect(STATE_DB) as db:
-        db.row_factory = aiosqlite.Row
-
-        # Total tokens by model
-        rows = await db.execute_fetchall("""
-            SELECT model,
-                   SUM(input_tokens) as input_tokens,
-                   SUM(output_tokens) as output_tokens,
-                   SUM(cache_read_tokens) as cache_read_tokens,
-                   SUM(reasoning_tokens) as reasoning_tokens,
-                   COUNT(DISTINCT session_id) as session_count
-            FROM session_model_usage
-            GROUP BY model
-            ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC
-        """)
-        by_model = []
+    # M5-01: root + sub-profiles. F-M5-09: sessões arquivadas ficam FORA
+    # (a página de Sessões e o analytics precisam do mesmo universo).
+    model_acc: dict[str, dict] = {}
+    for owner, rows in await _query_each_db("""
+        SELECT smu.model as model,
+               SUM(smu.input_tokens) as input_tokens,
+               SUM(smu.output_tokens) as output_tokens,
+               SUM(smu.cache_read_tokens) as cache_read_tokens,
+               SUM(smu.reasoning_tokens) as reasoning_tokens,
+               COUNT(DISTINCT smu.session_id) as session_count
+        FROM session_model_usage smu
+        JOIN sessions s ON s.id = smu.session_id
+        WHERE COALESCE(s.archived, 0) = 0
+        GROUP BY smu.model
+    """):
         for r in rows:
-            by_model.append({
-                "model": r["model"],
-                "input_tokens": r["input_tokens"] or 0,
-                "output_tokens": r["output_tokens"] or 0,
-                "cache_read_tokens": r["cache_read_tokens"] or 0,
-                "reasoning_tokens": r["reasoning_tokens"] or 0,
-                "session_count": r["session_count"] or 0,
+            acc = model_acc.setdefault(r["model"], {
+                "model": r["model"], "input_tokens": 0, "output_tokens": 0,
+                "cache_read_tokens": 0, "reasoning_tokens": 0, "session_count": 0,
             })
+            acc["input_tokens"] += r["input_tokens"] or 0
+            acc["output_tokens"] += r["output_tokens"] or 0
+            acc["cache_read_tokens"] += r["cache_read_tokens"] or 0
+            acc["reasoning_tokens"] += r["reasoning_tokens"] or 0
+            acc["session_count"] += r["session_count"] or 0
+    by_model = sorted(
+        model_acc.values(),
+        key=lambda m: m["input_tokens"] + m["output_tokens"],
+        reverse=True,
+    )
 
-        # Token trend: last 7 days grouped by day with per-model breakdown
-        rows = await db.execute_fetchall("""
-            SELECT date(first_seen, 'unixepoch') as day,
-                   model,
-                   SUM(input_tokens) as input_tokens,
-                   SUM(output_tokens) as output_tokens,
-                   SUM(cache_read_tokens) as cache_read_tokens,
-                   SUM(reasoning_tokens) as reasoning_tokens
-            FROM session_model_usage
-            WHERE first_seen >= strftime('%s', 'now', '-7 days')
-            GROUP BY day, model
-            ORDER BY day
-        """)
-        trend = []
+    # M5-02: bucket por last_seen (não first_seen) — linhas multi-dia eram
+    # atribuídas integralmente ao primeiro dia (52 linhas em escala) e a
+    # janela por first_seen excluía linhas ativas. M5-03: mesmo offset BRT do
+    # heatmap (BRT_SQL_OFFSET) — os dois gráficos agora concordam no dia.
+    trend_acc: dict[tuple[str, str], dict] = {}
+    for owner, rows in await _query_each_db(f"""
+        SELECT date(smu.last_seen, 'unixepoch', '{BRT_SQL_OFFSET}') as day,
+               smu.model as model,
+               SUM(smu.input_tokens) as input_tokens,
+               SUM(smu.output_tokens) as output_tokens,
+               SUM(smu.cache_read_tokens) as cache_read_tokens,
+               SUM(smu.reasoning_tokens) as reasoning_tokens
+        FROM session_model_usage smu
+        JOIN sessions s ON s.id = smu.session_id
+        WHERE COALESCE(s.archived, 0) = 0
+          AND smu.last_seen >= strftime('%s', 'now', '-7 days')
+        GROUP BY day, smu.model
+    """):
         for r in rows:
-            trend.append({
-                "day": r["day"],
-                "model": r["model"],
-                "input_tokens": r["input_tokens"] or 0,
-                "output_tokens": r["output_tokens"] or 0,
-                "cache_read_tokens": r["cache_read_tokens"] or 0,
-                "reasoning_tokens": r["reasoning_tokens"] or 0,
+            acc = trend_acc.setdefault((r["day"], r["model"]), {
+                "day": r["day"], "model": r["model"], "input_tokens": 0,
+                "output_tokens": 0, "cache_read_tokens": 0, "reasoning_tokens": 0,
             })
+            acc["input_tokens"] += r["input_tokens"] or 0
+            acc["output_tokens"] += r["output_tokens"] or 0
+            acc["cache_read_tokens"] += r["cache_read_tokens"] or 0
+            acc["reasoning_tokens"] += r["reasoning_tokens"] or 0
+    trend = sorted(trend_acc.values(), key=lambda t: (t["day"], t["model"]))
 
-        # Top 5 sessions by total token count
-        rows = await db.execute_fetchall("""
-            SELECT s.id as session_id,
-                   s.display_name,
-                   s.model,
-                   SUM(smu.input_tokens + smu.output_tokens + smu.cache_read_tokens + smu.reasoning_tokens) as total_tokens,
-                   SUM(smu.input_tokens) as input_tokens,
-                   SUM(smu.output_tokens) as output_tokens,
-                   SUM(smu.cache_read_tokens) as cache_read_tokens,
-                   SUM(smu.reasoning_tokens) as reasoning_tokens
-            FROM session_model_usage smu
-            JOIN sessions s ON s.id = smu.session_id
-            GROUP BY smu.session_id
-            ORDER BY total_tokens DESC
-            LIMIT 5
-        """)
-        top_sessions = []
+    # Top 5 sessions — agora globais (todos os profiles), com a coluna
+    # `profile` (M5-01: "UNION com coluna de profile") para o badge no front.
+    top_sessions = []
+    for owner, rows in await _query_each_db("""
+        SELECT s.id as session_id,
+               s.display_name,
+               s.model,
+               SUM(smu.input_tokens + smu.output_tokens + smu.cache_read_tokens + smu.reasoning_tokens) as total_tokens,
+               SUM(smu.input_tokens) as input_tokens,
+               SUM(smu.output_tokens) as output_tokens,
+               SUM(smu.cache_read_tokens) as cache_read_tokens,
+               SUM(smu.reasoning_tokens) as reasoning_tokens
+        FROM session_model_usage smu
+        JOIN sessions s ON s.id = smu.session_id
+        WHERE COALESCE(s.archived, 0) = 0
+        GROUP BY smu.session_id
+    """):
         for r in rows:
             top_sessions.append({
                 "session_id": r["session_id"],
                 "display_name": r["display_name"],
                 "model": r["model"],
+                "profile": owner,
                 "total_tokens": r["total_tokens"] or 0,
                 "input_tokens": r["input_tokens"] or 0,
                 "output_tokens": r["output_tokens"] or 0,
                 "cache_read_tokens": r["cache_read_tokens"] or 0,
                 "reasoning_tokens": r["reasoning_tokens"] or 0,
             })
+    top_sessions.sort(key=lambda t: t["total_tokens"], reverse=True)
+    top_sessions = top_sessions[:5]
 
-        # Summary totals
-        totals = {
-            "input_tokens": sum(m["input_tokens"] for m in by_model),
-            "output_tokens": sum(m["output_tokens"] for m in by_model),
-            "cache_read_tokens": sum(m["cache_read_tokens"] for m in by_model),
-            "reasoning_tokens": sum(m["reasoning_tokens"] for m in by_model),
-        }
+    totals = {
+        "input_tokens": sum(m["input_tokens"] for m in by_model),
+        "output_tokens": sum(m["output_tokens"] for m in by_model),
+        "cache_read_tokens": sum(m["cache_read_tokens"] for m in by_model),
+        "reasoning_tokens": sum(m["reasoning_tokens"] for m in by_model),
+    }
 
     return {
         "by_model": by_model,
@@ -179,34 +227,38 @@ async def token_usage(user: dict = Depends(require_auth)):
 @router.get("/api/analytics/tokens/by-model")
 async def token_by_model(user: dict = Depends(require_auth)):
     """Detailed per-model token breakdown with session counts."""
-    async with aiosqlite.connect(STATE_DB) as db:
-        rows = await db.execute_fetchall("""
-            SELECT model,
-                   COUNT(DISTINCT session_id) as session_count,
-                   SUM(input_tokens) as input_tokens,
-                   SUM(output_tokens) as output_tokens,
-                   SUM(cache_read_tokens) as cache_read_tokens,
-                   SUM(cache_write_tokens) as cache_write_tokens,
-                   SUM(reasoning_tokens) as reasoning_tokens,
-                   SUM(api_call_count) as api_call_count,
-                   SUM(estimated_cost_usd) as estimated_cost_usd
-            FROM session_model_usage
-            GROUP BY model
-            ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC
-        """)
-        result = []
+    acc: dict[str, dict] = {}
+    for owner, rows in await _query_each_db("""
+        SELECT smu.model as model,
+               COUNT(DISTINCT smu.session_id) as session_count,
+               SUM(smu.input_tokens) as input_tokens,
+               SUM(smu.output_tokens) as output_tokens,
+               SUM(smu.cache_read_tokens) as cache_read_tokens,
+               SUM(smu.cache_write_tokens) as cache_write_tokens,
+               SUM(smu.reasoning_tokens) as reasoning_tokens,
+               SUM(smu.api_call_count) as api_call_count,
+               SUM(smu.estimated_cost_usd) as estimated_cost_usd
+        FROM session_model_usage smu
+        JOIN sessions s ON s.id = smu.session_id
+        WHERE COALESCE(s.archived, 0) = 0
+        GROUP BY smu.model
+    """):
         for r in rows:
-            result.append({
-                "model": r[0],
-                "session_count": r[1] or 0,
-                "input_tokens": r[2] or 0,
-                "output_tokens": r[3] or 0,
-                "cache_read_tokens": r[4] or 0,
-                "cache_write_tokens": r[5] or 0,
-                "reasoning_tokens": r[6] or 0,
-                "api_call_count": r[7] or 0,
-                "estimated_cost_usd": r[8] or 0.0,
+            a = acc.setdefault(r["model"], {
+                "model": r["model"], "session_count": 0, "input_tokens": 0,
+                "output_tokens": 0, "cache_read_tokens": 0,
+                "cache_write_tokens": 0, "reasoning_tokens": 0,
+                "api_call_count": 0, "estimated_cost_usd": 0.0,
             })
+            a["session_count"] += r["session_count"] or 0
+            a["input_tokens"] += r["input_tokens"] or 0
+            a["output_tokens"] += r["output_tokens"] or 0
+            a["cache_read_tokens"] += r["cache_read_tokens"] or 0
+            a["cache_write_tokens"] += r["cache_write_tokens"] or 0
+            a["reasoning_tokens"] += r["reasoning_tokens"] or 0
+            a["api_call_count"] += r["api_call_count"] or 0
+            a["estimated_cost_usd"] += r["estimated_cost_usd"] or 0.0
+    result = sorted(acc.values(), key=lambda m: m["input_tokens"] + m["output_tokens"], reverse=True)
     return {"models": result}
 
 
@@ -218,29 +270,31 @@ DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
 @router.get("/api/analytics/activity")
 async def activity_heatmap(user: dict = Depends(require_auth)):
     """Activity heatmap: sessions grouped by day-of-week × hour in BRT (UTC-3)."""
-    async with aiosqlite.connect(STATE_DB) as db:
-        rows = await db.execute_fetchall("""
-            SELECT
-                CAST(strftime('%w', datetime(started_at, 'unixepoch', '-3 hours')) AS INTEGER) as dow,
-                CAST(strftime('%H', datetime(started_at, 'unixepoch', '-3 hours')) AS INTEGER) as hour,
-                COUNT(*) as cnt
-            FROM sessions
-            WHERE started_at IS NOT NULL
-            GROUP BY dow, hour
-        """)
-
-        heatmap = []
-        per_hour: dict[int, int] = {}
-        per_day: dict[str, int] = {}
-        total_sessions = 0
-
+    heat_acc: dict[tuple[int, int], int] = {}
+    for owner, rows in await _query_each_db(f"""
+        SELECT
+            CAST(strftime('%w', datetime(started_at, 'unixepoch', '{BRT_SQL_OFFSET}')) AS INTEGER) as dow,
+            CAST(strftime('%H', datetime(started_at, 'unixepoch', '{BRT_SQL_OFFSET}')) AS INTEGER) as hour,
+            COUNT(*) as cnt
+        FROM sessions
+        WHERE started_at IS NOT NULL
+          AND COALESCE(archived, 0) = 0
+        GROUP BY dow, hour
+    """):
         for r in rows:
-            dow, hour, cnt = int(r[0]), int(r[1]), int(r[2])
-            day_name = DAY_NAMES[dow]
-            heatmap.append({"day": day_name, "hour": hour, "count": cnt})
-            per_hour[hour] = per_hour.get(hour, 0) + cnt
-            per_day[day_name] = per_day.get(day_name, 0) + cnt
-            total_sessions += cnt
+            heat_acc[(int(r[0]), int(r[1]))] = heat_acc.get((int(r[0]), int(r[1])), 0) + int(r[2])
+
+    heatmap = []
+    per_hour: dict[int, int] = {}
+    per_day: dict[str, int] = {}
+    total_sessions = 0
+
+    for (dow, hour), cnt in sorted(heat_acc.items()):
+        day_name = DAY_NAMES[dow]
+        heatmap.append({"day": day_name, "hour": hour, "count": cnt})
+        per_hour[hour] = per_hour.get(hour, 0) + cnt
+        per_day[day_name] = per_day.get(day_name, 0) + cnt
+        total_sessions += cnt
 
         # Determine peak hour and peak day
         peak_hour = max(per_hour, key=lambda k: per_hour[k]) if per_hour else None
