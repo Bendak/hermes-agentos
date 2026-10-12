@@ -2,6 +2,7 @@
 
 import logging
 import os
+import threading
 import time
 from fastapi import APIRouter, Depends
 from backend.auth import require_auth
@@ -51,6 +52,11 @@ async def _query_each_db(sql: str) -> list[tuple[str, list]]:
 # ── Hardware monitoring state ────────────────────────────────────────
 _cpu_prev: dict = {}
 _cpu_prev_time: float = 0.0
+# M5-07: _calc_cpu_percent é read-modify-write do delta — requests
+# concorrentes liam o prev um do outro e distorciam a %. Lock torna a
+# janela de race fechada num worker (multi-worker = estado por processo,
+# inerente ao design de memória; documentado no finding).
+_cpu_lock = threading.Lock()
 
 
 def _read_cpu_times():
@@ -70,6 +76,12 @@ def _read_cpu_times():
 
 def _calc_cpu_percent():
     """Calculate CPU usage % since last call."""
+    global _cpu_prev, _cpu_prev_time
+    with _cpu_lock:
+        return _calc_cpu_percent_locked()
+
+
+def _calc_cpu_percent_locked():
     global _cpu_prev, _cpu_prev_time
     cur = _read_cpu_times()
     now = time.time()
@@ -125,7 +137,10 @@ async def token_usage(user: dict = Depends(require_auth)):
                SUM(smu.input_tokens) as input_tokens,
                SUM(smu.output_tokens) as output_tokens,
                SUM(smu.cache_read_tokens) as cache_read_tokens,
+               SUM(smu.cache_write_tokens) as cache_write_tokens,
                SUM(smu.reasoning_tokens) as reasoning_tokens,
+               SUM(smu.estimated_cost_usd) as estimated_cost_usd,
+               SUM(smu.api_call_count) as api_call_count,
                COUNT(DISTINCT smu.session_id) as session_count
         FROM session_model_usage smu
         JOIN sessions s ON s.id = smu.session_id
@@ -135,18 +150,27 @@ async def token_usage(user: dict = Depends(require_auth)):
         for r in rows:
             acc = model_acc.setdefault(r["model"], {
                 "model": r["model"], "input_tokens": 0, "output_tokens": 0,
-                "cache_read_tokens": 0, "reasoning_tokens": 0, "session_count": 0,
+                "cache_read_tokens": 0, "cache_write_tokens": 0,
+                "reasoning_tokens": 0, "estimated_cost_usd": 0.0,
+                "api_call_count": 0, "session_count": 0,
             })
             acc["input_tokens"] += r["input_tokens"] or 0
             acc["output_tokens"] += r["output_tokens"] or 0
             acc["cache_read_tokens"] += r["cache_read_tokens"] or 0
+            acc["cache_write_tokens"] += r["cache_write_tokens"] or 0
             acc["reasoning_tokens"] += r["reasoning_tokens"] or 0
+            acc["estimated_cost_usd"] += r["estimated_cost_usd"] or 0.0
+            acc["api_call_count"] += r["api_call_count"] or 0
             acc["session_count"] += r["session_count"] or 0
-    by_model = sorted(
-        model_acc.values(),
-        key=lambda m: m["input_tokens"] + m["output_tokens"],
-        reverse=True,
-    )
+    # M5-08: o ranking por in+out puro divergia do consumo real (um modelo
+    # 4º na barra era o maior da tela com 380M de cache_read). Contrato único
+    # (M5-04/10): ordenar por TOTAL (todos os tipos) e expor o total pronto.
+    for m in model_acc.values():
+        m["total_tokens"] = (
+            m["input_tokens"] + m["output_tokens"] + m["cache_read_tokens"]
+            + m["cache_write_tokens"] + m["reasoning_tokens"]
+        )
+    by_model = sorted(model_acc.values(), key=lambda m: m["total_tokens"], reverse=True)
 
     # M5-02: bucket por last_seen (não first_seen) — linhas multi-dia eram
     # atribuídas integralmente ao primeiro dia (52 linhas em escala) e a
@@ -159,6 +183,7 @@ async def token_usage(user: dict = Depends(require_auth)):
                SUM(smu.input_tokens) as input_tokens,
                SUM(smu.output_tokens) as output_tokens,
                SUM(smu.cache_read_tokens) as cache_read_tokens,
+               SUM(smu.cache_write_tokens) as cache_write_tokens,
                SUM(smu.reasoning_tokens) as reasoning_tokens
         FROM session_model_usage smu
         JOIN sessions s ON s.id = smu.session_id
@@ -169,11 +194,13 @@ async def token_usage(user: dict = Depends(require_auth)):
         for r in rows:
             acc = trend_acc.setdefault((r["day"], r["model"]), {
                 "day": r["day"], "model": r["model"], "input_tokens": 0,
-                "output_tokens": 0, "cache_read_tokens": 0, "reasoning_tokens": 0,
+                "output_tokens": 0, "cache_read_tokens": 0,
+                "cache_write_tokens": 0, "reasoning_tokens": 0,
             })
             acc["input_tokens"] += r["input_tokens"] or 0
             acc["output_tokens"] += r["output_tokens"] or 0
             acc["cache_read_tokens"] += r["cache_read_tokens"] or 0
+            acc["cache_write_tokens"] += r["cache_write_tokens"] or 0
             acc["reasoning_tokens"] += r["reasoning_tokens"] or 0
     trend = sorted(trend_acc.values(), key=lambda t: (t["day"], t["model"]))
 
@@ -188,7 +215,9 @@ async def token_usage(user: dict = Depends(require_auth)):
                SUM(smu.input_tokens) as input_tokens,
                SUM(smu.output_tokens) as output_tokens,
                SUM(smu.cache_read_tokens) as cache_read_tokens,
-               SUM(smu.reasoning_tokens) as reasoning_tokens
+               SUM(smu.cache_write_tokens) as cache_write_tokens,
+               SUM(smu.reasoning_tokens) as reasoning_tokens,
+               SUM(smu.estimated_cost_usd) as estimated_cost_usd
         FROM session_model_usage smu
         JOIN sessions s ON s.id = smu.session_id
         WHERE COALESCE(s.archived, 0) = 0
@@ -200,11 +229,13 @@ async def token_usage(user: dict = Depends(require_auth)):
                 "display_name": r["display_name"],
                 "model": r["model"],
                 "profile": owner,
-                "total_tokens": r["total_tokens"] or 0,
+                "total_tokens": (r["total_tokens"] or 0) + (r["cache_write_tokens"] or 0),
                 "input_tokens": r["input_tokens"] or 0,
                 "output_tokens": r["output_tokens"] or 0,
                 "cache_read_tokens": r["cache_read_tokens"] or 0,
+                "cache_write_tokens": r["cache_write_tokens"] or 0,
                 "reasoning_tokens": r["reasoning_tokens"] or 0,
+                "estimated_cost_usd": r["estimated_cost_usd"] or 0.0,
             })
     top_sessions.sort(key=lambda t: t["total_tokens"], reverse=True)
     top_sessions = top_sessions[:5]
@@ -213,7 +244,11 @@ async def token_usage(user: dict = Depends(require_auth)):
         "input_tokens": sum(m["input_tokens"] for m in by_model),
         "output_tokens": sum(m["output_tokens"] for m in by_model),
         "cache_read_tokens": sum(m["cache_read_tokens"] for m in by_model),
+        "cache_write_tokens": sum(m["cache_write_tokens"] for m in by_model),
         "reasoning_tokens": sum(m["reasoning_tokens"] for m in by_model),
+        "total_tokens": sum(m["total_tokens"] for m in by_model),
+        "estimated_cost_usd": round(sum(m["estimated_cost_usd"] for m in by_model), 6),
+        "api_call_count": sum(m["api_call_count"] for m in by_model),
     }
 
     return {
@@ -330,7 +365,7 @@ async def hardware_stats(user: dict = Depends(require_auth)):
     mem = _read_meminfo()
 
     # Disk
-    st = os.statvfs("/opt/data")
+    st = os.statvfs(settings.AGENTOS_DATA_DIR)  # M5-06: não hardcode
     disk_total = st.f_blocks * st.f_frsize
     disk_free = st.f_bavail * st.f_frsize
     disk_used = disk_total - disk_free
