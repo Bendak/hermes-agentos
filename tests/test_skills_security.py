@@ -2,6 +2,7 @@
 
 import os
 
+import backend.skills_hub as skills_hub
 from backend.config import settings
 
 
@@ -14,6 +15,7 @@ def _mk_skill(slug: str, content: str = "# T\nname: t\ndescription: d\n") -> Non
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, "SKILL.md"), "w") as f:
         f.write(content)
+    skills_hub._index_cache = None
 
 
 def test_slug_traversal_is_contained(client, admin_headers):

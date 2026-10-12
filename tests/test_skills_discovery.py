@@ -2,6 +2,7 @@
 
 import os
 
+import backend.skills_hub as skills_hub
 from backend.config import settings
 from backend.profile_discovery import PROFILES_DIR
 
@@ -15,6 +16,7 @@ def _mk(relpath: str, root: str | None = None) -> None:
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, "SKILL.md"), "w") as f:
         f.write("---\nname: x\ndescription: d\n---\nbody\n")
+    skills_hub._index_cache = None
 
 
 def test_nested_umbrella_skills_are_discovered(client, admin_headers):

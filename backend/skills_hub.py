@@ -1,10 +1,14 @@
+import logging
 import os
 import re
+import time
 from pathlib import Path
 
 import yaml
 
 from backend.config import settings
+
+logger = logging.getLogger(__name__)
 
 SKILLS_DIR = os.path.join(settings.AGENTOS_DATA_DIR, "skills")
 from backend.profile_discovery import (  # noqa: E402  (M10-16)
@@ -111,62 +115,143 @@ def _walk_skill_dirs(root: str) -> dict[str, str]:
     return found
 
 
+# ── Índice de skills (TTL) ──────────────────────────────────────────
+# O adversarial mediu list ~850ms com walks redundantes por request; o índice
+# faz UM walk + extração de frontmatter name por janela de TTL. É também a
+# base da semântica de disabled (F-M7-11: Hermes keya por frontmatter name,
+# AgentOS por dir name — o matcher aceita os DOIS).
+_INDEX_TTL_SECONDS = 5.0
+_index_cache: tuple[float, dict[str, dict]] | None = None
+
+_FM_NAME_RE = re.compile(r"^---\s*\r?\n(.*?)(?:\r?\n)---", re.DOTALL)
+_NAME_RE = re.compile(r"^name:\s*(.+?)\s*$", re.MULTILINE)
+
+
+def _frontmatter_name(skill_dir: str) -> str:
+    """Extrai só o `name:` do frontmatter (lê no máx 2KB — F-M7-12 em espírito:
+    nada de ler o arquivo inteiro pra uma chave)."""
+    try:
+        with open(os.path.join(skill_dir, "SKILL.md"), "r", encoding="utf-8", errors="replace") as f:
+            head = f.read(2048)
+    except OSError:
+        return ""
+    m = _FM_NAME_RE.match(head)
+    if not m:
+        return ""
+    n = _NAME_RE.search(m.group(1))
+    return n.group(1).strip().strip("'\"") if n else ""
+
+
+def _skill_index() -> dict[str, dict]:
+    """{slug: {dir, basename, name}} — TTL-cached (5s)."""
+    global _index_cache
+    now = time.monotonic()
+    if _index_cache is not None and now - _index_cache[0] < _INDEX_TTL_SECONDS:
+        return _index_cache[1]
+    idx: dict[str, dict] = {}
+    for prefix, root in _skill_roots():
+        for rel, d in _walk_skill_dirs(root).items():
+            slug = f"{prefix}/{rel}" if prefix else rel
+            idx[slug] = {
+                "dir": d,
+                "basename": os.path.basename(d),
+                "name": _frontmatter_name(d),
+            }
+    _index_cache = (now, idx)
+    return idx
+
+
 def discover_skills() -> dict[str, str]:
     """{slug: skill_dir} — slug = relpath (shared) ou profiles/<p>/<relpath>
     (skills de profile). ÚNICO ponto que transforma nomes em paths: o
     resolver do detail consulta ESTE mapa, nunca faz join com input do
     usuário (M7-04 — contenção estrutural, não por blacklist)."""
-    out: dict[str, str] = {}
-    for prefix, root in _skill_roots():
-        for rel, d in _walk_skill_dirs(root).items():
-            slug = f"{prefix}/{rel}" if prefix else rel
-            out[slug] = d
+    return {slug: e["dir"] for slug, e in _skill_index().items()}
+
+
+def _disabled_keys(slug: str, entry: dict) -> set[str]:
+    """Chaves que podem significar 'disabled' pra uma skill (F-M7-11):
+    slug completo (vocabulário AgentOS), basename/dir name e frontmatter
+    name (vocabulário do Hermes). Nos dois sentidos o drift existia."""
+    keys = {slug, entry["basename"]}
+    if entry["name"]:
+        keys.add(entry["name"])
+    return keys
+
+
+def _is_disabled(slug: str, entry: dict, disabled: set[str]) -> bool:
+    return bool(disabled) and bool(_disabled_keys(slug, entry) & disabled)
+
+
+def _external_entries(config: dict) -> dict[str, dict]:
+    """{slug: {dir, basename, name}} das external_dirs de um config
+    (recursivo — umbrella packs eram invisíveis)."""
+    out: dict[str, dict] = {}
+    for d in config.get("skills", {}).get("external_dirs", []) or []:
+        for rel, sd in _walk_skill_dirs(d).items():
+            out[rel] = {
+                "dir": sd,
+                "basename": os.path.basename(sd),
+                "name": _frontmatter_name(sd),
+            }
     return out
 
 
 def get_profile_skills_map() -> dict[str, list[str]]:
-    """Return {skill_slug: [profile_name, ...]} for every skill."""
-    # M7-01: descoberta recursiva (shared + profiles/<p>/skills)
-    all_slugs: set[str] = set(discover_skills().keys())
+    """Return {skill_slug: [profile_name, ...]} for every skill.
 
-    # Also gather slugs from external dirs referenced by profiles or main config
-    def _external_slugs(config: dict) -> set[str]:
-        slugs: set[str] = set()
-        for d in config.get("skills", {}).get("external_dirs", []) or []:
-            # recursivo também: umbrella packs em external_dirs eram invisíveis
-            slugs.update(_walk_skill_dirs(d).keys())
-        return slugs
+    M7-03: atribuição por REACHABILITY (reachable ⇒ attributed) — um slug só
+    ganha o profile se for alcançável pra ele (shared root menos disabled,
+    skills/ do próprio profile, ou external_dirs DELE). O padrão antigo
+    creditava todo slug não-disabled a todo profile (ex.: slugs de
+    external_dirs de atlas/coder apareciam pra default/pipeline).
+    F-M7-10 resolve junto (default só recebe os external do main config).
+    F-M7-11: disabled casa por slug, basename/dir name OU frontmatter name
+    (Hermes keya por name, o AgentOS keyava por dir — drift nos dois sentidos).
+    """
+    index = dict(_skill_index())
+    shared_slugs = {s for s in index if not s.startswith("profiles/")}
 
     main_cfg = _read_yaml(MAIN_CONFIG)
-    all_slugs |= _external_slugs(main_cfg)
+    main_entries = _external_entries(main_cfg)
     main_disabled: set[str] = set(main_cfg.get("skills", {}).get("disabled", []) or [])
+
+    all_slugs: set[str] = set(index) | set(main_entries)
 
     profile_names = _profile_names()  # M13-1: single source
 
-    # Build map: slug -> list of profile names that have it enabled
-    slug_profiles: dict[str, list[str]] = {s: [] for s in all_slugs}
+    # entries conhecidos (shared + profiles + externals do main) p/ o matcher
+    entries: dict[str, dict] = dict(index)
+    entries.update(main_entries)
+
+    slug_profiles: dict[str, list[str]] = {}
 
     for pname in profile_names:
         if pname == "default":
             cfg = main_cfg
-            # Default profile disabled list is the main config disabled list
             disabled = main_disabled
-            extra_slugs = set()
+            own_slugs: set[str] = set()
+            extra_entries = main_entries
         else:
             cfg_path = os.path.join(PROFILES_DIR, pname, "config.yaml")
             cfg = _read_yaml(cfg_path)
             profile_disabled: set[str] = set(cfg.get("skills", {}).get("disabled", []) or [])
             disabled = main_disabled | profile_disabled
-            extra_slugs = _external_slugs(cfg)
+            own_slugs = {s for s in index if s.startswith(f"profiles/{pname}/")}
+            extra_entries = _external_entries(cfg)
+            entries.update(extra_entries)
 
-        # Merge external-dir slugs into the global set
-        for s in extra_slugs:
-            if s not in slug_profiles:
-                slug_profiles[s] = []
+        reachable = shared_slugs | own_slugs | set(extra_entries)
 
-        for slug in slug_profiles:
-            if slug not in disabled:
-                slug_profiles[slug].append(pname)
+        for slug in reachable:
+            entry = entries.get(slug, {"basename": os.path.basename(slug), "name": ""})
+            if _is_disabled(slug, entry, disabled):
+                continue
+            slug_profiles.setdefault(slug, []).append(pname)
+
+    # todo slug descoberto existe no mapa (mesmo sem profile — "Unused")
+    for slug in all_slugs:
+        slug_profiles.setdefault(slug, [])
 
     return slug_profiles
 
@@ -174,56 +259,87 @@ def get_profile_skills_map() -> dict[str, list[str]]:
 # ── Skill parsing ──────────────────────────────────────────────────
 
 
-def _parse_skill_md(skill_path: str) -> dict | None:
-    """Parse a SKILL.md file's YAML frontmatter."""
+# M7-08: cap de conteúdo (1MB) — preview derivado do MESMO texto (F-M7-12:
+# o detail lia o arquivo 2x e o parse 1x; agora é uma leitura por request).
+_SKILL_MD_PARSE_MAX_BYTES = 1024 * 1024
+
+# M7-05: regex tolerante — BOM, \r\n e fechamento '---' no EOF sem newline
+# derrubavam o parse e a skill sumia (404 errado pra skill instalada).
+_FM_RE = re.compile(r"^---\s*\r?\n(.*?)\r?\n---\s*(?:\r?\n|$)", re.DOTALL)
+
+
+def _parse_skill_md(skill_path: str, content: str | None = None) -> dict | None:
+    """Parse a SKILL.md file's YAML frontmatter.
+
+    M7-05: retorna shape de fallback (com parse_error) em vez de None quando o
+    frontmatter é ruim — None agora significa 'arquivo não existe' (404
+    honesto); parse ruim nunca mais esconde skill instalada.
+    """
     try:
-        with open(skill_path, "r", encoding="utf-8") as f:
-            content = f.read()
+        if content is None:
+            with open(skill_path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read(_SKILL_MD_PARSE_MAX_BYTES)
+    except OSError:
+        return None
 
-        skill_dir = os.path.dirname(skill_path)
-        dir_name = os.path.basename(skill_dir)
-        category = _derive_category(dir_name)
+    skill_dir = os.path.dirname(skill_path)
+    dir_name = os.path.basename(skill_dir)
+    category = _derive_category(dir_name)
 
-        # Count files in skill directory
-        file_count = sum(1 for _ in Path(skill_dir).rglob("*") if _.is_file())
+    # Count files in skill directory
+    file_count = sum(1 for _ in Path(skill_dir).rglob("*") if _.is_file())
 
-        if not content.startswith("---"):
-            return {
-                "name": dir_name,
-                "description": content[:200].strip(),
-                "category": category,
-                "icon": "",
-                "file_count": file_count,
-                "preview": "",
-                "has_references": os.path.isdir(os.path.join(skill_dir, "references")),
-                "has_scripts": os.path.isdir(os.path.join(skill_dir, "scripts")),
-                "has_templates": os.path.isdir(os.path.join(skill_dir, "templates")),
-            }
-
-        match = re.match(r"^---\s*\n(.*?)\n---\s*\n", content, re.DOTALL)
-        if not match:
-            return None
-
-        frontmatter = yaml.safe_load(match.group(1))
-        if not isinstance(frontmatter, dict):
-            return None
-
-        body = content[match.end():]
-        preview = body[:300].strip() if body else ""
-
+    def _fallback(parse_error: bool = False) -> dict:
         return {
-            "name": frontmatter.get("name", dir_name),
-            "description": frontmatter.get("description", ""),
+            "name": dir_name,
+            "description": (content[:200] or "").strip(),
             "category": category,
-            "icon": frontmatter.get("icon", ""),
+            "icon": "",
             "file_count": file_count,
-            "preview": preview,
+            "preview": "",
             "has_references": os.path.isdir(os.path.join(skill_dir, "references")),
             "has_scripts": os.path.isdir(os.path.join(skill_dir, "scripts")),
             "has_templates": os.path.isdir(os.path.join(skill_dir, "templates")),
+            "parse_error": parse_error,
         }
-    except Exception:
-        return None
+
+    text = content.lstrip("\ufeff")  # BOM
+    if not text.startswith("---"):
+        return _fallback()
+
+    match = _FM_RE.match(text)
+    if not match:
+        return _fallback(parse_error=True)
+
+    try:
+        frontmatter = yaml.safe_load(match.group(1))
+    except Exception as e:  # M7-05: YAML ruim loga, não engole
+        logger.warning("skills: frontmatter YAML inválido em %s: %s", skill_path, e)
+        return _fallback(parse_error=True)
+
+    if not isinstance(frontmatter, dict):
+        return _fallback(parse_error=True)
+
+    body = text[match.end():]
+    preview = body[:300].strip() if body else ""
+
+    # M7-06: coerção de tipos — yaml.safe_load devolve None/list/int pra
+    # chaves mal preenchidas e o front derrubava a página em .toLowerCase()
+    def _s(v) -> str:
+        return v if isinstance(v, str) else ("" if v is None else str(v))
+
+    return {
+        "name": _s(frontmatter.get("name")) or dir_name,
+        "description": _s(frontmatter.get("description")),
+        "category": category,
+        "icon": _s(frontmatter.get("icon")),
+        "file_count": file_count,
+        "preview": preview,
+        "has_references": os.path.isdir(os.path.join(skill_dir, "references")),
+        "has_scripts": os.path.isdir(os.path.join(skill_dir, "scripts")),
+        "has_templates": os.path.isdir(os.path.join(skill_dir, "templates")),
+        "parse_error": False,
+    }
 
 
 async def list_skills() -> list[dict]:
@@ -270,12 +386,16 @@ async def get_skill_detail(slug: str) -> dict | None:
     if not os.path.isfile(skill_path):
         return None
 
-    info = _parse_skill_md(skill_path)
-    if not info:
+    # F-M7-12: UMA leitura — parse e full_content derivam do mesmo texto
+    try:
+        with open(skill_path, "r", encoding="utf-8", errors="replace") as f:
+            full_content = f.read(_SKILL_MD_MAX_BYTES)
+    except OSError:
         return None
 
-    with open(skill_path, "r", encoding="utf-8") as f:
-        full_content = f.read(_SKILL_MD_MAX_BYTES)
+    info = _parse_skill_md(skill_path, content=full_content)
+    if not info:
+        return None
 
     files = []
     for root, dirs, filenames in os.walk(skill_dir):
@@ -304,21 +424,33 @@ async def list_profiles_summary() -> list[dict]:
     main_disabled: set[str] = set(main_cfg.get("skills", {}).get("disabled", []) or [])
 
     # Count total skills available (shared recursive + main external dirs)
-    all_slugs: set[str] = set(discover_skills().keys())
-    for d in main_cfg.get("skills", {}).get("external_dirs", []) or []:
-        all_slugs.update(_walk_skill_dirs(d).keys())
+    index = _skill_index()
+    main_entries = _external_entries(main_cfg)
+    entries: dict[str, dict] = dict(index)
+    entries.update(main_entries)
+    all_slugs: set[str] = set(index) | set(main_entries)
+
+    def _count_universe(universe: set[str], disabled: set[str]) -> tuple[int, int]:
+        """(enabled, disabled) — M7-07: MESMO universo dos dois lados (disabled
+        de external_dirs/own skills nunca era subtraído) + F-M7-11: matcher."""
+        n_dis = 0
+        for slug in universe:
+            entry = entries.get(slug, {"basename": os.path.basename(slug), "name": ""})
+            if _is_disabled(slug, entry, disabled):
+                n_dis += 1
+        return len(universe) - n_dis, n_dis
 
     profiles: list[dict] = []
 
     # Default profile
     if os.path.exists(MAIN_CONFIG):
-        total = len(all_slugs)
+        enabled, dis = _count_universe(all_slugs, main_disabled)
         profiles.append({
             "name": "default",
             "model": (main_cfg.get("model", {}) or {}).get("default", ""),
             "provider": (main_cfg.get("model", {}) or {}).get("provider", ""),
-            "skills_enabled": total - len(main_disabled & all_slugs),
-            "skills_disabled": len(main_disabled & all_slugs),
+            "skills_enabled": enabled,
+            "skills_disabled": dis,
             "external_dirs": main_cfg.get("skills", {}).get("external_dirs", []) or [],
         })
 
@@ -332,26 +464,23 @@ async def list_profiles_summary() -> list[dict]:
 
         cfg = _read_yaml(os.path.join(prof_dir, "config.yaml"))
         profile_disabled: set[str] = set(cfg.get("skills", {}).get("disabled", []) or [])
-        combined_disabled = (main_disabled | profile_disabled) & all_slugs
 
-        # Also count extra skills from profile's own external dirs AND its
-        # own skills/ dir (M7-02: nunca contadas — 27 SKILL.md invisíveis)
-        extra = set()
-        for d in cfg.get("skills", {}).get("external_dirs", []) or []:
-            extra.update(_walk_skill_dirs(d).keys())
-        extra.update(
-            slug for slug in discover_skills()
+        # extra = external_dirs do profile + skills/ do próprio (M7-02)
+        prof_entries = _external_entries(cfg)
+        entries.update(prof_entries)
+        extra = set(prof_entries) | {
+            slug for slug in index
             if slug.startswith(f"profiles/{entry}/")
-        )
+        }
 
-        total = len(all_slugs | extra)
+        enabled, dis = _count_universe(all_slugs | extra, main_disabled | profile_disabled)
 
         profiles.append({
             "name": entry,
             "model": (cfg.get("model", {}) or {}).get("default", ""),
             "provider": (cfg.get("model", {}) or {}).get("provider", ""),
-            "skills_enabled": total - len(combined_disabled),
-            "skills_disabled": len(combined_disabled),
+            "skills_enabled": enabled,
+            "skills_disabled": dis,
             "external_dirs": cfg.get("skills", {}).get("external_dirs", []) or [],
         })
 
