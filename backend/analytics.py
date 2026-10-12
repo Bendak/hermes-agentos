@@ -293,7 +293,14 @@ async def token_by_model(user: dict = Depends(require_auth)):
             a["reasoning_tokens"] += r["reasoning_tokens"] or 0
             a["api_call_count"] += r["api_call_count"] or 0
             a["estimated_cost_usd"] += r["estimated_cost_usd"] or 0.0
-    result = sorted(acc.values(), key=lambda m: m["input_tokens"] + m["output_tokens"], reverse=True)
+    # N2: contrato único com /tokens — total_tokens explícito e ranking por
+    # consumo total (o ranking in+out antigo contradizia o próprio endpoint).
+    for m in acc.values():
+        m["total_tokens"] = (
+            m["input_tokens"] + m["output_tokens"] + m["cache_read_tokens"]
+            + m["cache_write_tokens"] + m["reasoning_tokens"]
+        )
+    result = sorted(acc.values(), key=lambda m: m["total_tokens"], reverse=True)
     return {"models": result}
 
 
@@ -331,13 +338,15 @@ async def activity_heatmap(user: dict = Depends(require_auth)):
         per_day[day_name] = per_day.get(day_name, 0) + cnt
         total_sessions += cnt
 
-        # Determine peak hour and peak day
-        peak_hour = max(per_hour, key=lambda k: per_hour[k]) if per_hour else None
-        peak_day = max(per_day, key=lambda k: per_day[k]) if per_day else None
+    # N1: estes blocos são PÓS-LOOP (foram herdados no indent errado quando o
+    # wrapper `async with` saiu; com zero linhas o loop nunca rodava e o
+    # return estourava UnboundLocalError — 500 em /activity p/ universo vazio,
+    # fresh install ou só-arquivadas).
+    peak_hour = max(per_hour, key=lambda k: per_hour[k]) if per_hour else None
+    peak_day = max(per_day, key=lambda k: per_day[k]) if per_day else None
 
-        # Fill per_hour/per_day for all hours/days
-        all_hours = {h: per_hour.get(h, 0) for h in range(24)}
-        all_days = {d: per_day.get(d, 0) for d in DAY_NAMES}
+    all_hours = {h: per_hour.get(h, 0) for h in range(24)}
+    all_days = {d: per_day.get(d, 0) for d in DAY_NAMES}
 
     return {
         "heatmap": heatmap,

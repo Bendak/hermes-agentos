@@ -195,3 +195,38 @@ def test_trend_buckets_by_last_seen_brt(client, admin_headers, data_dir):
         f"M5-02/03: bucket errado ({trend[0]['day']} != {expected_day})"
     )
     assert trend[0]["input_tokens"] == 50
+
+
+def test_activity_empty_universe_returns_zeros(client, admin_headers, data_dir):
+    """N1: /activity com zero sessões ativas não pode 500 (UnboundLocalError
+    dos blocos pós-loop) — casos: fresh install e 'só arquivadas'."""
+    now = int(time.time())
+    # universo com UMA sessão arquivada → ativas = 0 (o caso criado pelo
+    # filtro do F-M5-09) — sem state.db algum também precisa responder
+    r = client.get("/api/analytics/activity", headers=admin_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["total_sessions"] == 0
+    assert body["per_hour"] == {str(h): 0 for h in range(24)}
+    assert body["peak_hour"] is None
+
+    _make_db(_state_db(data_dir), [("s-arc", "arc", "m", now, 1)], [])
+    r = client.get("/api/analytics/activity", headers=admin_headers)
+    assert r.status_code == 200 and r.json()["total_sessions"] == 0, (
+        "N1: /activity 500 ou contou arquivada com universo vazio de ativas"
+    )
+
+
+def test_by_model_contract_matches_tokens(client, admin_headers, data_dir):
+    """N2: /by-model tem total_tokens e rankeia por total (contrato único)."""
+    now = int(time.time())
+    _make_db(_state_db(data_dir),
+             [("s1", "s1", "big-cache", now, 0), ("s2", "s2", "small-io", now, 0)],
+             [
+                 ("s1", "big-cache", 1, 1, 380_000_000, 0, 0, 1, 2.0, now, now),
+                 ("s2", "small-io", 24_000_000, 1, 0, 0, 0, 1, 0.5, now, now),
+             ])
+    r = client.get("/api/analytics/tokens/by-model", headers=admin_headers)
+    models = r.json()["models"]
+    assert models[0]["model"] == "big-cache", f"N2: ranking in+out ainda ({models})"
+    assert models[0]["total_tokens"] == 380_000_002
