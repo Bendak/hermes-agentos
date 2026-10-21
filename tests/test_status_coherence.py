@@ -26,12 +26,24 @@ def _set_claim(task_id, fresh=True):
     db.close()
 
 
-def _events(task_id):
+def _events(task_id, kind="status"):
     from backend.tasks import DB_PATH
 
     db = sqlite3.connect(DB_PATH)
     rows = db.execute(
-        "SELECT kind, payload FROM task_events WHERE task_id=? AND kind='status' ORDER BY id",
+        "SELECT kind, payload FROM task_events WHERE task_id=? AND kind=? ORDER BY id",
+        (task_id, kind),
+    ).fetchall()
+    db.close()
+    return [(k, json.loads(p) if p else {}) for k, p in rows]
+
+
+def _all_events(task_id):
+    from backend.tasks import DB_PATH
+
+    db = sqlite3.connect(DB_PATH)
+    rows = db.execute(
+        "SELECT kind, payload FROM task_events WHERE task_id=? ORDER BY id",
         (task_id,),
     ).fetchall()
     db.close()
@@ -142,3 +154,27 @@ def test_millisecond_claim_normalized_m3103(client, admin_headers, make_task):
     assert r.json()["status"] == "ready", (
         "M31-03 regression: claim em ms expirado foi tratado como fresco"
     )
+
+
+def test_manual_block_is_sticky_for_upstream_promote(client, admin_headers, make_task):
+    """Block via UI (PATCH) precisa gravar evento kind='blocked' — o promote
+    pass do Hermes só respeita blocks com esse evento (sticky #28712); sem ele
+    o card voltava pra 'ready' sozinho (bug relatado pelo usuário)."""
+    task = make_task({})
+    tid = task["id"]
+    client.patch(f"/api/tasks/{tid}", json={"status": "blocked"}, headers=admin_headers)
+
+    evs = _all_events(tid)
+    kinds = [k for k, _ in evs]
+    assert "blocked" in kinds, f"sem evento sticky 'blocked' ({kinds})"
+    st = [p for _, p in evs if p.get("source") == "agentos-api"]
+    assert st and "via" in st[0]["reason"]
+
+    # unblock → evento 'unblocked' (a cadeia sticky precisa alternar)
+    client.patch(f"/api/tasks/{tid}", json={"status": "ready"}, headers=admin_headers)
+    evs = _all_events(tid)
+    kinds = [k for k, _ in evs]
+    assert "unblocked" in kinds, f"sem evento 'unblocked' ({kinds})"
+    # o upstream lê o MAIS RECENTE de ('blocked','unblocked') — deve ser unblocked
+    last = [k for k, _ in evs if k in ("blocked", "unblocked")][-1]
+    assert last == "unblocked"

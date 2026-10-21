@@ -521,6 +521,31 @@ async def _apply_status_change(db, task_id: str, new_status: str, now: int, acto
             (effective, task_id),
         )
 
+    # Sticky block (bug relatado pelo usuário: block manual na UI voltava pra
+    # ready sozinho). O promote pass do Hermes só RESPEITA blocks com evento de
+    # kind 'blocked' (protocolo sticky #28712 — kanban_block do worker); o
+    # PATCH da UI não gravava esse evento, e o docstring do upstream diz que
+    # task "with no such event at all auto-recovers". Gravar o par
+    # blocked/unblocked faz o dispatcher enxergar o block de operador.
+    if effective == "blocked" and old_status != "blocked":
+        try:
+            await db.execute(
+                "INSERT INTO task_events (task_id, kind, payload, created_at) "
+                "VALUES (?, 'blocked', ?, ?)",
+                (task_id, json.dumps({"reason": f"blocked via {actor}", "source": "agentos-api"}), now),
+            )
+        except Exception as e:
+            logger.warning("sticky-block event failed for %s: %s", task_id, e)
+    elif old_status == "blocked" and effective != "blocked":
+        try:
+            await db.execute(
+                "INSERT INTO task_events (task_id, kind, payload, created_at) "
+                "VALUES (?, 'unblocked', ?, ?)",
+                (task_id, json.dumps({"reason": f"unblocked via {actor}", "source": "agentos-api"}), now),
+            )
+        except Exception as e:
+            logger.warning("sticky-unblock event failed for %s: %s", task_id, e)
+
     # M31-06: o REQUEST audita mesmo quando coagido pra o mesmo status
     # (from=running,to=running,requested=ready,coerced=true) — sem isso o
     # trace fica mudo exatamente no caso do incidente.
