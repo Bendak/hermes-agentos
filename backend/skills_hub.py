@@ -143,7 +143,12 @@ def _frontmatter_name(skill_dir: str) -> str:
 
 
 def _skill_index() -> dict[str, dict]:
-    """{slug: {dir, basename, name}} — TTL-cached (5s)."""
+    """{slug: {dir, basename, name, info}} — TTL-cached (5s).
+
+    Fase 2 do flag de perf do adversarial: o parse completo (frontmatter YAML
+    + file_count por rglob) era refeito a cada request de listagem (~0.9s com
+    440 skills). Agora o parse roda UMA vez por janela de TTL e o list fica em
+    lookup de dict. Detalhe continua lendo o arquivo (precisa do conteúdo)."""
     global _index_cache
     now = time.monotonic()
     if _index_cache is not None and now - _index_cache[0] < _INDEX_TTL_SECONDS:
@@ -152,10 +157,12 @@ def _skill_index() -> dict[str, dict]:
     for prefix, root in _skill_roots():
         for rel, d in _walk_skill_dirs(root).items():
             slug = f"{prefix}/{rel}" if prefix else rel
+            info = _parse_skill_md(os.path.join(d, "SKILL.md"))
             idx[slug] = {
                 "dir": d,
                 "basename": os.path.basename(d),
-                "name": _frontmatter_name(d),
+                "name": (info or {}).get("name", "") or os.path.basename(d),
+                "info": info,
             }
     _index_cache = (now, idx)
     return idx
@@ -347,12 +354,10 @@ async def list_skills() -> list[dict]:
     profile_map = get_profile_skills_map()
 
     skills = []
-    for slug, skill_dir in sorted(discover_skills().items()):
-        info = _parse_skill_md(os.path.join(skill_dir, "SKILL.md"))
+    for slug, entry in sorted(_skill_index().items()):
+        info = entry.get("info")
         if info:
-            info["slug"] = slug
-            info["profiles"] = profile_map.get(slug, [])
-            skills.append(info)
+            skills.append({**info, "slug": slug, "profiles": profile_map.get(slug, [])})
 
     return skills
 
