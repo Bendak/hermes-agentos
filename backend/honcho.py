@@ -39,6 +39,9 @@ _OBS_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2})", re.MULTILINE)
 
 _cache: tuple[float, dict] | None = None
 
+# N-11: em bancos migrados (ALTER TABLE ADD COLUMN pending) a ordem física é
+# pending POR ÚLTIMO, diferente daqui. Todo INSERT usa colunas nomeadas — nunca
+# inserir posicionalmente.
 _SCHEMA = (
     "CREATE TABLE IF NOT EXISTS honcho_snapshots ("
     " ts INTEGER NOT NULL, workspace TEXT NOT NULL, sessions INTEGER,"
@@ -233,28 +236,39 @@ def _conclusion_item(item: dict) -> dict:
     }
 
 
-def _lag_warnings(entry: dict, series: list[dict]) -> list[str]:
-    """§6 (F-4): deriver lento — pending > 50 por mais de 1h.
+_LAG_THRESHOLD = 50
+_LAG_MIN_SECONDS = 3600
 
-    Baseline = sequência de snapshots com pending > 50 até agora (a série é
-    gravada por cadência própria). Sem série suficiente não há como provar
-    1h → não alerta (nunca inventar duração).
+
+def _lag_warnings(entry: dict, series: list[dict]) -> list[str]:
+    """§6 (F-4/N-8): deriver lento — pending > 50 por mais de 1h.
+
+    Só alerta com duração PROVADA: a sequência de snapshots precisa cobrir o
+    período sem buracos (gap ≤ 2× o intervalo de gravação) e sem `pending`
+    desconhecido. Buraco de cobertura ou NULL quebra o streak — desconhecido
+    não é "sustentado", e o docstring promete nunca inventar duração (N-8:
+    série esparsa interpolava 144h a partir de 2 pontos).
     """
     queue = entry.get("queue") or {}
     cur = queue.get("pending")
-    if not isinstance(cur, int) or cur <= 50:
+    if not isinstance(cur, int) or cur <= _LAG_THRESHOLD:
         return []
     now = int(time.time())
-    start = now
+    max_gap = 2 * _SNAPSHOT_INTERVAL
+    start = None
+    prev_ts = now
     for point in reversed(series):
         ts = point.get("ts")
         pending = point.get("pending")
         if not isinstance(ts, int):
             continue
-        if isinstance(pending, int) and pending <= 50:
+        if not isinstance(pending, int) or pending <= _LAG_THRESHOLD:
+            break
+        if prev_ts - ts > max_gap:
             break
         start = ts
-    if now - start < 3600:
+        prev_ts = ts
+    if start is None or now - start < _LAG_MIN_SECONDS:
         return []
     hours = (now - start) / 3600
     return [f"deriver lento: {cur} pendente(s) há {hours:.1f}h (>50 por >1h)"]

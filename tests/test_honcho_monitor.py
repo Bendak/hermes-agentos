@@ -293,3 +293,17 @@ def test_deriver_lag_warning_f4(env, monkeypatch):
     # pending baixo → sem alerta
     assert not any("deriver lento" in w for w in honcho._lag_warnings(
         {"queue": {"pending": 3}}, [{"ts": now - 7200, "pending": 3}]))
+
+    # N-9: recente (<1h) não alerta, mesmo com pending alto
+    assert not honcho._lag_warnings(
+        {"queue": {"pending": 80}}, [{"ts": now - 1800, "pending": 80}])
+
+    # N-8: série esparsa NÃO interpola duração (2 pontos separados por dias)
+    assert not honcho._lag_warnings(
+        {"queue": {"pending": 80}}, [{"ts": now - 6 * 86400, "pending": 80}])
+
+    # N-8: `pending` desconhecido (NULL) quebra o streak — não estende cobertura
+    assert not honcho._lag_warnings(
+        {"queue": {"pending": 80}},
+        [{"ts": now - 7 * 3600, "pending": 3},
+         {"ts": now - 6 * 3600, "pending": None}])
