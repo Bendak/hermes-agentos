@@ -860,7 +860,14 @@ index_html = os.path.join(dist_path, "index.html")
 
 @app.get("/api/honcho/summary")
 async def honcho_monitor(user: dict = Depends(require_admin)) -> dict:
-    return await honcho_summary()
+    # F-H1: defesa final — nem config malformada nem bug interno viram 500.
+    try:
+        return await honcho_summary()
+    except Exception as e:  # pragma: no cover — collect já não levanta
+        import logging  # noqa: PLC0415
+        logging.getLogger(__name__).warning("honcho summary falhou: %s", e)
+        return {"status": "degraded", "workspaces": [], "series": {},
+                "errors": [f"endpoint: {type(e).__name__}: {e}"], "warnings": []}
 
 
 @app.get("/{full_path:path}")
