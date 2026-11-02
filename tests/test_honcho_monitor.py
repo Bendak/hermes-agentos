@@ -212,3 +212,84 @@ def test_endpoint_gate(env, monkeypatch, client, admin_headers, viewer_headers):
     r = client.get("/api/honcho/summary", headers=admin_headers)
     assert r.status_code == 200
     assert r.json()["status"] == "ok"
+
+
+def test_not_configured_keeps_generated_at_f1(tmp_path, monkeypatch):
+    """F-1 (adversarial lote 2): o payload not_configured PRECISA de generated_at.
+
+    A UI formata esse campo no cabeçalho; sem ele a página inteira morria com
+    RangeError e o aviso "honcho.json ausente" nunca aparecia.
+    """
+    monkeypatch.setattr(honcho, "CONFIG_PATH", str(tmp_path / "nope.json"))
+    monkeypatch.setattr(honcho, "AGENTOS_DB", str(tmp_path / "agentos.db"))
+    honcho._cache = None
+    d = asyncio.run(honcho.collect())
+    assert d["status"] == "not_configured"
+    assert isinstance(d.get("generated_at"), int), d
+    assert d["workspaces"] == [] and d["series"] == {}
+
+
+def test_conclusion_truncation_is_explicit_f5():
+    """F-5: corte em 1000 chars vem com marcador e flag, nunca silencioso."""
+    short = honcho._conclusion_item({"id": "a", "content": "fato curto"})
+    assert short["truncated"] is False and short["content"] == "fato curto"
+
+    long_raw = "x" * 1600
+    long_item = honcho._conclusion_item({"id": "b", "content": long_raw})
+    assert long_item["truncated"] is True
+    assert long_item["content"].endswith("…")
+    assert len(long_item["content"]) <= honcho._CONCLUSION_MAX + 1
+
+
+def test_deriver_lag_warning_f4(env, monkeypatch):
+    """F-4: pending > 50 sustentado por > 1h vira warning; recente não."""
+    _fake_http(monkeypatch)
+    db_path = env / "agentos.db"
+    now = int(time.time())
+    db = sqlite3.connect(str(db_path))
+    db.execute(honcho._SCHEMA)
+    db.execute(
+        "INSERT INTO honcho_snapshots VALUES (?, 'hermes', 10, 10, 2, 80, 1000)",
+        (now - 7200,),
+    )
+    db.execute(
+        "INSERT INTO honcho_snapshots VALUES (?, 'hermes', 11, 11, 2, 80, 1000)",
+        (now - 1800,),
+    )
+    db.commit()
+    db.close()
+
+    async def _post(client, path, body=None):
+        if path == "/v3/workspaces/list":
+            return {"items": [{"id": "hermes", "created_at": "2026-06-09"}]}
+        if path.endswith("/peers/list"):
+            return {"items": [{"id": "mauricio"}], "total": 1}
+        if path.endswith("/conclusions/list"):
+            if body and body.get("size") == 1:
+                return {"items": [{"created_at": "2026-10-26T12:00:00Z"}], "total": 3}
+            return {"items": [], "total": 3}
+        if path.endswith("/sessions/list"):
+            return {"items": [], "total": 10}
+        raise AssertionError(f"POST inesperado: {path}")
+
+    async def _get(client, path):
+        if path == "/health":
+            return {"status": "ok"}
+        if path.endswith("/card"):
+            return {"peer_card": None}
+        if path.endswith("/queue/status"):
+            return {"total_work_units": 90, "completed_work_units": 10,
+                    "pending_work_units": 80, "in_progress_work_units": 0}
+        if path.endswith("/representation"):
+            return {"representation": ""}
+        raise AssertionError(f"GET inesperado: {path}")
+
+    monkeypatch.setattr(honcho, "_get_json", _get)
+    monkeypatch.setattr(honcho, "_post_json", _post)
+    honcho._cache = None
+    d = asyncio.run(honcho.collect())
+    assert any("deriver lento" in w for w in d["warnings"]), d["warnings"]
+
+    # pending baixo → sem alerta
+    assert not any("deriver lento" in w for w in honcho._lag_warnings(
+        {"queue": {"pending": 3}}, [{"ts": now - 7200, "pending": 3}]))

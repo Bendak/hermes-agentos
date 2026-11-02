@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { NavBar } from '../App'
+import { Link } from 'react-router-dom'
 
 function getAuthHeaders(): Record<string, string> {
   const token = localStorage.getItem('agentos_access_token')
@@ -24,6 +25,7 @@ interface HonchoHuman {
 interface HonchoConclusion {
   id: string
   content: string
+  truncated?: boolean
   created_at: string | null
 }
 interface HonchoWorkspace {
@@ -173,6 +175,7 @@ function WorkspaceCard({ ws, series }: { ws: HonchoWorkspace; series: number[] }
         <div className="mt-4">
           <button
             onClick={() => setOpenConc(v => !v)}
+            aria-expanded={openConc}
             className="text-xs text-accent hover:text-accent-hover transition-colors"
           >
             {openConc ? '▾ ocultar' : '▸ ver'} últimas {ws.recent_conclusions!.length} conclusões (conteúdo)
@@ -181,7 +184,14 @@ function WorkspaceCard({ ws, series }: { ws: HonchoWorkspace; series: number[] }
             <ul className="mt-3 space-y-2">
               {ws.recent_conclusions!.map((c) => (
                 <li key={c.id} className="rounded-lg border border-border/60 bg-bg-base/40 p-3">
-                  <p className="text-[11px] text-text-tertiary mb-1">{brt(c.created_at)}</p>
+                  <p className="text-[11px] text-text-tertiary mb-1">
+                    {brt(c.created_at)}
+                    {c.truncated && (
+                      <span className="ml-2 rounded border border-semantic-warning/40 text-semantic-warning px-1.5 py-0.5">
+                        truncado (1000 chars) — texto original maior
+                      </span>
+                    )}
+                  </p>
                   <p className="text-xs text-text-secondary whitespace-pre-wrap break-words">{c.content}</p>
                 </li>
               ))}
@@ -206,9 +216,31 @@ export default function MemoryPage() {
     refetchInterval: 60000,
   })
 
-  if (isLoading) return <div className="text-text-tertiary text-sm py-8">Carregando memória…</div>
-  if (error) return <div className="text-semantic-error text-sm py-8">Erro: {(error as Error).message}</div>
-  if (!data) return null
+  const shell = (inner: React.ReactNode) => (
+    <>
+      <NavBar />
+      <div className="mx-auto max-w-7xl px-6 py-8">{inner}</div>
+    </>
+  )
+
+  if (isLoading) return shell(<div className="text-text-tertiary text-sm py-8">Carregando memória…</div>)
+  if (error) {
+    const msg = (error as Error).message
+    return shell(
+      <div className="max-w-xl space-y-3 py-8">
+        <p className="text-semantic-error text-sm">Erro: {msg}</p>
+        {msg === 'Apenas admin' && (
+          <p className="text-xs text-text-tertiary">
+            A memória do Honcho é restrita ao admin (contém fatos reais e privados).
+          </p>
+        )}
+        <Link to="/" className="inline-block text-xs text-accent hover:text-accent-hover">
+          ← Voltar ao Dashboard
+        </Link>
+      </div>,
+    )
+  }
+  if (!data) return shell(null)
 
   const wsList = data.workspaces ?? []
   const statusColor =
@@ -223,7 +255,10 @@ export default function MemoryPage() {
         <div>
           <h2 className="text-h3 font-bold text-text-primary">Memória (Honcho)</h2>
           <p className="text-xs text-text-tertiary mt-1">
-            {data.base_url ?? '—'} · atualizado {brt(new Date(data.generated_at * 1000).toISOString())} BRT
+            {data.base_url ?? '—'} · atualizado{' '}
+            {data.generated_at
+              ? `${brt(new Date(data.generated_at * 1000).toISOString())} BRT`
+              : '—'}
           </p>
         </div>
         <span className={`text-sm font-mono ${statusColor}`}>● {data.status}</span>
@@ -234,7 +269,12 @@ export default function MemoryPage() {
           {e}
         </div>
       ))}
-      {(data.warnings ?? []).map((w) => (
+      {(data.warnings ?? []).filter((w) => /queda de [a-z_]+:/.test(w)).map((w) => (
+        <div key={w} className="rounded-lg border border-semantic-error/40 bg-semantic-error/10 px-4 py-2 text-xs text-semantic-error">
+          ⚠ queda detectada — {w}
+        </div>
+      ))}
+      {(data.warnings ?? []).filter((w) => !/queda de [a-z_]+:/.test(w)).map((w) => (
         <div key={w} className="rounded-lg border border-semantic-warning/40 bg-semantic-warning/10 px-4 py-2 text-xs text-semantic-warning">
           {w}
         </div>

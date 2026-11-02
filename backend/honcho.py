@@ -212,13 +212,63 @@ def _drop_warnings(entry: dict, series: list[dict]) -> list[str]:
     return out
 
 
+_CONCLUSION_MAX = 1000
+
+
+def _conclusion_item(item: dict) -> dict:
+    """F-5 (adversarial lote 2): corte EXPLÍCITO.
+
+    Para auditoria de fatos, texto cortado sem aviso parece completo. Se o
+    conteúdo excede o teto, devolvemos o trecho + '…' e ``truncated: true``
+    para a UI marcar — nunca um prefixo silencioso.
+    """
+    raw = str(item.get("content") or "")
+    truncated = len(raw) > _CONCLUSION_MAX
+    content = raw[:_CONCLUSION_MAX].rstrip() + "…" if truncated else raw
+    return {
+        "id": item.get("id"),
+        "content": content,
+        "truncated": truncated,
+        "created_at": item.get("created_at"),
+    }
+
+
+def _lag_warnings(entry: dict, series: list[dict]) -> list[str]:
+    """§6 (F-4): deriver lento — pending > 50 por mais de 1h.
+
+    Baseline = sequência de snapshots com pending > 50 até agora (a série é
+    gravada por cadência própria). Sem série suficiente não há como provar
+    1h → não alerta (nunca inventar duração).
+    """
+    queue = entry.get("queue") or {}
+    cur = queue.get("pending")
+    if not isinstance(cur, int) or cur <= 50:
+        return []
+    now = int(time.time())
+    start = now
+    for point in reversed(series):
+        ts = point.get("ts")
+        pending = point.get("pending")
+        if not isinstance(ts, int):
+            continue
+        if isinstance(pending, int) and pending <= 50:
+            break
+        start = ts
+    if now - start < 3600:
+        return []
+    hours = (now - start) / 3600
+    return [f"deriver lento: {cur} pendente(s) há {hours:.1f}h (>50 por >1h)"]
+
+
 async def collect() -> dict:
     """Agrega tudo; nunca levanta (degradação por seção)."""
     cfg = _load_config()
     if cfg is None:
+        # F-1 (adversarial lote 2): generated_at SEMPRE presente — a UI formata
+        # esse campo no cabeçalho; sem ele a página inteira quebrava (RangeError).
         return {"status": "not_configured", "workspaces": [], "series": {},
                 "errors": [f"honcho.json ausente/ilegível/inválido em {CONFIG_PATH}"],
-                "warnings": []}
+                "warnings": [], "generated_at": int(time.time())}
 
     result: dict = {
         "status": "ok",
@@ -312,11 +362,7 @@ async def collect() -> dict:
                     recent = await _post_json(
                         client, f"/v3/workspaces/{ws_id}/conclusions/list", {"size": 10})
                     entry["recent_conclusions"] = [
-                        {
-                            "id": it.get("id"),
-                            "content": str(it.get("content", ""))[:1000],
-                            "created_at": it.get("created_at"),
-                        }
+                        _conclusion_item(it)
                         for it in (recent.get("items") or [])[:10]
                         if isinstance(it, dict)
                     ]
@@ -379,6 +425,8 @@ async def collect() -> dict:
                 result["series"][ws_id] = series
                 result["warnings"].extend(
                     f"{ws_id}: {w}" for w in _drop_warnings(entry, series))
+                result["warnings"].extend(
+                    f"{ws_id}: {w}" for w in _lag_warnings(entry, series))
 
             if result["errors"]:
                 result["status"] = "degraded"
