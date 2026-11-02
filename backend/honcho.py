@@ -305,6 +305,22 @@ async def collect() -> dict:
                         entry["latest_conclusion_at"] = items[0].get("created_at")
                 except Exception as e:
                     result["errors"].append(f"{ws_id}.latest_conclusion: {e}")
+                # Q3 (02/11): auditoria de fatos — últimas 10 conclusões COM conteúdo
+                # (admin-only; permite pedir conclusão corretiva quando algo está errado).
+                try:
+                    recent = await _post_json(
+                        client, f"/v3/workspaces/{ws_id}/conclusions/list", {"size": 10})
+                    entry["recent_conclusions"] = [
+                        {
+                            "id": it.get("id"),
+                            "content": str(it.get("content", ""))[:1000],
+                            "created_at": it.get("created_at"),
+                        }
+                        for it in (recent.get("items") or [])
+                        if isinstance(it, dict)
+                    ]
+                except Exception as e:
+                    result["errors"].append(f"{ws_id}.recent_conclusions: {e}")
                 try:
                     q = await _get_json(client, f"/v3/workspaces/{ws_id}/queue/status")
                     entry["queue"] = {
