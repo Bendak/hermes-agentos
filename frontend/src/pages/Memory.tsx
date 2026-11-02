@@ -256,7 +256,7 @@ export default function MemoryPage() {
           <h2 className="text-h3 font-bold text-text-primary">Memória (Honcho)</h2>
           <p className="text-xs text-text-tertiary mt-1">
             {data.base_url ?? '—'} · atualizado{' '}
-            {data.generated_at
+            {typeof data.generated_at === 'number' && Number.isFinite(data.generated_at)
               ? `${brt(new Date(data.generated_at * 1000).toISOString())} BRT`
               : '—'}
           </p>
@@ -269,12 +269,12 @@ export default function MemoryPage() {
           {e}
         </div>
       ))}
-      {(data.warnings ?? []).filter((w) => /queda de [a-z_]+:/.test(w)).map((w) => (
+      {(data.warnings ?? []).filter((w) => /:\s*queda de\s/.test(w)).map((w) => (
         <div key={w} className="rounded-lg border border-semantic-error/40 bg-semantic-error/10 px-4 py-2 text-xs text-semantic-error">
           ⚠ queda detectada — {w}
         </div>
       ))}
-      {(data.warnings ?? []).filter((w) => !/queda de [a-z_]+:/.test(w)).map((w) => (
+      {(data.warnings ?? []).filter((w) => !/:\s*queda de\s/.test(w)).map((w) => (
         <div key={w} className="rounded-lg border border-semantic-warning/40 bg-semantic-warning/10 px-4 py-2 text-xs text-semantic-warning">
           {w}
         </div>
