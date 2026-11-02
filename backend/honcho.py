@@ -307,6 +307,7 @@ async def collect() -> dict:
                     result["errors"].append(f"{ws_id}.latest_conclusion: {e}")
                 # Q3 (02/11): auditoria de fatos — últimas 10 conclusões COM conteúdo
                 # (admin-only; permite pedir conclusão corretiva quando algo está errado).
+                # Nota: a API v3 ignora `size` no body e devolve 50/página — cortamos aqui.
                 try:
                     recent = await _post_json(
                         client, f"/v3/workspaces/{ws_id}/conclusions/list", {"size": 10})
@@ -316,7 +317,7 @@ async def collect() -> dict:
                             "content": str(it.get("content", ""))[:1000],
                             "created_at": it.get("created_at"),
                         }
-                        for it in (recent.get("items") or [])
+                        for it in (recent.get("items") or [])[:10]
                         if isinstance(it, dict)
                     ]
                 except Exception as e:
