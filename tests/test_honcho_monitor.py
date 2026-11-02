@@ -57,6 +57,11 @@ def _fake_http(monkeypatch, health_ok=True, card=None, workspaces=None,
             if body and body.get("size") == 1:
                 return {"items": [{"created_at": "2026-10-26T12:00:00Z"}],
                         "total": conclusions_total}
+            if body and body.get("size") == 10:
+                return {"items": [
+                    {"id": "c1", "content": "fato A", "created_at": "2026-10-26T12:00:00Z"},
+                    {"id": "c2", "content": "fato B", "created_at": "2026-10-24T09:00:00Z"},
+                ], "total": conclusions_total}
             return {"items": [], "total": conclusions_total}
         if path.endswith("/sessions/list"):
             return {"items": [], "total": 10}
@@ -81,6 +86,9 @@ def test_summary_happy_path(env, monkeypatch):
     assert ws["sessions"] == 10 and ws["conclusions"] == 20 and ws["peers"] == 2
     assert ws["queue"]["pending"] == 1
     assert ws["latest_conclusion_at"] == "2026-10-26T12:00:00Z"  # F-H3
+    # Q3: últimas conclusões com CONTEÚDO (auditoria de fatos, admin-only)
+    assert [c["id"] for c in ws["recent_conclusions"]] == ["c1", "c2"]
+    assert ws["recent_conclusions"][0]["content"] == "fato A"
     human = {h["id"]: h for h in ws["humans"]}
     assert human["user_a"]["representation"]["observations"] == 2
     assert human["user_a"]["representation"]["latest_observation"] == "2026-10-21"
