@@ -9,6 +9,7 @@ import ProtectedRoute from './auth/ProtectedRoute'
 import UserManagement from './pages/UserManagement'
 import ProfilesPage from './pages/Profiles'
 import AnalyticsPage from './pages/Analytics'
+import MemoryPage from './pages/Memory'
 import ChatPage from './pages/Chat'
 import { useQuery, useMutation, useQueryClient, QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { DndContext, DragOverlay, useDroppable, closestCorners, MouseSensor, TouchSensor, useSensor, useSensors } from '@dnd-kit/core'
@@ -251,6 +252,7 @@ export function NavBar() {
     return 'dark'
   })
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [openMenu, setOpenMenu] = useState<string | null>(null)
 
   useEffect(() => {
     document.documentElement.classList.toggle('light', theme === 'light')
@@ -275,6 +277,43 @@ export function NavBar() {
     )
   }
 
+  const navGroup = (label: string, items: Array<[string, string]>) => {
+    const open = openMenu === label
+    const active = items.some(([to]) => location.pathname === to || (to !== '/' && location.pathname.startsWith(to)))
+    return (
+      <div key={label} className="relative" onMouseLeave={() => { if (open) setOpenMenu(null) }}>
+        <button
+          onClick={() => setOpenMenu(open ? null : label)}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          className={`relative px-3 py-1.5 text-sm font-medium rounded-md transition duration-200 ease-agent-os flex items-center gap-1 ${
+            active ? 'text-accent bg-accent-subtle' : 'text-text-secondary hover:text-text-primary hover:bg-surface/60'
+          }`}
+        >
+          {label}
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+          {active && (
+            <span className="absolute bottom-[-13px] left-1 right-1 h-[2px] bg-accent rounded-full shadow-glow hidden sm:block" />
+          )}
+        </button>
+        {open && (
+          <div
+            role="menu"
+            className="absolute left-0 top-full mt-2 min-w-[180px] rounded-lg border border-border bg-bg-elevated shadow-xl py-1 z-50"
+          >
+            {items.map(([to, lbl]) => (
+              <div key={to} className="px-1" onClick={() => setOpenMenu(null)}>
+                {navLink(to, lbl)}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  const admin = user?.role === 'admin'
+
   return (
     <>
       <nav className="bg-bg-elevated/80 backdrop-blur-md border-b border-border px-4 sm:px-6 py-3 sticky top-0 z-50">
@@ -288,15 +327,14 @@ export function NavBar() {
             <div className="hidden xl:flex items-center gap-1 ml-2">
               {navLink('/', 'Dashboard')}
               {navLink('/chat', 'Chat')}
-              {navLink('/sessions', 'Sessions')}
-              {navLink('/tasks', 'Tasks')}
-              {navLink('/config', 'Config')}
-              {navLink('/skills', 'Skills')}
-              {navLink('/workflows', 'Workflows')}
-              {navLink('/cron', 'Cron')}
-              {navLink('/profiles', 'Profiles')}
-              {navLink('/analytics', 'Analytics')}
-              {navLink('/settings', 'Settings')}
+              {navGroup('Operação', [['/sessions', 'Sessions'], ['/tasks', 'Tasks'], ['/cron', 'Cron']])}
+              {navGroup('IA', [['/skills', 'Skills'], ['/profiles', 'Profiles'], ['/workflows', 'Workflows']])}
+              {navGroup('Sistema', [
+                ['/analytics', 'Analytics'],
+                ['/config', 'Config'],
+                ['/settings', 'Settings'],
+                ...(admin ? [['/memory', 'Memória'] as [string, string]] : []),
+              ])}
             </div>
           </div>
           <div className="flex items-center gap-1">
@@ -350,15 +388,19 @@ export function NavBar() {
           <div className="flex flex-col gap-1">
             {navLink('/', 'Dashboard')}
             {navLink('/chat', 'Chat')}
-            {navLink('/sessions', 'Sessions')}
-            {navLink('/tasks', 'Tasks')}
-            {navLink('/config', 'Config')}
-            {navLink('/skills', 'Skills')}
-            {navLink('/workflows', 'Workflows')}
-            {navLink('/cron', 'Cron')}
-            {navLink('/profiles', 'Profiles')}
-            {navLink('/analytics', 'Analytics')}
-            {navLink('/settings', 'Settings')}
+            {['Operação', 'IA', 'Sistema'].map((g) => (
+              <div key={g}>
+                <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-text-tertiary">{g}</p>
+                {g === 'Operação' && [navLink('/sessions', 'Sessions'), navLink('/tasks', 'Tasks'), navLink('/cron', 'Cron')]}
+                {g === 'IA' && [navLink('/skills', 'Skills'), navLink('/profiles', 'Profiles'), navLink('/workflows', 'Workflows')]}
+                {g === 'Sistema' && [
+                  navLink('/analytics', 'Analytics'),
+                  navLink('/config', 'Config'),
+                  navLink('/settings', 'Settings'),
+                  ...(admin ? [navLink('/memory', 'Memória')] : []),
+                ]}
+              </div>
+            ))}
             {onOpenSearch && (
               <button
                 onClick={() => { setMobileMenuOpen(false); onOpenSearch() }}
@@ -5176,6 +5218,7 @@ function AppInner() {
           <Route path="/cron" element={<ProtectedRoute><CronPage /></ProtectedRoute>} />
           <Route path="/profiles" element={<ProtectedRoute><ProfilesPage /></ProtectedRoute>} />
           <Route path="/analytics" element={<ProtectedRoute><AnalyticsPage /></ProtectedRoute>} />
+          <Route path="/memory" element={<ProtectedRoute><MemoryPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
           <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
         </Routes>
