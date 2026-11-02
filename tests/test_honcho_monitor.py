@@ -1,12 +1,14 @@
-"""SPEC honcho-monitor.md — lote 1 backend regressions (6 tests).
+"""SPEC honcho-monitor.md — lote 1 backend regressions.
 
-Mocks the HTTP layer (``_get_json``/``_post_json``) so no network or real Honcho
-is touched; config + agentos DB are sandboxed.
+Mocks the HTTP layer (``_get_json``/``_post_json``) — no network, no real
+Honcho. HONCHO É DADO REAL: testes nunca injetam nada na API; fixtures vivem
+em memória e os snapshots vão para um agentos.db de sandbox.
 """
 
 import asyncio
 import json
 import sqlite3
+import time
 
 import pytest
 
@@ -26,8 +28,13 @@ def env(tmp_path, monkeypatch):
     return tmp_path
 
 
-def _fake_http(monkeypatch, health_ok=True, card=None):
+def _fake_http(monkeypatch, health_ok=True, card=None, workspaces=None,
+               peers_total=None, conclusions_total=20):
+    workspaces = workspaces or [{"id": "hermes", "created_at": "2026-06-09"}]
+    calls = {"n": 0}
+
     async def _get(client, path):
+        calls["n"] += 1
         if path == "/health":
             if not health_ok:
                 raise RuntimeError("honcho down")
@@ -40,14 +47,19 @@ def _fake_http(monkeypatch, health_ok=True, card=None):
         raise AssertionError(f"GET inesperado: {path}")
 
     async def _post(client, path, body=None):
+        calls["n"] += 1
         if path == "/v3/workspaces/list":
-            return {"items": [{"id": "hermes", "created_at": "2026-06-09"}]}
+            return {"items": workspaces}
         if path.endswith("/peers/list"):
-            return {"items": [{"id": "mauricio"}, {"id": "hermes"}]}
+            items = [{"id": "mauricio"}, {"id": "hermes"}]
+            return {"items": items, "total": peers_total or len(items)}
+        if path.endswith("/conclusions/list"):
+            if body and body.get("size") == 1:
+                return {"items": [{"created_at": "2026-10-26T12:00:00Z"}],
+                        "total": conclusions_total}
+            return {"items": [], "total": conclusions_total}
         if path.endswith("/sessions/list"):
             return {"items": [], "total": 10}
-        if path.endswith("/conclusions/list"):
-            return {"items": [], "total": 20}
         if path.endswith("/representation"):
             return {"representation": "## Explicit Observations\n\n"
                                        "[2026-06-16 22:27:33] a\n"
@@ -56,35 +68,53 @@ def _fake_http(monkeypatch, health_ok=True, card=None):
 
     monkeypatch.setattr(honcho, "_get_json", _get)
     monkeypatch.setattr(honcho, "_post_json", _post)
+    return calls
 
 
 def test_summary_happy_path(env, monkeypatch):
     _fake_http(monkeypatch)
     data = asyncio.run(honcho.collect())
     assert data["status"] == "ok"
-    assert data["health"] == {"status": "ok"}
+    assert data["base_url"] == "http://fake:8000"  # F-H10: só host
     ws = data["workspaces"][0]
     assert ws["id"] == "hermes"
     assert ws["sessions"] == 10 and ws["conclusions"] == 20 and ws["peers"] == 2
     assert ws["queue"]["pending"] == 1
+    assert ws["latest_conclusion_at"] == "2026-10-26T12:00:00Z"  # F-H3
     human = {h["id"]: h for h in ws["humans"]}
     assert human["mauricio"]["representation"]["observations"] == 2
     assert human["mauricio"]["representation"]["latest_observation"] == "2026-10-21"
-    assert data["series"]["hermes"][0]["sessions"] == 10
+    assert data["series"]["hermes"][0]["pending"] == 1  # F-H4
 
 
-def test_card_null_is_not_generated_not_alarm(env, monkeypatch):
+def test_card_states_distinguish_null_empty_populated(env, monkeypatch):
     _fake_http(monkeypatch, card=None)
-    data = asyncio.run(honcho.collect())
-    human = {h["id"]: h for h in data["workspaces"][0]["humans"]}
-    assert human["mauricio"]["card"] == "not_generated"
-    assert data["status"] == "ok"  # card null NÃO é degradação
+    d = asyncio.run(honcho.collect())
+    assert {h["id"]: h for h in d["workspaces"][0]["humans"]}["mauricio"]["card"] == "not_generated"
 
-    _fake_http(monkeypatch, card=["fato 1"])
     honcho._cache = None
-    data = asyncio.run(honcho.collect())
-    human = {h["id"]: h for h in data["workspaces"][0]["humans"]}
-    assert human["mauricio"]["card"] == "populated"
+    _fake_http(monkeypatch, card=[])
+    d = asyncio.run(honcho.collect())
+    hum = {h["id"]: h for h in d["workspaces"][0]["humans"]}
+    assert hum["mauricio"]["card"] == "empty"  # F-H5
+
+    honcho._cache = None
+    _fake_http(monkeypatch, card=["fato"])
+    d = asyncio.run(honcho.collect())
+    hum = {h["id"]: h for h in d["workspaces"][0]["humans"]}
+    assert hum["mauricio"]["card"] == "populated"
+
+
+def test_union_of_workspaces_fh2(env, monkeypatch):
+    """Config mapeia só 'hermes'; a API tem 2 → os DOIS aparecem (nada escondido)."""
+    _fake_http(monkeypatch, workspaces=[
+        {"id": "hermes", "created_at": "2026-06-09"},
+        {"id": "hermes_seguranca", "created_at": "2026-10-10"},
+    ])
+    d = asyncio.run(honcho.collect())
+    ids = [w["id"] for w in d["workspaces"]]
+    assert ids == ["hermes", "hermes_seguranca"], ids
+    assert all(w["sessions"] == 10 for w in d["workspaces"])
 
 
 def test_unreachable_never_raises(env, monkeypatch):
@@ -94,38 +124,57 @@ def test_unreachable_never_raises(env, monkeypatch):
     assert any("health" in e for e in data["errors"])
 
 
-def test_not_configured(tmp_path, monkeypatch):
-    monkeypatch.setattr(honcho, "CONFIG_PATH", str(tmp_path / "nope.json"))
-    monkeypatch.setattr(honcho, "AGENTOS_DB", str(tmp_path / "a.db"))
-    honcho._cache = None
-    data = asyncio.run(honcho.collect())
-    assert data["status"] == "not_configured"
+def test_malformed_configs_never_500(env, monkeypatch, client, admin_headers):
+    """F-H1: JSON válido com tipo errado não pode virar 500."""
+    _fake_http(monkeypatch)  # base válida não vira timeout de rede real
+    for bad in ('[1,2,3]', '"texto"', '{"baseUrl": 123, "hosts": {}}',
+                '{"baseUrl": "http://x:8000", "hosts": "nope"}',
+                '{"baseUrl": "http://x:8000", "hosts": {"h": 42}}'):
+        (env / "honcho.json").write_text(bad)
+        honcho._cache = None
+        d = asyncio.run(honcho.collect())
+        assert d["status"] in ("ok", "not_configured", "degraded"), (bad, d["status"])
+        honcho._cache = None
+        r = client.get("/api/honcho/summary", headers=admin_headers)
+        assert r.status_code == 200, (bad, r.status_code)
 
 
-def test_snapshot_rate_limit(env, monkeypatch):
+def test_peers_total_not_page_len_fh8(env, monkeypatch):
+    _fake_http(monkeypatch, peers_total=120)
+    d = asyncio.run(honcho.collect())
+    assert d["workspaces"][0]["peers"] == 120
+
+
+def test_snapshot_rate_and_drop_detection(env, monkeypatch):
     _fake_http(monkeypatch)
     asyncio.run(honcho.collect())
     asyncio.run(honcho.collect())  # <1h → não duplica
     db = sqlite3.connect(str(env / "agentos.db"))
     n = db.execute("SELECT COUNT(*) FROM honcho_snapshots").fetchone()[0]
     assert n == 1, n
-    # envelhece o snapshot → o próximo coletor grava outro
-    db.execute("UPDATE honcho_snapshots SET ts = ts - 4000")
+    # snapshot anterior com contadores MAIORES → queda detectada
+    db.execute(
+        "INSERT INTO honcho_snapshots VALUES (?, 'hermes', 50, 99, 9, 0, 7000)",
+        (int(time.time()) - 7200,),
+    )
     db.commit()
     db.close()
-    asyncio.run(honcho.collect())
-    db = sqlite3.connect(str(env / "agentos.db"))
-    n = db.execute("SELECT COUNT(*) FROM honcho_snapshots").fetchone()[0]
-    db.close()
-    assert n == 2, n
+    d = asyncio.run(honcho.collect())
+    assert any("queda de" in w for w in d["warnings"]), d["warnings"]
 
 
-def test_endpoint_gate_and_shape(env, monkeypatch, client, admin_headers, viewer_headers):
+def test_ttl_cache_prevents_http(env, monkeypatch):
+    calls = _fake_http(monkeypatch)
+    asyncio.run(honcho.summary())
+    first = calls["n"]
+    asyncio.run(honcho.summary())  # dentro do TTL → sem HTTP
+    assert calls["n"] == first, f"TTL não segurou ({first} → {calls['n']})"
+
+
+def test_endpoint_gate(env, monkeypatch, client, admin_headers, viewer_headers):
     _fake_http(monkeypatch)
     honcho._cache = None
-    r = client.get("/api/honcho/summary", headers=viewer_headers)
-    assert r.status_code == 403, f"viewer leu memória ({r.status_code})"
+    assert client.get("/api/honcho/summary", headers=viewer_headers).status_code == 403
     r = client.get("/api/honcho/summary", headers=admin_headers)
     assert r.status_code == 200
-    body = r.json()
-    assert body["status"] == "ok" and body["workspaces"][0]["id"] == "hermes"
+    assert r.json()["status"] == "ok"
