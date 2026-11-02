@@ -633,6 +633,7 @@ from backend.workflow_engine import run_workflow, get_workflow_runs, get_run_det
 # ── Cron endpoints ────────────────────────────────────────────────
 
 from backend.cron import router as cron_router  # noqa: E402
+from backend.honcho import summary as honcho_summary  # noqa: E402
 app.include_router(cron_router)
 
 from backend.analytics import router as analytics_router  # noqa: E402
@@ -851,6 +852,15 @@ async def list_models(user: dict = Depends(require_auth)) -> dict:
 
 dist_path = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 index_html = os.path.join(dist_path, "index.html")
+
+
+# ── Honcho memory monitor ─────────────────────────────────────────
+# SPEC: deliverables/agentos-review/specs/honcho-monitor.md
+# Admin-only: expõe nomes de peers e saúde da memória; viewer não vê.
+
+@app.get("/api/honcho/summary")
+async def honcho_monitor(user: dict = Depends(require_admin)) -> dict:
+    return await honcho_summary()
 
 
 @app.get("/{full_path:path}")
