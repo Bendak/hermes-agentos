@@ -45,6 +45,11 @@ _SCHEMA = (
     " conclusions INTEGER, peers INTEGER, pending INTEGER,"
     " representation_chars INTEGER)"
 )
+# N-02: dois collects concorrentes (cache frio) gravavam 2 linhas na mesma hora.
+_SCHEMA_UNIQUE = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_honcho_snap_ws_ts"
+    " ON honcho_snapshots(workspace, ts)"
+)
 
 
 def _load_config() -> dict | None:
@@ -84,11 +89,20 @@ def _load_config() -> dict | None:
             if isinstance(w, str) and w and w not in workspaces:
                 workspaces.append(w)
 
-    # F-H10: só o host no payload da UI (sem path/query)
-    parts = urlsplit(base)
-    base_host = f"{parts.scheme}://{parts.hostname or '?'}"
-    if parts.port:
-        base_host += f":{parts.port}"
+    # F-H10: só o host no payload da UI (sem path/query).
+    # N-01: URL sintaticamente inválida (porta 'abc', IPv6 malformado, >65535)
+    # explodia em urlsplit/.port — config ruim vira not_configured, nunca exceção.
+    try:
+        parts = urlsplit(base)
+        port = parts.port  # may raise ValueError
+        if not parts.scheme or not parts.hostname:
+            raise ValueError("url sem scheme/host")
+        base_host = f"{parts.scheme}://{parts.hostname}"
+        if port:
+            base_host += f":{port}"
+    except Exception as e:
+        logger.warning("honcho: baseUrl inválido (%s): %s", base, e)
+        return None
     return {"base_url": base, "base_host": base_host, "workspaces": workspaces}
 
 
@@ -116,6 +130,11 @@ def _repr_stats(text: str) -> dict:
 async def _open_db() -> aiosqlite.Connection:
     db = await aiosqlite.connect(AGENTOS_DB)
     await db.execute(_SCHEMA)
+    try:  # DBs antigos podem ter duplicatas — índice é best-effort
+        await db.execute(_SCHEMA_UNIQUE)
+        await db.commit()
+    except Exception as e:
+        logger.warning("honcho: índice único de snapshots não criado: %s", e)
     # migração de DBs criados antes da coluna `pending` (F-H4)
     try:
         async with db.execute("PRAGMA table_info(honcho_snapshots)") as cur:
@@ -142,8 +161,9 @@ async def _snapshot(ws_id: str, counters: dict) -> None:
             if row and now - int(row[0]) < _SNAPSHOT_INTERVAL:
                 return
             await db.execute(
-                "INSERT INTO honcho_snapshots (ts, workspace, sessions, conclusions,"
-                " peers, pending, representation_chars) VALUES (?,?,?,?,?,?,?)",
+                "INSERT OR IGNORE INTO honcho_snapshots (ts, workspace, sessions,"
+                " conclusions, peers, pending, representation_chars)"
+                " VALUES (?,?,?,?,?,?,?)",
                 (now, ws_id, counters.get("sessions"), counters.get("conclusions"),
                  counters.get("peers"), counters.get("queue", {}).get("pending"),
                  counters.get("representation_chars")),
@@ -174,14 +194,19 @@ async def _series(ws_id: str) -> list[dict]:
         return []
 
 
-def _drop_warnings(series: list[dict]) -> list[str]:
-    """F-H4/H9: contador caindo entre dois snapshots = perda detectada."""
-    if len(series) < 2:
+def _drop_warnings(entry: dict, series: list[dict]) -> list[str]:
+    """F-H4/H9 + N-03: perda detectada comparando o LIVE com o último snapshot.
+
+    Antes comparava só snapshot×snapshot: uma queda real ficava invisível até
+    o próximo write (≤1h). Agora o request atual já acusa. Inclui
+    representation_chars (N-03c). Baseline = último snapshot armazenado.
+    """
+    if not series:
         return []
-    prev, cur = series[-2], series[-1]
+    last = series[-1]
     out = []
-    for key in ("sessions", "conclusions", "peers"):
-        a, b = prev.get(key), cur.get(key)
+    for key in ("sessions", "conclusions", "peers", "representation_chars"):
+        a, b = last.get(key), entry.get(key)
         if isinstance(a, int) and isinstance(b, int) and b < a:
             out.append(f"queda de {key}: {a} → {b}")
     return out
@@ -211,6 +236,8 @@ async def collect() -> dict:
                 result["health"] = health
                 if isinstance(health, dict) and str(health.get("status", "ok")).lower() not in (
                         "ok", "healthy", "up"):
+                    # N-06: corpo unhealthy não pode virar "ok" geral
+                    result["status"] = "degraded"
                     result["warnings"].append(f"health reporta {health.get('status')!r}")
             except Exception as e:
                 result["status"] = "unreachable"
@@ -241,11 +268,16 @@ async def collect() -> dict:
                 result["status"] = "degraded"
                 result["warnings"].append("nenhum workspace para monitorar")
 
+            if len(order) > _MAX_WORKSPACES:  # N-07
+                result["warnings"].append(
+                    f"{len(order)} workspaces; monitorando só os {_MAX_WORKSPACES} primeiros")
             for ws_id in order[:_MAX_WORKSPACES]:
                 entry: dict = {
                     "id": ws_id,
                     "created_at": next((w.get("created_at") for w in api_ws
                                         if w.get("id") == ws_id), None),
+                    # N-04: contrato congelado p/ a UI — chave sempre presente
+                    "latest_conclusion_at": None,
                 }
                 peers: list[dict] = []
                 try:
@@ -328,7 +360,8 @@ async def collect() -> dict:
                 await _snapshot(ws_id, entry)
                 series = await _series(ws_id)
                 result["series"][ws_id] = series
-                result["warnings"].extend(f"{ws_id}: {w}" for w in _drop_warnings(series))
+                result["warnings"].extend(
+                    f"{ws_id}: {w}" for w in _drop_warnings(entry, series))
 
             if result["errors"]:
                 result["status"] = "degraded"
