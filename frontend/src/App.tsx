@@ -254,16 +254,37 @@ export function NavBar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [openMenu, setOpenMenu] = useState<string | null>(null)
 
+  // F-6 (adversarial lote 2): teclado — Escape fecha o dropdown; clique fora
+  // também (o mouseleave cobre o mouse, mas não o teclado). Sem isso o menu
+  // ficava preso aberto quando o ponteiro estava parado.
+  useEffect(() => {
+    if (!openMenu) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenMenu(null)
+    }
+    const onPointer = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null
+      if (!target?.closest('[data-nav-group]')) setOpenMenu(null)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('mousedown', onPointer)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('mousedown', onPointer)
+    }
+  }, [openMenu])
+
   useEffect(() => {
     document.documentElement.classList.toggle('light', theme === 'light')
     localStorage.setItem('agentos-theme', theme)
   }, [theme])
 
-  const navLink = (to: string, label: string, closeMobile?: () => void) => {
+  const navLink = (to: string, label: string, closeMobile?: () => void, role?: string) => {
     const active = location.pathname === to || (to !== '/' && location.pathname.startsWith(to))
     return (
       <Link
         to={to}
+        role={role}
         onClick={() => { setMobileMenuOpen(false); closeMobile?.() }}
         className={`relative px-3 py-1.5 text-sm font-medium rounded-md transition duration-200 ease-agent-os ${
           active ? 'text-accent bg-accent-subtle' : 'text-text-secondary hover:text-text-primary hover:bg-surface/60'
@@ -281,7 +302,7 @@ export function NavBar() {
     const open = openMenu === label
     const active = items.some(([to]) => location.pathname === to || (to !== '/' && location.pathname.startsWith(to)))
     return (
-      <div key={label} className="relative" onMouseLeave={() => { if (open) setOpenMenu(null) }}>
+      <div key={label} data-nav-group className="relative" onMouseLeave={() => { if (open) setOpenMenu(null) }}>
         <button
           onClick={() => setOpenMenu(open ? null : label)}
           aria-haspopup="menu"
@@ -302,8 +323,8 @@ export function NavBar() {
             className="absolute left-0 top-full mt-2 min-w-[180px] rounded-lg border border-border bg-bg-elevated shadow-xl py-1 z-50"
           >
             {items.map(([to, lbl]) => (
-              <div key={to} className="px-1" onClick={() => setOpenMenu(null)}>
-                {navLink(to, lbl)}
+              <div key={to} role="none" className="px-1" onClick={() => setOpenMenu(null)}>
+                {navLink(to, lbl, undefined, 'menuitem')}
               </div>
             ))}
           </div>
