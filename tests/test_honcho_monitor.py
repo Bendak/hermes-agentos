@@ -152,15 +152,41 @@ def test_snapshot_rate_and_drop_detection(env, monkeypatch):
     db = sqlite3.connect(str(env / "agentos.db"))
     n = db.execute("SELECT COUNT(*) FROM honcho_snapshots").fetchone()[0]
     assert n == 1, n
-    # snapshot anterior com contadores MAIORES → queda detectada
+    # último snapshot armazenado com contadores MAIORES → queda detectada já no read
+    db.execute("DELETE FROM honcho_snapshots")
     db.execute(
         "INSERT INTO honcho_snapshots VALUES (?, 'hermes', 50, 99, 9, 0, 7000)",
-        (int(time.time()) - 7200,),
+        (int(time.time()) - 10,),
     )
     db.commit()
     db.close()
     d = asyncio.run(honcho.collect())
     assert any("queda de" in w for w in d["warnings"]), d["warnings"]
+
+
+def test_invalid_url_never_raises_n01(env, monkeypatch):
+    """N-01: baseUrl sintaticamente inválida não pode explodir em collect()."""
+    for bad_url in ("http://host:abc", "http://[bad", "http://host:99999999"):
+        (env / "honcho.json").write_text(
+            json.dumps({"baseUrl": bad_url, "hosts": {"h": {"workspace": "hermes"}}}))
+        honcho._cache = None
+        d = asyncio.run(honcho.collect())  # não pode levantar
+        assert d["status"] == "not_configured", (bad_url, d["status"])
+
+
+def test_snapshot_unique_n02(env, monkeypatch):
+    """N-02: dois snapshots no mesmo segundo (race) → 1 linha só."""
+    _fake_http(monkeypatch)
+    asyncio.run(honcho.collect())
+    db = sqlite3.connect(str(env / "agentos.db"))
+    now = int(time.time())
+    db.execute("DELETE FROM honcho_snapshots")
+    db.execute("INSERT OR IGNORE INTO honcho_snapshots VALUES (?, 'hermes', 1, 1, 1, 0, 1)", (now,))
+    db.execute("INSERT OR IGNORE INTO honcho_snapshots VALUES (?, 'hermes', 2, 2, 2, 0, 2)", (now,))
+    db.commit()
+    n = db.execute("SELECT COUNT(*) FROM honcho_snapshots").fetchone()[0]
+    db.close()
+    assert n == 1, f"UNIQUE não segurou a race ({n} linhas)"
 
 
 def test_ttl_cache_prevents_http(env, monkeypatch):
