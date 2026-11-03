@@ -253,6 +253,7 @@ export function NavBar() {
   })
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const [openMenu, setOpenMenu] = useState<string | null>(null)
+  const menuCloseTimer = useRef<number | null>(null)
 
   // F-6 (adversarial lote 2): teclado — Escape fecha o dropdown; clique fora
   // também (o mouseleave cobre o mouse, mas não o teclado). Sem isso o menu
@@ -298,11 +299,30 @@ export function NavBar() {
     )
   }
 
+  // Fecho por hover com atraso: sem isso o vão entre o botão e o painel dispara
+  // mouseleave no meio do trajeto e o menu some antes de o mouse chegar.
+  const cancelMenuClose = () => {
+    if (menuCloseTimer.current) {
+      window.clearTimeout(menuCloseTimer.current)
+      menuCloseTimer.current = null
+    }
+  }
+  const scheduleMenuClose = () => {
+    cancelMenuClose()
+    menuCloseTimer.current = window.setTimeout(() => setOpenMenu(null), 180)
+  }
+
   const navGroup = (label: string, items: Array<[string, string]>) => {
     const open = openMenu === label
     const active = items.some(([to]) => location.pathname === to || (to !== '/' && location.pathname.startsWith(to)))
     return (
-      <div key={label} data-nav-group className="relative" onMouseLeave={() => { if (open) setOpenMenu(null) }}>
+      <div
+        key={label}
+        data-nav-group
+        className="relative"
+        onMouseEnter={cancelMenuClose}
+        onMouseLeave={scheduleMenuClose}
+      >
         <button
           onClick={() => setOpenMenu(open ? null : label)}
           aria-haspopup="menu"
@@ -318,15 +338,17 @@ export function NavBar() {
           )}
         </button>
         {open && (
+          <div className="absolute left-0 top-full pt-2 min-w-[180px] z-50">
           <div
             role="menu"
-            className="absolute left-0 top-full mt-2 min-w-[180px] rounded-lg border border-border bg-bg-elevated shadow-xl py-1 z-50"
+            className="rounded-lg border border-border bg-bg-elevated shadow-xl py-1"
           >
             {items.map(([to, lbl]) => (
               <div key={to} role="none" className="px-1" onClick={() => setOpenMenu(null)}>
                 {navLink(to, lbl, undefined, 'menuitem')}
               </div>
             ))}
+          </div>
           </div>
         )}
       </div>
