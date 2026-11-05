@@ -1703,7 +1703,7 @@ function ReasoningBlock({ content }: { content: string }) {
         {expanded ? 'Hide thinking…' : 'Thinking…'}
       </button>
       {expanded && (
-        <div className="mt-1 text-caption text-text-tertiary italic whitespace-pre-wrap w-full min-w-0 max-h-80 overflow-y-auto border border-border/40 rounded-lg p-2 bg-bg-base/40">
+        <div className="mt-1 text-caption text-text-tertiary italic whitespace-pre-wrap w-full min-w-0 max-h-80 overflow-y-auto border border-border rounded-lg p-2 bg-bg-base/40">
           <div className="w-full min-w-0" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
             <MarkdownRenderer content={content} />
           </div>
@@ -1943,7 +1943,7 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
   return (
     <div className="flex flex-col">
       {/* Pagination controls at top */}
-      <div ref={messagesRef} className="flex items-center justify-between gap-3 px-2 py-3 border-b border-border/50 mb-3 flex-wrap">
+      <div ref={messagesRef} className="flex items-center justify-between gap-3 px-2 py-3 border-b border-border mb-3 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="text-caption text-text-tertiary">
             Showing {rangeStart}–{rangeEnd} of {total}

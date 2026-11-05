@@ -475,8 +475,10 @@ export default function ChatPage() {
               <div
                 key={s.id}
                 className={
-                  'group mb-0.5 flex items-center gap-1 rounded-lg px-2 py-1.5 ' +
-                  (s.id === activeId ? 'bg-accent/15 text-text-primary' : 'text-text-secondary hover:bg-bg-base')
+                  'group mb-0.5 flex items-center gap-1 rounded-lg border-l-2 px-2 py-1.5 ' +
+                  (s.id === activeId
+                    ? 'border-accent bg-bg-base text-text-primary'
+                    : 'border-transparent text-text-secondary hover:bg-bg-base')
                 }
               >
                 {renamingId === s.id ? (
@@ -633,7 +635,7 @@ export default function ChatPage() {
                       ) : (
                         <>
                           {m.reasoning_content && (
-                            <details className="mb-2 rounded-lg border border-border/60 px-2 py-1 text-xs text-text-tertiary">
+                            <details className="mb-2 rounded-lg border border-border px-2 py-1 text-xs text-text-tertiary">
                               <summary className="cursor-pointer">Thinking</summary>
                               <pre className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words">
                                 {m.reasoning_content}
@@ -645,7 +647,7 @@ export default function ChatPage() {
                               {m.tool_calls.map((tc, k) => (
                                 <details
                                   key={k}
-                                  className="rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-text-tertiary"
+                                  className="rounded-md border border-border px-2 py-0.5 text-[11px] text-text-tertiary"
                                 >
                                   <summary className="cursor-pointer">🔧 {toolCallName(tc)}</summary>
                                   <pre className="mt-1 max-h-40 max-w-[420px] overflow-auto whitespace-pre-wrap break-words">
@@ -668,7 +670,7 @@ export default function ChatPage() {
                 <div className="flex justify-start">
                   <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-bg-elevated px-4 py-2.5 text-sm text-text-primary">
                     {thinking && (
-                      <details open className="mb-2 rounded-lg border border-border/60 px-2 py-1 text-xs text-text-tertiary">
+                      <details open className="mb-2 rounded-lg border border-border px-2 py-1 text-xs text-text-tertiary">
                         <summary className="cursor-pointer">Thinking…</summary>
                         <pre className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words">{thinking}</pre>
                       </details>
@@ -678,7 +680,7 @@ export default function ChatPage() {
                         {liveTools.map((t, k) => (
                           <div
                             key={k}
-                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-text-tertiary"
+                            className="flex items-center gap-2 rounded-md border border-border px-2 py-0.5 text-[11px] text-text-tertiary"
                           >
                             <span>{t.status === 'running' ? '⏳' : t.status === 'failed' ? '⚠️' : '✓'}</span>
                             <span className="font-medium">{t.name}</span>

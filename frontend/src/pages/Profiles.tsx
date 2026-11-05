@@ -106,7 +106,7 @@ function ToggleChip({ label, active, onClick }: { label: string; active: boolean
       className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-all border ${
         active
           ? 'bg-accent/15 border-accent/40 text-accent'
-          : 'bg-bg-base border-border text-text-tertiary hover:text-text-secondary hover:border-border/80'
+          : 'bg-bg-base border-border text-text-tertiary hover:text-text-secondary hover:border-border'
       }`}
     >
       {active && (
