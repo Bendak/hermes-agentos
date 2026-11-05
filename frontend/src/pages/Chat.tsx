@@ -44,6 +44,111 @@ function toolCallArgs(tc: ToolCall): string {
   return tc.function?.arguments || tc.arguments || ''
 }
 
+interface RenderTool {
+  name: string
+  args?: string
+  output?: string
+}
+
+interface RenderItem {
+  role: 'user' | 'agent'
+  content: string
+  reasoning?: string
+  tools: RenderTool[]
+  ts?: string | number
+}
+
+/** Mesmo formato da view de sessão: cada passo do agente vira um bloco com timestamp. */
+function buildItems(messages: ChatMsg[]): RenderItem[] {
+  const items: RenderItem[] = []
+  for (const m of messages) {
+    if (m.role === 'system') continue
+    if (m.role === 'user') {
+      items.push({ role: 'user', content: m.content, tools: [], ts: m.timestamp })
+      continue
+    }
+    if (m.role === 'tool') {
+      const last = [...items].reverse().find((i) => i.role === 'agent')
+      const name = m.tool_name || 'tool'
+      if (last) {
+        const slot = last.tools.find((t) => t.output === undefined && (!m.tool_name || t.name === m.tool_name))
+        if (slot) slot.output = m.content
+        else last.tools.push({ name, output: m.content })
+      } else {
+        items.push({ role: 'agent', content: '', tools: [{ name, output: m.content }], ts: m.timestamp })
+      }
+      continue
+    }
+    const tools: RenderTool[] = (m.tool_calls || []).map((tc) => ({
+      name: toolCallName(tc),
+      args: toolCallArgs(tc),
+    }))
+    items.push({
+      role: 'agent',
+      content: m.content || '',
+      reasoning: m.reasoning_content || '',
+      tools,
+      ts: m.timestamp,
+    })
+  }
+  return items.filter((i) => i.role === 'user' || i.content || i.reasoning || i.tools.length > 0)
+}
+
+function fmtTs(ts?: string | number): string {
+  if (ts === undefined || ts === null || ts === '') return ''
+  const raw = typeof ts === 'number' ? ts : Number(ts)
+  const ms = Number.isFinite(raw) ? (raw > 1e11 ? raw : raw * 1000) : Date.parse(String(ts))
+  if (!Number.isFinite(ms)) return ''
+  const parts = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(ms))
+  const get = (type: string) => parts.find((x) => x.type === type)?.value || ''
+  return `${get('day')}/${get('month')} ${get('hour')}:${get('minute')}`
+}
+
+function ThinkingBlock({ text, live }: { text: string; live?: boolean }) {
+  return (
+    <div className="w-full border-l-2 border-accent/60 pl-3">
+      <p className={'text-[11px] font-semibold uppercase tracking-wider ' + 'text-accent'}>
+        Thinking{live ? '…' : ''}
+      </p>
+      <p className="mt-1 max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-text-secondary">
+        {text}
+      </p>
+    </div>
+  )
+}
+
+function ToolBar({ tool }: { tool: RenderTool }) {
+  const hasBody = Boolean(tool.args || tool.output)
+  return (
+    <details className="w-full rounded-lg border border-border bg-bg-elevated/60">
+      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-text-secondary">
+        <span className="text-[10px] uppercase tracking-wider text-text-tertiary">Tool</span>
+        <span className="font-medium">{tool.name}</span>
+        {!hasBody && <span className="ml-auto text-text-tertiary">·</span>}
+      </summary>
+      <div className="space-y-2 px-3 pb-3">
+        {tool.args && (
+          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-base/60 p-2 text-[11px] text-text-tertiary">
+            {tool.args}
+          </pre>
+        )}
+        {tool.output && (
+          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-base/60 p-2 text-[11px] text-text-secondary">
+            {tool.output.slice(0, 6000)}
+          </pre>
+        )}
+      </div>
+    </details>
+  )
+}
+
 function authHeaders(json = false): Record<string, string> {
   const token = localStorage.getItem('agentos_access_token')
   const h: Record<string, string> = {}
@@ -447,6 +552,8 @@ export default function ChatPage() {
     return out
   }, [filtered])
 
+  const items = useMemo(() => buildItems(messages), [messages])
+
   const sidebar = (
     <aside className="flex h-full w-72 shrink-0 flex-col border-r border-border bg-bg-elevated">
       <div className="space-y-2 border-b border-border p-3">
@@ -607,99 +714,67 @@ export default function ChatPage() {
                 </div>
               )}
               {loadingMessages && <p className="text-center text-xs text-text-tertiary">Loading messages…</p>}
-              {messages.map((m, i) => {
-                if (m.role === 'tool' || m.role === 'system') {
+              {items.map((item, i) => {
+                if (item.role === 'user') {
                   return (
-                    <details
-                      key={i}
-                      className="rounded-lg border border-border bg-bg-elevated/40 px-3 py-2 text-xs text-text-tertiary"
-                    >
-                      <summary className="cursor-pointer">{m.tool_name || m.role}</summary>
-                      <pre className="mt-1 whitespace-pre-wrap break-words">{m.content.slice(0, 4000)}</pre>
-                    </details>
-                  )
-                }
-                const mine = m.role === 'user'
-                return (
-                  <div key={i} className={'flex ' + (mine ? 'justify-end' : 'justify-start')}>
-                    <div
-                      className={
-                        'max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ' +
-                        (mine
-                          ? 'rounded-br-sm bg-accent text-white'
-                          : 'rounded-bl-sm border border-border bg-bg-elevated text-text-primary')
-                      }
-                    >
-                      {mine ? (
-                        <span className="whitespace-pre-wrap">{m.content}</span>
-                      ) : (
-                        <>
-                          {m.reasoning_content && (
-                            <details className="mb-2 rounded-lg border border-border px-2 py-1 text-xs text-text-tertiary">
-                              <summary className="cursor-pointer">Thinking</summary>
-                              <pre className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words">
-                                {m.reasoning_content}
-                              </pre>
-                            </details>
-                          )}
-                          {m.tool_calls && m.tool_calls.length > 0 && (
-                            <div className="mb-2 flex flex-wrap gap-1">
-                              {m.tool_calls.map((tc, k) => (
-                                <details
-                                  key={k}
-                                  className="rounded-md border border-border px-2 py-0.5 text-[11px] text-text-tertiary"
-                                >
-                                  <summary className="cursor-pointer">🔧 {toolCallName(tc)}</summary>
-                                  <pre className="mt-1 max-h-40 max-w-[420px] overflow-auto whitespace-pre-wrap break-words">
-                                    {toolCallArgs(tc)}
-                                  </pre>
-                                </details>
-                              ))}
-                            </div>
-                          )}
-                          <div className="prose-invert max-w-full">
-                            <MarkdownRenderer content={m.content || '…'} />
-                          </div>
-                        </>
+                    <div key={i} className="flex flex-col items-end gap-1">
+                      <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-accent px-4 py-2.5 text-sm leading-relaxed text-white">
+                        <span className="whitespace-pre-wrap">{item.content}</span>
+                      </div>
+                      {fmtTs(item.ts) && (
+                        <span className="pr-1 text-[10px] text-text-tertiary">{fmtTs(item.ts)}</span>
                       )}
                     </div>
+                  )
+                }
+                return (
+                  <div key={i} className="flex w-full flex-col items-start gap-2">
+                    {fmtTs(item.ts) && (
+                      <span className="pl-1 text-[10px] text-text-tertiary">{fmtTs(item.ts)}</span>
+                    )}
+                    {item.reasoning && <ThinkingBlock text={item.reasoning} />}
+                    {item.tools.map((t, k) => (
+                      <ToolBar key={k} tool={t} />
+                    ))}
+                    {item.content && (
+                      <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-bg-elevated px-4 py-2.5 text-sm leading-relaxed text-text-primary">
+                        <div className="prose-invert max-w-full">
+                          <MarkdownRenderer content={item.content} />
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}
               {sending && (
-                <div className="flex justify-start">
-                  <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-bg-elevated px-4 py-2.5 text-sm text-text-primary">
-                    {thinking && (
-                      <details open className="mb-2 rounded-lg border border-border px-2 py-1 text-xs text-text-tertiary">
-                        <summary className="cursor-pointer">Thinking…</summary>
-                        <pre className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words">{thinking}</pre>
-                      </details>
-                    )}
-                    {liveTools.length > 0 && (
-                      <div className="mb-2 flex flex-col gap-1">
-                        {liveTools.map((t, k) => (
-                          <div
-                            key={k}
-                            className="flex items-center gap-2 rounded-md border border-border px-2 py-0.5 text-[11px] text-text-tertiary"
-                          >
-                            <span>{t.status === 'running' ? '⏳' : t.status === 'failed' ? '⚠️' : '✓'}</span>
-                            <span className="font-medium">{t.name}</span>
-                            {t.preview && <span className="truncate opacity-70">{t.preview}</span>}
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {streamText ? (
+                <div className="flex w-full flex-col items-start gap-2">
+                  <span className="pl-1 text-[10px] text-text-tertiary">{fmtTs(Date.now() / 1000)}</span>
+                  {thinking && <ThinkingBlock text={thinking} live />}
+                  {liveTools.map((t, k) => (
+                    <div
+                      key={k}
+                      className="flex w-full items-center gap-2 rounded-lg border border-border bg-bg-elevated/60 px-3 py-2 text-xs text-text-secondary"
+                    >
+                      <span className="text-[10px] uppercase tracking-wider text-text-tertiary">Tool</span>
+                      <span className="font-medium">{t.name}</span>
+                      <span className="ml-auto text-text-tertiary">
+                        {t.status === 'running' ? '⏳' : t.status === 'failed' ? '⚠️' : '✓'}
+                      </span>
+                      {t.preview && <span className="max-w-[45%] truncate opacity-70">{t.preview}</span>}
+                    </div>
+                  ))}
+                  {streamText ? (
+                    <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-bg-elevated px-4 py-2.5 text-sm leading-relaxed text-text-primary">
                       <div className="prose-invert max-w-full">
                         <MarkdownRenderer content={streamText} />
                         <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-accent align-middle" />
                       </div>
-                    ) : (
-                      <span className="text-text-tertiary">
-                        {thinking || liveTools.length ? 'Working…' : 'Thinking…'}
-                      </span>
-                    )}
-                  </div>
+                    </div>
+                  ) : (
+                    !thinking && liveTools.length === 0 && (
+                      <span className="text-xs text-text-tertiary">Thinking…</span>
+                    )
+                  )}
                 </div>
               )}
               <div ref={bottomRef} />
