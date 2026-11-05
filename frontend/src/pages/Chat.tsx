@@ -290,9 +290,9 @@ export default function ChatPage() {
     }
   }, [])
 
-  const loadMessages = useCallback(async (id: string) => {
+  const loadMessages = useCallback(async (id: string, clearError = true) => {
     setLoadingMessages(true)
-    setError(null)
+    if (clearError) setError(null)
     try {
       const res = await fetch('/api/chat/sessions/' + id + '/messages?limit=200', { headers: authHeaders() })
       if (!res.ok) throw new Error(await apiErrorMessage(res))
@@ -452,7 +452,8 @@ export default function ChatPage() {
       if ((err as Error).name !== 'AbortError') {
         setError((err as Error).message)
         const id = activeIdRef.current
-        if (id) await loadMessages(id)
+        // não limpar o erro no reload: o 409 de turno concorrente tem que ficar visível
+        if (id) await loadMessages(id, false)
       }
     } finally {
       setSending(false)
