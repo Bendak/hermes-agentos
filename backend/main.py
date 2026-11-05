@@ -209,7 +209,9 @@ def health() -> dict:
 
 @app.get("/api/agents")
 async def list_agents(user: dict = Depends(require_auth)) -> list[dict]:
-    profiles = get_profiles()
+    from backend.config import is_hidden  # noqa: PLC0415
+
+    profiles = [p for p in get_profiles() if user.get("role") == "admin" or not is_hidden(p["id"])]
     from backend.sessions import count_sessions_by_profile  # noqa: PLC0415
     session_counts = await count_sessions_by_profile()
     for p in profiles:
@@ -219,6 +221,10 @@ async def list_agents(user: dict = Depends(require_auth)) -> list[dict]:
 
 @app.get("/api/agents/{profile_id}")
 async def get_agent(profile_id: str, user: dict = Depends(require_auth)) -> dict:
+    from backend.config import is_hidden  # noqa: PLC0415
+
+    if user.get("role") != "admin" and is_hidden(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
     detail = await get_profile_detail(profile_id)
     if detail is None:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -227,6 +233,10 @@ async def get_agent(profile_id: str, user: dict = Depends(require_auth)) -> dict
 
 @app.get("/api/agents/{profile_id}/health")
 async def get_agent_health(profile_id: str, user: dict = Depends(require_auth)) -> dict:
+    from backend.config import is_hidden  # noqa: PLC0415
+
+    if user.get("role") != "admin" and is_hidden(profile_id):
+        raise HTTPException(status_code=404, detail="Profile not found")
     # Basic process-level health
     profiles = get_profiles()
     profile = next((p for p in profiles if p["id"] == profile_id), None)
