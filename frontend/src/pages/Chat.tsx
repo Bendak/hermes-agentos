@@ -341,6 +341,8 @@ export default function ChatPage() {
     abortRef.current?.abort()
     setActiveId(id)
     activeIdRef.current = id
+    const target = sessions.find((x) => x.id === id)
+    if (user?.role === 'admin' && target) setSelectedProfile(target.profile)
     setMessages([])
     setStreamText('')
     setThinking('')
@@ -350,7 +352,10 @@ export default function ChatPage() {
 
   async function createChat(profileOverride?: string): Promise<ChatSession> {
     const body: Record<string, unknown> = {}
-    if (user?.role === 'admin') body.profile = profileOverride || selectedProfile || 'default'
+    if (user?.role === 'admin') {
+      // fonte única: o que o dropdown mostra é o profile da sessão ativa
+      body.profile = profileOverride || active?.profile || selectedProfile || 'default'
+    }
     const res = await fetch('/api/chat/sessions', {
       method: 'POST',
       headers: authHeaders(true),
