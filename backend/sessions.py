@@ -343,11 +343,17 @@ async def list_sessions(
                 db_where = where_sql
                 bind = [owner] + list(params)
                 if profile is not None:
-                    # Filtro no SQL: paginação/total honestos (não filtrar depois do LIMIT)
-                    clause = f"{prof_expr} = ?"
-                    db_where = ("WHERE " + " AND ".join(where_clauses + [clause])) if where_clauses else f"WHERE {clause}"
-                    # prof_expr tem um ? no SELECT e outro no WHERE quando existe a coluna
-                    bind = [owner] + list(params) + ([owner, profile] if has_col else [profile])
+                    if not has_col:
+                        # store legado de profile único: sem coluna não há o que comparar;
+                        # ou o db inteiro é do profile, ou não é (evita bind mismatch)
+                        if owner != profile:
+                            continue
+                    else:
+                        # Filtro no SQL: paginação/total honestos (não filtrar depois do LIMIT)
+                        clause = f"{prof_expr} = ?"
+                        db_where = ("WHERE " + " AND ".join(where_clauses + [clause])) if where_clauses else f"WHERE {clause}"
+                        # prof_expr tem um ? no SELECT e outro no WHERE
+                        bind = [owner] + list(params) + [owner, profile]
                 sql = f"""
                     SELECT
                         id, source, model, title, started_at, ended_at,

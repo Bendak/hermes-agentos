@@ -511,7 +511,10 @@ function HardwareWidget() {
   const { data } = useQuery<{ cpu: { percent: number }; ram: { percent: number }; disk: { percent: number } }>({
     queryKey: ['hardware-widget'],
     queryFn: async () => {
-      const res = await fetch('/api/analytics/hardware')
+      const token = localStorage.getItem('agentos_access_token')
+      const res = await fetch('/api/analytics/hardware', {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
       if (!res.ok) throw new Error('Failed')
       return res.json()
     },
@@ -629,8 +632,8 @@ function DashboardPage() {
             ))}
           </div>
         )}
-        {/* Hardware widget */}
-        <HardwareWidget />
+        {/* Hardware widget — operação, admin-only (evita 403 em loop p/ viewer) */}
+        {isAdmin() && <HardwareWidget />}
       </main>
     </div>
   )
