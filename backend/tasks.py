@@ -209,6 +209,15 @@ VALID_STATUSES = {"todo", "ready", "running", "done", "blocked", "archived", "tr
 
 VALID_WORKSPACE_KINDS = {"scratch", "workspace", "dir"}
 
+def _reject_hidden_assignee(assignee: str | None) -> None:
+    """Family profiles are chat-only: never a kanban worker."""
+    if not assignee:
+        return
+    from backend.config import hidden_profiles
+    if assignee in hidden_profiles():
+        raise ValueError(f"profile '{assignee}' não pode receber tarefas")
+
+
 async def create_task(
     *,
     title: str = "",
@@ -225,6 +234,7 @@ async def create_task(
 
     if not title.strip():
         return None
+    _reject_hidden_assignee(assignee)
 
     # F-M4-01: never accept a workspace_path outside the allowlist roots.
     if workspace_path:
@@ -630,6 +640,8 @@ async def update_task(task_id: str, updates: dict, actor: str = "api") -> dict |
         if k == "workspace_kind" and v is not None:
             if v not in VALID_WORKSPACE_KINDS:
                 return None
+        if k == "assignee":
+            _reject_hidden_assignee(v if isinstance(v, str) else None)
         if k == "workspace_path" and v is not None:
             # F-M4-01: raise ValueError (mapped to 400 by the endpoint) instead
             # of silently accepting an arbitrary filesystem path.
