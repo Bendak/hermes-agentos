@@ -47,3 +47,28 @@ def test_profile_filter_applies_before_pagination(tmp_path, monkeypatch):
 
     admin = asyncio.run(sessions_mod.list_sessions(limit=20))
     assert admin["total"] == 30 and len(admin["sessions"]) == 20  # admin: página cheia
+
+
+def test_legacy_store_without_profile_name_no_bind_mismatch(tmp_path, monkeypatch):
+    """NEW-5: store legado sem coluna profile_name não pode gerar bind mismatch
+    (a exceção era engolida e a lista vinha vazia)."""
+    legacy = tmp_path / "legacy.db"
+    con = sqlite3.connect(legacy)
+    con.execute("CREATE TABLE sessions (id TEXT, source TEXT, model TEXT, title TEXT,"
+                " started_at TEXT, ended_at TEXT, message_count INTEGER, tool_call_count INTEGER,"
+                " chat_type TEXT, archived INTEGER, hidden INTEGER DEFAULT 0)")
+    con.execute("INSERT INTO sessions VALUES ('l1','cli','m','legado',100,NULL,0,0,NULL,0,0)")
+    con.commit(); con.close()
+    monkeypatch.setattr(sessions_mod, "_state_db_files", lambda: [("default", str(legacy))])
+
+    # owner diferente do profile → db pulado (sem erro, sem vazamento)
+    other = asyncio.run(sessions_mod.list_sessions(limit=20, profile="user_a"))
+    assert other["total"] == 0 and other["sessions"] == []
+
+    # owner é o próprio profile → rows aparecem normalmente
+    same = asyncio.run(sessions_mod.list_sessions(limit=20, profile="default"))
+    assert same["total"] == 1 and same["sessions"][0]["id"] == "l1"
+
+    # admin continua vendo tudo
+    admin = asyncio.run(sessions_mod.list_sessions(limit=20))
+    assert admin["total"] == 1
