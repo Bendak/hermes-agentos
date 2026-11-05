@@ -109,3 +109,20 @@ def test_bulk_update_with_hidden_assignee_is_400(client, admin_headers, family_p
     r = client.post("/api/tasks/bulk", json={"ids": [tid], "updates": {"assignee": "familia_anna"}},
                     headers=admin_headers)
     assert r.status_code == 400, r.text
+
+
+def test_viewer_session_and_analytics_are_scoped(client, admin_headers, viewer_headers, family_profiles):
+    # viewer não lista sessões de outros profiles (sandbox sem state.db: vazio)
+    r = client.get("/api/sessions", headers=viewer_headers)
+    assert r.status_code == 200
+    assert r.json()["total"] == 0
+    assert all(not str(x.get("profile", "")).startswith("familia") for x in r.json()["sessions"])
+
+    # busca também não devolve nada de família
+    rs = client.get("/api/sessions/search?q=teste", headers=viewer_headers)
+    assert rs.status_code == 200
+    assert all(not str(h.get("profile", "")).startswith("familia") for h in rs.json())
+
+    # analytics é operação: admin-only
+    assert client.get("/api/analytics/tokens", headers=viewer_headers).status_code == 403
+    assert client.get("/api/analytics/tokens", headers=admin_headers).status_code == 200
