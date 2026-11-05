@@ -214,8 +214,8 @@ def _reject_hidden_assignee(assignee: str | None) -> None:
     if not assignee:
         return
     from backend.config import hidden_profiles
-    if assignee in hidden_profiles():
-        raise ValueError(f"profile '{assignee}' não pode receber tarefas")
+    if assignee.strip().lower() in {p.lower() for p in hidden_profiles()}:
+        raise ValueError(f"profile '{assignee.strip()}' não pode receber tarefas")
 
 
 async def create_task(

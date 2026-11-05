@@ -149,8 +149,8 @@ def get_profiles(include_hidden: bool = True) -> List[Dict[str, Any]]:
     """
     from backend.config import hidden_profiles
 
-    hidden = hidden_profiles()
-    profile_ids = [p for p in _discover_profile_ids() if include_hidden or p not in hidden]
+    hidden = {p.lower() for p in hidden_profiles()}
+    profile_ids = [p for p in _discover_profile_ids() if include_hidden or p.lower() not in hidden]
     running_tasks = _kanban_running_tasks()  # M24-6
     profiles = []
     for profile_id in profile_ids:
@@ -171,7 +171,7 @@ def get_profiles(include_hidden: bool = True) -> List[Dict[str, Any]]:
             continue
 
         name = "Hermes" if profile_id == "default" else profile_id.capitalize()
-        selectable = profile_id not in hidden
+        selectable = profile_id.lower() not in hidden
         model = "unknown"
         provider = "unknown"
 
