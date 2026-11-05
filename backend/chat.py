@@ -291,11 +291,22 @@ async def _remote_messages(profile: str, session_id: str, limit: int, offset: in
         role = m.get("role")
         if role not in ("user", "assistant", "tool", "system"):
             continue
+        tool_calls = m.get("tool_calls")
+        if isinstance(tool_calls, str):
+            try:
+                import json as _json
+                tool_calls = _json.loads(tool_calls)
+            except Exception:
+                pass
         out.append({
             "role": role,
             "content": m.get("content") or "",
             "timestamp": m.get("timestamp"),
             "tool_name": m.get("tool_name"),
+            # thinking/tool calls fazem parte do transcript que a UI mostra
+            "reasoning_content": m.get("reasoning_content") or m.get("reasoning"),
+            "tool_calls": tool_calls,
+            "display_kind": m.get("display_kind"),
         })
     return {"data": out, "pagination": data.get("pagination") or {}}
 
@@ -365,7 +376,7 @@ async def create_chat_session(body: dict, user: dict = Depends(require_auth)):
     else:
         # Perfil vem do usuário logado; sem mapeamento NÃO tem chat (403).
         try:
-            profile = chat_sessions.profile_for(user["username"])
+            profile = chat_sessions.profile_for_user(user["user_id"], user["username"])
         except chat_sessions.ProfileConfigError:
             raise HTTPException(status_code=503, detail="mapeamento de profiles inválido no servidor")
         if profile is None:

@@ -12,11 +12,36 @@ interface ChatSession {
   archived: boolean
 }
 
+interface ToolCall {
+  id?: string
+  type?: string
+  name?: string
+  arguments?: string
+  function?: { name?: string; arguments?: string }
+}
+
 interface ChatMsg {
   role: 'user' | 'assistant' | 'tool' | 'system'
   content: string
   timestamp?: string | number
   tool_name?: string | null
+  reasoning_content?: string | null
+  tool_calls?: ToolCall[] | null
+  display_kind?: string | null
+}
+
+interface LiveTool {
+  name: string
+  status: 'running' | 'done' | 'failed'
+  preview?: string
+}
+
+function toolCallName(tc: ToolCall): string {
+  return tc.function?.name || tc.name || tc.type || 'tool'
+}
+
+function toolCallArgs(tc: ToolCall): string {
+  return tc.function?.arguments || tc.arguments || ''
 }
 
 function authHeaders(json = false): Record<string, string> {
@@ -43,8 +68,7 @@ function dayBucket(ts: number): string {
 async function streamTurn(
   sessionId: string,
   text: string,
-  onDelta: (chunk: string) => void,
-  onStarted: () => void,
+  onEvent: (event: string, payload: Record<string, unknown>) => void,
   signal: AbortSignal,
 ): Promise<void> {
   const res = await fetch('/api/chat/sessions/' + sessionId + '/stream', {
@@ -55,7 +79,6 @@ async function streamTurn(
   })
   if (!res.ok) throw new Error(await apiErrorMessage(res))
   if (!res.body) throw new Error('Empty stream')
-  onStarted()
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -76,10 +99,7 @@ async function streamTurn(
       }
       if (!data) continue
       try {
-        const payload = JSON.parse(data)
-        if (event === 'assistant.delta' && typeof payload.delta === 'string') {
-          onDelta(payload.delta)
-        }
+        onEvent(event, JSON.parse(data))
       } catch {
         /* frame parcial/ruído: o transcript canônico vem no reload final */
       }
@@ -103,6 +123,11 @@ export default function ChatPage() {
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  const [thinking, setThinking] = useState('')
+  const [liveTools, setLiveTools] = useState<LiveTool[]>([])
+  const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([])
+  const [selectedProfile, setSelectedProfile] = useState<string>('default')
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -156,10 +181,29 @@ export default function ChatPage() {
   }, [])
 
   useEffect(() => {
+    if (user?.role !== 'admin') return
+    void (async () => {
+      try {
+        const res = await fetch('/api/profiles', { headers: authHeaders() })
+        if (!res.ok) return
+        const rows = await res.json()
+        const list = Array.isArray(rows) ? rows : []
+        const opts = [{ id: 'default', name: 'default' }].concat(
+          list.map((r: { id?: string; name?: string }) => ({ id: String(r.id || r.name || ''), name: String(r.name || r.id || '') })),
+        ).filter((o) => o.id)
+        setProfiles(opts)
+      } catch {
+        /* dropdown degrada para o texto */
+      }
+    })()
+  }, [user?.role])
+
+  useEffect(() => {
     void loadSessions().then((rows) => {
       if (rows.length > 0) {
         setActiveId(rows[0].id)
         activeIdRef.current = rows[0].id
+        if (user?.role === 'admin') setSelectedProfile(rows[0].profile || 'default')
         void loadMessages(rows[0].id)
       }
     })
@@ -173,14 +217,18 @@ export default function ChatPage() {
     activeIdRef.current = id
     setMessages([])
     setStreamText('')
+    setThinking('')
+    setLiveTools([])
     void loadMessages(id)
   }
 
-  async function createChat(): Promise<ChatSession> {
+  async function createChat(profileOverride?: string): Promise<ChatSession> {
+    const body: Record<string, unknown> = {}
+    if (user?.role === 'admin') body.profile = profileOverride || selectedProfile || 'default'
     const res = await fetch('/api/chat/sessions', {
       method: 'POST',
       headers: authHeaders(true),
-      body: JSON.stringify({}),
+      body: JSON.stringify(body),
     })
     if (!res.ok) throw new Error(await apiErrorMessage(res))
     const row: ChatSession = await res.json()
@@ -202,6 +250,18 @@ export default function ChatPage() {
     }
   }
 
+  /** Admin troca de profile: começa uma conversa nova com ele (a sessão atual mantém o seu). */
+  async function switchProfile(profile: string) {
+    if (!profile || profile === active?.profile) return
+    setError(null)
+    setSelectedProfile(profile)
+    try {
+      await createChat(profile)
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
   async function sendMessage(text: string) {
     const trimmed = text.trim()
     if (!trimmed || sending) return
@@ -209,6 +269,8 @@ export default function ChatPage() {
     setError(null)
     setSending(true)
     setStreamText('')
+    setThinking('')
+    setLiveTools([])
 
     try {
       let id = activeIdRef.current
@@ -222,12 +284,43 @@ export default function ChatPage() {
       await streamTurn(
         id,
         trimmed,
-        (chunk) => setStreamText((prev) => prev + chunk),
-        () => setStreamText(''),
+        (event, payload) => {
+          if (event === 'assistant.delta' && typeof payload.delta === 'string') {
+            setStreamText((prev) => prev + (payload.delta as string))
+          } else if (event === 'tool.progress' && payload.tool_name === '_thinking') {
+            setThinking((prev) => prev + String(payload.delta || ''))
+          } else if (event === 'tool.started') {
+            const name = String(payload.tool_name || 'tool')
+            setLiveTools((prev) => [
+              ...prev,
+              { name, status: 'running', preview: typeof payload.preview === 'string' ? payload.preview : '' },
+            ])
+          } else if (event === 'tool.completed' || event === 'tool.failed') {
+            const name = String(payload.tool_name || 'tool')
+            const status: LiveTool['status'] = event === 'tool.failed' ? 'failed' : 'done'
+            setLiveTools((prev) => {
+              const next = [...prev]
+              for (let i = next.length - 1; i >= 0; i--) {
+                if (next[i].name === name && next[i].status === 'running') {
+                  next[i] = {
+                    ...next[i],
+                    status,
+                    preview: typeof payload.preview === 'string' ? payload.preview : next[i].preview,
+                  }
+                  return next
+                }
+              }
+              next.push({ name, status, preview: typeof payload.preview === 'string' ? payload.preview : '' })
+              return next
+            })
+          }
+        },
         controller.signal,
       )
       await loadMessages(id)
       setStreamText('')
+      setThinking('')
+      setLiveTools([])
       await loadSessions()
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
@@ -465,10 +558,30 @@ export default function ChatPage() {
             </button>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-text-primary">{active?.title || 'Chat'}</p>
-              <p className="truncate text-[11px] text-text-tertiary">
-                {user?.username || 'user'}
-                {active?.profile ? ' · ' + active.profile : ''}
-              </p>
+              <div className="flex items-center gap-2 text-[11px] text-text-tertiary">
+                <span className="truncate">{user?.username || 'user'}</span>
+                {user?.role === 'admin' ? (
+                  <select
+                    value={active?.profile || selectedProfile}
+                    onChange={(e) => void switchProfile(e.target.value)}
+                    disabled={sending}
+                    title="Profile for new chats"
+                    aria-label="Profile for new chats"
+                    className="max-w-[180px] rounded border border-border bg-bg-base px-1.5 py-0.5 text-[11px] text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent"
+                  >
+                    {(profiles.length
+                      ? profiles
+                      : [{ id: active?.profile || selectedProfile, name: active?.profile || selectedProfile }]
+                    ).map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : active?.profile ? (
+                  <span className="truncate">· {active.profile}</span>
+                ) : null}
+              </div>
             </div>
           </header>
 
@@ -518,9 +631,34 @@ export default function ChatPage() {
                       {mine ? (
                         <span className="whitespace-pre-wrap">{m.content}</span>
                       ) : (
-                        <div className="prose-invert max-w-full">
-                          <MarkdownRenderer content={m.content || '…'} />
-                        </div>
+                        <>
+                          {m.reasoning_content && (
+                            <details className="mb-2 rounded-lg border border-border/60 px-2 py-1 text-xs text-text-tertiary">
+                              <summary className="cursor-pointer">Thinking</summary>
+                              <pre className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap break-words">
+                                {m.reasoning_content}
+                              </pre>
+                            </details>
+                          )}
+                          {m.tool_calls && m.tool_calls.length > 0 && (
+                            <div className="mb-2 flex flex-wrap gap-1">
+                              {m.tool_calls.map((tc, k) => (
+                                <details
+                                  key={k}
+                                  className="rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-text-tertiary"
+                                >
+                                  <summary className="cursor-pointer">🔧 {toolCallName(tc)}</summary>
+                                  <pre className="mt-1 max-h-40 max-w-[420px] overflow-auto whitespace-pre-wrap break-words">
+                                    {toolCallArgs(tc)}
+                                  </pre>
+                                </details>
+                              ))}
+                            </div>
+                          )}
+                          <div className="prose-invert max-w-full">
+                            <MarkdownRenderer content={m.content || '…'} />
+                          </div>
+                        </>
                       )}
                     </div>
                   </div>
@@ -529,13 +667,35 @@ export default function ChatPage() {
               {sending && (
                 <div className="flex justify-start">
                   <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-bg-elevated px-4 py-2.5 text-sm text-text-primary">
+                    {thinking && (
+                      <details open className="mb-2 rounded-lg border border-border/60 px-2 py-1 text-xs text-text-tertiary">
+                        <summary className="cursor-pointer">Thinking…</summary>
+                        <pre className="mt-1 max-h-56 overflow-y-auto whitespace-pre-wrap break-words">{thinking}</pre>
+                      </details>
+                    )}
+                    {liveTools.length > 0 && (
+                      <div className="mb-2 flex flex-col gap-1">
+                        {liveTools.map((t, k) => (
+                          <div
+                            key={k}
+                            className="flex items-center gap-2 rounded-md border border-border/60 px-2 py-0.5 text-[11px] text-text-tertiary"
+                          >
+                            <span>{t.status === 'running' ? '⏳' : t.status === 'failed' ? '⚠️' : '✓'}</span>
+                            <span className="font-medium">{t.name}</span>
+                            {t.preview && <span className="truncate opacity-70">{t.preview}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {streamText ? (
                       <div className="prose-invert max-w-full">
                         <MarkdownRenderer content={streamText} />
                         <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-accent align-middle" />
                       </div>
                     ) : (
-                      <span className="text-text-tertiary">Thinking…</span>
+                      <span className="text-text-tertiary">
+                        {thinking || liveTools.length ? 'Working…' : 'Thinking…'}
+                      </span>
                     )}
                   </div>
                 </div>

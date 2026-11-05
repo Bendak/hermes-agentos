@@ -29,6 +29,7 @@ from backend.auth import (
     list_all_users,
     update_user_password,
     delete_user,
+    set_user_chat_profile,
 )
 
 app = FastAPI(title="AgentOS", version="0.1.0")
@@ -791,6 +792,29 @@ async def change_own_password(body: dict, user: dict = Depends(require_auth)):
         raise HTTPException(status_code=403, detail="Current password is incorrect")
     update_user_password(user["user_id"], new_password)
     return {"message": "Password updated successfully"}
+
+
+@app.put("/api/auth/users/{target_user_id}/profile")
+async def admin_set_chat_profile(target_user_id: int, body: dict, user: dict = Depends(require_admin)):
+    """Admin: mapeia o profile de chat do usuário (NULL = mapa legado).
+
+    O profile é o que define identidade + memória no Hermes; usuário comum
+    nunca escolhe o próprio — só usa o que o admin definiu aqui.
+    """
+    from backend.profile_discovery import discover_profile_ids
+
+    raw = body.get("chat_profile")
+    if raw is not None and not isinstance(raw, str):
+        raise HTTPException(status_code=400, detail="chat_profile must be a string or null")
+    profile = (raw or "").strip().lower()
+    if profile:
+        allowed = {p.lower() for p in discover_profile_ids(include_default=True)}
+        if profile not in allowed:
+            raise HTTPException(status_code=400, detail="profile not found")
+    if not set_user_chat_profile(target_user_id, profile or None):
+        raise HTTPException(status_code=404, detail="User not found")
+    row = next((u for u in list_all_users() if u["id"] == target_user_id), None)
+    return row or {"id": target_user_id, "chat_profile": profile or None}
 
 
 @app.put("/api/auth/users/{target_user_id}/password")
