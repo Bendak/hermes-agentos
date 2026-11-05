@@ -279,7 +279,7 @@ def _can_read_session(detail: dict, user: dict) -> bool:
 
 @app.get("/api/sessions")
 async def sessions_list(
-    user: dict = Depends(require_auth),
+    user: dict = Depends(require_admin),
     limit: int = Query(default=50, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     search: str | None = Query(default=None),
@@ -298,7 +298,7 @@ async def sessions_list(
 
 @app.get("/api/sessions/search")
 async def sessions_search(
-    user: dict = Depends(require_auth),
+    user: dict = Depends(require_admin),
     q: str = Query(min_length=1),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[dict]:
@@ -311,7 +311,7 @@ async def sessions_search(
 
 
 @app.get("/api/sessions/{session_id}")
-async def sessions_detail(session_id: str, user: dict = Depends(require_auth)) -> dict:
+async def sessions_detail(session_id: str, user: dict = Depends(require_admin)) -> dict:
     detail = await get_session(session_id)
     if detail is None or not _can_read_session(detail, user):
         # 404 para não confirmar a existência de sessão de outra pessoa
@@ -322,7 +322,7 @@ async def sessions_detail(session_id: str, user: dict = Depends(require_auth)) -
 @app.get("/api/sessions/{session_id}/messages")
 async def session_messages(
     session_id: str,
-    user: dict = Depends(require_auth),
+    user: dict = Depends(require_admin),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
 ) -> dict:
