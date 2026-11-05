@@ -17,26 +17,55 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
+import logging
+
 from backend import chat_sessions
 from backend.auth import require_auth
 from backend.config import settings
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 HERMES_API_URL = settings.HERMES_API_URL or "http://localhost:8642"
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 DEFAULT_GROQ_MODEL = "whisper-large-v3-turbo"
 
 
-def _hermes_api_key() -> str:
-    """API server key: explicit setting, Hermes .env on disk, then container env.
+def _profiles_dir() -> str:
+    return os.environ.get("AGENTOS_PROFILES_DIR") or os.path.join(settings.AGENTOS_DATA_DIR, "profiles")
 
-    The gateway validates Bearer tokens against API_SERVER_KEY resolved from
-    /opt/data/.env (which Hermes may regenerate on updates), so the on-disk
-    .env is the source of truth. The container environment (docker-compose)
-    can go stale after Hermes regenerates the key — it is only a last-resort
-    fallback (avoids the "Invalid gateway API key (API_SERVER_KEY)" 401).
+
+def _read_env_var(path: str, name: str) -> str:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if line.startswith("export "):
+                    line = line[len("export "):].lstrip()
+                if line.startswith(name + "="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def _hermes_api_key(profile: str = "default") -> str:
+    """API server key for the profile that will answer this session.
+
+    The gateway resolves API_SERVER_KEY *inside the profile scope* for
+    `/p/<profile>/` and fails closed when the profile has none, so a single
+    root key can never authenticate a family profile. Never fall back to the
+    root key for a named profile — that would silently downgrade to 401.
     """
+    if profile and profile != "default":
+        key = _read_env_var(os.path.join(_profiles_dir(), profile, ".env"), "API_SERVER_KEY")
+        if key:
+            return key
+        raise HTTPException(
+            status_code=500,
+            detail=f"profile '{profile}' has no API_SERVER_KEY configured",
+        )
+
     key = settings.HERMES_API_KEY
     if not key:
         # Primary: parse the Hermes .env on disk (same container, /opt/data/.env)
@@ -153,16 +182,36 @@ async def chat(
 
 # ── Sessões (Lote 1 — chat da família) ───────────────────────────────────────
 
+_PROFILE_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+
+
+def _validate_profile(profile: str) -> str:
+    """A profile name we are willing to put in a URL path.
+
+    Two gates: a strict charset (`.` and `/` never survive, so the request
+    cannot escape the `/p/<profile>/` namespace) and the profile home must
+    exist under the profiles dir (no ghost routing).
+    """
+    if not profile or profile == "default":
+        return "default"
+    if not _PROFILE_RE.fullmatch(profile):
+        raise HTTPException(status_code=400, detail="profile inválido")
+    if not os.path.isdir(os.path.join(_profiles_dir(), profile)):
+        raise HTTPException(status_code=400, detail="profile inexistente")
+    return profile
+
+
 def _gateway_base(profile: str) -> str:
     """Profile-routed gateway root (`/p/<profile>`), default keeps the bare root."""
-    if profile and profile != "default":
+    profile = _validate_profile(profile)
+    if profile != "default":
         return f"{HERMES_API_URL}/p/{profile}"
     return HERMES_API_URL
 
 
-def _gateway_headers() -> dict:
+def _gateway_headers(profile: str = "default") -> dict:
     return {
-        "Authorization": f"Bearer {_hermes_api_key()}",
+        "Authorization": f"Bearer {_hermes_api_key(profile)}",
         "Content-Type": "application/json",
     }
 
@@ -176,30 +225,40 @@ async def _create_remote_session(profile: str, session_id: str, title: str | Non
     payload = {"id": session_id, "source": "api_server"}
     if title:
         payload["title"] = title
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-        r = await client.post(
-            f"{_gateway_base(profile)}/api/sessions",
-            headers=_gateway_headers(),
-            json=payload,
-        )
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+            r = await client.post(
+                f"{_gateway_base(profile)}/api/sessions",
+                headers=_gateway_headers(profile),
+                json=payload,
+            )
+    except httpx.HTTPError as exc:
+        # Transport faults (refused, timeout, DNS) are not HTTPException: they
+        # used to escape as a 500 and leave a ghost row listed.
+        raise HTTPException(status_code=502, detail=f"gateway indisponível: {type(exc).__name__}")
     if r.status_code not in (200, 201):
         raise HTTPException(
             status_code=502,
-            detail=f"Hermes session create failed {r.status_code}: {r.text[:300]}",
+            detail=f"Hermes session create failed ({r.status_code})",
         )
 
 
 async def _remote_messages(profile: str, session_id: str, limit: int, offset: int) -> dict:
-    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-        r = await client.get(
-            f"{_gateway_base(profile)}/api/sessions/{session_id}/messages",
-            headers=_gateway_headers(),
-            params={"limit": limit, "offset": offset},
-        )
+    # `order=latest`: sending `limit` without it makes the gateway serve the
+    # OLDEST page (default_page = requested_limit is None).
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+            r = await client.get(
+                f"{_gateway_base(profile)}/api/sessions/{session_id}/messages",
+                headers=_gateway_headers(profile),
+                params={"limit": limit, "offset": offset, "order": "latest"},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"gateway indisponível: {type(exc).__name__}")
     if r.status_code == 404:
         raise HTTPException(status_code=404, detail="Sessão não existe no Hermes")
     if r.status_code != 200:
-        raise HTTPException(status_code=502, detail=f"Hermes messages failed {r.status_code}: {r.text[:300]}")
+        raise HTTPException(status_code=502, detail=f"Hermes messages failed ({r.status_code})")
     data = r.json()
     out = []
     for m in data.get("data") or []:
@@ -215,6 +274,34 @@ async def _remote_messages(profile: str, session_id: str, limit: int, offset: in
     return {"data": out, "pagination": data.get("pagination") or {}}
 
 
+async def _patch_remote_session(row: dict, *, archived: bool | None = None,
+                                 title: str | None = None) -> None:
+    """Espelha metadados no gateway (archived/title). Best-effort.
+
+    A verdade para bloquear turnos é o estado local (stream responde 409 em
+    sessão arquivada), então uma falha aqui não derruba a operação — mas o
+    rename/archive no dashboard do Hermes fica consistente quando dá.
+    """
+    body: dict = {}
+    if archived is not None:
+        body["archived"] = archived
+    if title is not None:
+        body["title"] = title
+    if not body:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0)) as client:
+            r = await client.patch(
+                f"{_gateway_base(row['profile'])}/api/sessions/{row['hermes_id']}",
+                headers=_gateway_headers(row["profile"]),
+                json=body,
+            )
+        if r.status_code not in (200, 404):
+            logger.warning("gateway PATCH %s falhou (%s)", row["hermes_id"], r.status_code)
+    except (httpx.HTTPError, HTTPException) as exc:
+        logger.warning("gateway PATCH %s indisponível: %s", row["hermes_id"], type(exc).__name__)
+
+
 def _owned_or_404(session_id: str, user: dict) -> dict:
     row = chat_sessions.get_owned(session_id, user["user_id"])
     if row is None:
@@ -226,9 +313,17 @@ def _owned_or_404(session_id: str, user: dict) -> dict:
 @router.get("/api/chat/sessions")
 async def list_chat_sessions(
     include_archived: bool = False,
+    all: bool = False,
     user: dict = Depends(require_auth),
 ):
     chat_sessions.init_db()
+    if all:
+        # Suporte: admin vê todas, com o dono explícito (auditável no log).
+        if user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Admin access required")
+        rows = chat_sessions.list_all(include_archived=include_archived)
+        data = [{**chat_sessions.public(r), "user_id": r["user_id"]} for r in rows]
+        return {"data": data}
     rows = chat_sessions.list_for_user(user["user_id"], include_archived=include_archived)
     return {"data": [chat_sessions.public(r) for r in rows]}
 
@@ -236,10 +331,18 @@ async def list_chat_sessions(
 @router.post("/api/chat/sessions")
 async def create_chat_session(body: dict, user: dict = Depends(require_auth)):
     chat_sessions.init_db()
-    # O perfil vem do usuário logado; admin pode pedir outro (teste/suporte).
-    profile = chat_sessions.profile_for(user["username"])
+    # Perfil vem do usuário logado; usuário sem mapeamento NÃO tem chat (403).
+    try:
+        profile = chat_sessions.profile_for(user["username"])
+    except chat_sessions.ProfileConfigError:
+        raise HTTPException(status_code=503, detail="mapeamento de profiles inválido no servidor")
+    if profile is None:
+        raise HTTPException(status_code=403, detail="Chat não habilitado para este usuário")
+    # Admin pode pedir outro profile (teste/suporte), validado contra a lista real.
     if user.get("role") == "admin" and isinstance(body.get("profile"), str) and body["profile"].strip():
-        profile = body["profile"].strip()
+        profile = _validate_profile(body["profile"].strip())
+    else:
+        profile = _validate_profile(profile)
     title = body.get("title")
     if title is not None and not isinstance(title, str):
         raise HTTPException(status_code=400, detail="title must be a string")
@@ -255,24 +358,36 @@ async def create_chat_session(body: dict, user: dict = Depends(require_auth)):
 
 @router.patch("/api/chat/sessions/{session_id}")
 async def patch_chat_session(session_id: str, body: dict, user: dict = Depends(require_auth)):
-    _owned_or_404(session_id, user)
+    row = _owned_or_404(session_id, user)
     if "title" in body:
-        if chat_sessions.rename(session_id, user["user_id"], str(body["title"])) is None:
+        if not isinstance(body["title"], str):
+            raise HTTPException(status_code=400, detail="title must be a string")
+        updated_row = chat_sessions.rename(session_id, user["user_id"], body["title"])
+        if updated_row is None:
             raise HTTPException(status_code=400, detail="Título vazio")
+        await _patch_remote_session(row, title=updated_row["title"])
     if "archived" in body:
-        chat_sessions.set_archived(session_id, user["user_id"], bool(body["archived"]))
-    row = chat_sessions.get_owned(session_id, user["user_id"])
-    assert row is not None
-    return chat_sessions.public(row)
+        if not isinstance(body["archived"], bool):
+            raise HTTPException(status_code=400, detail="archived must be a boolean")
+        chat_sessions.set_archived(session_id, user["user_id"], body["archived"])
+        await _patch_remote_session(row, archived=body["archived"])
+    updated = chat_sessions.get_owned(session_id, user["user_id"])
+    assert updated is not None
+    return chat_sessions.public(updated)
 
 
 @router.delete("/api/chat/sessions/{session_id}")
 async def delete_chat_session(session_id: str, user: dict = Depends(require_auth)):
-    """Arquiva (soft delete) — o transcript continua no gateway."""
-    _owned_or_404(session_id, user)
-    row = chat_sessions.set_archived(session_id, user["user_id"], True)
-    assert row is not None
-    return chat_sessions.public(row)
+    """Arquiva (soft delete): local e no gateway (best-effort).
+
+    Local primeiro: mesmo que o gateway esteja fora, a sessão para de aceitar
+    turnos (o stream responde 409 para arquivadas).
+    """
+    row = _owned_or_404(session_id, user)
+    updated = chat_sessions.set_archived(session_id, user["user_id"], True)
+    assert updated is not None
+    await _patch_remote_session(row, archived=True)
+    return chat_sessions.public(updated)
 
 
 @router.get("/api/chat/sessions/{session_id}/messages")
@@ -292,17 +407,23 @@ async def chat_session_messages(
 async def chat_session_stream(session_id: str, body: dict, user: dict = Depends(require_auth)):
     """Turno SSE na sessão: identidade do JWT + author para a memória."""
     row = _owned_or_404(session_id, user)
+    if row["archived"]:
+        raise HTTPException(status_code=409, detail="Sessão arquivada")
     message = body.get("message") or body.get("input")
     if not isinstance(message, str) or not message.strip():
         raise HTTPException(status_code=400, detail="Mensagem vazia")
 
-    chat_sessions.touch(session_id, title=chat_sessions.title_from_message(message))
-
     payload = {
         "message": message,
         "author": {"id": user["username"], "name": user["username"]},
+        # Camada 1.5 do plano: o agente sabe com quem fala, sem depender do
+        # `author` (que o pin de peer descarta para a memória).
+        "system_message": (
+            f"Você fala com {user['username']} (perfil {row['profile']}). "
+            "Trate essa pessoa como a usuária desta conversa."
+        ),
     }
-    headers = _gateway_headers()
+    headers = _gateway_headers(row["profile"])
     headers["X-Hermes-Session-Key"] = row["session_key"]
 
     client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
@@ -315,12 +436,17 @@ async def chat_session_stream(session_id: str, body: dict, user: dict = Depends(
         )
         resp = await client.send(req, stream=True)
         if resp.status_code != 200:
-            detail = (await resp.aread()).decode("utf-8", "replace")
+            await resp.aread()
             await client.aclose()
+            # Nunca repassar 401/403 do gateway como se fosse sessão expirada
+            # do AgentOS (o cliente deslogaria), nem vazar corpo upstream.
+            mapped = 404 if resp.status_code == 404 else 502
             raise HTTPException(
-                status_code=resp.status_code,
-                detail=f"Hermes stream error {resp.status_code}: {detail[:400]}",
+                status_code=mapped,
+                detail=f"Falha ao executar o turno no Hermes ({resp.status_code})",
             )
+        # Só depois de o gateway aceitar o turno: semear título e bump updated_at.
+        chat_sessions.touch(session_id, title=chat_sessions.title_from_message(message))
 
         async def sse_gen():
             # Passthrough CRU: o gateway emite eventos SSE completos
