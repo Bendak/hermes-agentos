@@ -7,6 +7,7 @@ The AgentOS process runs in the SAME container as the Hermes gateway, so
 it talks to the API server over localhost. API_SERVER_KEY is injected by
 the Hermes docker-compose environment.
 """
+import asyncio
 import json
 import os
 import re
@@ -176,13 +177,38 @@ async def chat(
         raise
     except Exception as exc:
         await client.aclose()
-        raise HTTPException(status_code=502, detail=f"Hermes API unreachable: {exc}")
+        raise HTTPException(status_code=502, detail="Hermes API unreachable")
 
 
 
 # ── Sessões (Lote 1 — chat da família) ───────────────────────────────────────
 
 _PROFILE_RE = re.compile(r"^[a-z0-9_]{1,64}$")
+_SAFE_NAME_RE = re.compile(r"[^A-Za-z0-9_.-]")
+
+_turn_locks: dict[str, "asyncio.Lock"] = {}
+_turn_locks_guard: "asyncio.Lock | None" = None
+
+
+def _safe_username(name: str) -> str:
+    return _SAFE_NAME_RE.sub("_", (name or ""))[:32] or "usuário"
+
+
+def _lock_guard() -> "asyncio.Lock":
+    global _turn_locks_guard
+    if _turn_locks_guard is None:
+        _turn_locks_guard = asyncio.Lock()
+    return _turn_locks_guard
+
+
+async def _acquire_turn_lock(session_id: str) -> "asyncio.Lock":
+    """Uma sessão = um turno por vez (o gateway aceitaria dois em paralelo)."""
+    async with _lock_guard():
+        lock = _turn_locks.setdefault(session_id, asyncio.Lock())
+    if lock.locked():
+        raise HTTPException(status_code=409, detail="Turno já em andamento nesta sessão")
+    await lock.acquire()
+    return lock
 
 
 def _validate_profile(profile: str) -> str:
@@ -331,17 +357,19 @@ async def list_chat_sessions(
 @router.post("/api/chat/sessions")
 async def create_chat_session(body: dict, user: dict = Depends(require_auth)):
     chat_sessions.init_db()
-    # Perfil vem do usuário logado; usuário sem mapeamento NÃO tem chat (403).
-    try:
-        profile = chat_sessions.profile_for(user["username"])
-    except chat_sessions.ProfileConfigError:
-        raise HTTPException(status_code=503, detail="mapeamento de profiles inválido no servidor")
-    if profile is None:
-        raise HTTPException(status_code=403, detail="Chat não habilitado para este usuário")
-    # Admin pode pedir outro profile (teste/suporte), validado contra a lista real.
-    if user.get("role") == "admin" and isinstance(body.get("profile"), str) and body["profile"].strip():
-        profile = _validate_profile(body["profile"].strip())
+    # Admin pode escolher o profile explicitamente (teste/suporte) — inclusive
+    # uma conta admin fora do mapa. A validação (charset + diretório) continua.
+    requested = body.get("profile")
+    if user.get("role") == "admin" and isinstance(requested, str) and requested.strip():
+        profile = _validate_profile(requested.strip())
     else:
+        # Perfil vem do usuário logado; sem mapeamento NÃO tem chat (403).
+        try:
+            profile = chat_sessions.profile_for(user["username"])
+        except chat_sessions.ProfileConfigError:
+            raise HTTPException(status_code=503, detail="mapeamento de profiles inválido no servidor")
+        if profile is None:
+            raise HTTPException(status_code=403, detail="Chat não habilitado para este usuário")
         profile = _validate_profile(profile)
     title = body.get("title")
     if title is not None and not isinstance(title, str):
@@ -349,7 +377,9 @@ async def create_chat_session(body: dict, user: dict = Depends(require_auth)):
 
     row = chat_sessions.create(user["user_id"], profile, title=title)
     try:
-        await _create_remote_session(profile, row["hermes_id"], title)
+        # O título já foi limpo/capado em 100 por chat_sessions.create; mandar o
+        # valor cru fazia o gateway rejeitar (>100) e a sessão nascer arquivada.
+        await _create_remote_session(profile, row["hermes_id"], row["title"])
     except HTTPException:
         chat_sessions.set_archived(row["id"], user["user_id"], True)  # não deixa sessão órfã na lista
         raise
@@ -418,14 +448,17 @@ async def chat_session_stream(session_id: str, body: dict, user: dict = Depends(
         "author": {"id": user["username"], "name": user["username"]},
         # Camada 1.5 do plano: o agente sabe com quem fala, sem depender do
         # `author` (que o pin de peer descarta para a memória).
+        # Nome vai para a camada de SISTEMA: qualquer coisa fora do vocabulário
+        # seguro vira "_" (um username malicioso não injeta instrução).
         "system_message": (
-            f"Você fala com {user['username']} (perfil {row['profile']}). "
+            f"Você fala com {_safe_username(user['username'])} (perfil {row['profile']}). "
             "Trate essa pessoa como a usuária desta conversa."
         ),
     }
     headers = _gateway_headers(row["profile"])
     headers["X-Hermes-Session-Key"] = row["session_key"]
 
+    turn_lock = await _acquire_turn_lock(session_id)
     client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
     try:
         req = client.build_request(
@@ -445,6 +478,7 @@ async def chat_session_stream(session_id: str, body: dict, user: dict = Depends(
                 status_code=mapped,
                 detail=f"Falha ao executar o turno no Hermes ({resp.status_code})",
             )
+            turn_lock.release()
         # Só depois de o gateway aceitar o turno: semear título e bump updated_at.
         chat_sessions.touch(session_id, title=chat_sessions.title_from_message(message))
 
@@ -459,6 +493,8 @@ async def chat_session_stream(session_id: str, body: dict, user: dict = Depends(
             finally:
                 await resp.aclose()
                 await client.aclose()
+                if turn_lock.locked():
+                    turn_lock.release()
 
         return StreamingResponse(
             sse_gen(),
@@ -470,10 +506,14 @@ async def chat_session_stream(session_id: str, body: dict, user: dict = Depends(
             },
         )
     except HTTPException:
+        if turn_lock.locked():
+            turn_lock.release()
         raise
-    except Exception as exc:
+    except Exception:
         await client.aclose()
-        raise HTTPException(status_code=502, detail=f"Hermes API unreachable: {exc}")
+        if turn_lock.locked():
+            turn_lock.release()
+        raise HTTPException(status_code=502, detail="Hermes API unreachable")
 
 
 @router.post("/api/voice")
