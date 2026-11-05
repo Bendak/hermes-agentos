@@ -8,6 +8,7 @@ interface UserRecord {
   username: string
   role: string
   created_at: string
+  chat_profile?: string | null
 }
 
 function getAuthHeaders(): Record<string, string> {
@@ -34,6 +35,37 @@ export default function UserManagement() {
   })
 
   const users = usersData?.users ?? []
+
+  // Profiles disponíveis para mapear o chat (default + subprofiles).
+  const { data: profileOptions } = useQuery({
+    queryKey: ['chat-profile-options'],
+    queryFn: async () => {
+      const res = await fetch('/api/profiles', { headers: getAuthHeaders() })
+      if (!res.ok) return [{ id: 'default', name: 'default' }]
+      const rows = (await res.json()) as { id?: string; name?: string }[]
+      const opts = [{ id: 'default', name: 'default' }].concat(
+        rows.map((r) => ({ id: String(r.id || r.name || ''), name: String(r.name || r.id || '') })),
+      )
+      return opts.filter((o) => o.id)
+    },
+    enabled: isAdmin,
+  })
+
+  const profileMutation = useMutation({
+    mutationFn: async ({ userId, profile }: { userId: number; profile: string | null }) => {
+      const res = await fetch(`/api/auth/users/${userId}/profile`, {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ chat_profile: profile }),
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: 'Failed to update chat profile' }))
+        throw new Error(err.detail || 'Failed to update chat profile')
+      }
+      return res.json()
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] }),
+  })
 
   // ── Dialog state ────────────────────────────────────────────────
   const [changePwTarget, setChangePwTarget] = useState<UserRecord | null>(null)
@@ -108,15 +140,16 @@ export default function UserManagement() {
             <tr className="border-b border-border bg-bg-elevated/50">
               <th className="text-left px-4 py-3 text-text-tertiary font-medium text-xs uppercase tracking-wider">Username</th>
               <th className="text-left px-4 py-3 text-text-tertiary font-medium text-xs uppercase tracking-wider">Role</th>
+              <th className="text-left px-4 py-3 text-text-tertiary font-medium text-xs uppercase tracking-wider">Chat profile</th>
               <th className="text-left px-4 py-3 text-text-tertiary font-medium text-xs uppercase tracking-wider">Created</th>
               <th className="text-right px-4 py-3 text-text-tertiary font-medium text-xs uppercase tracking-wider">Actions</th>
             </tr>
           </thead>
           <tbody>
             {isLoading ? (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-text-tertiary">Loading…</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-text-tertiary">Loading…</td></tr>
             ) : users.length === 0 ? (
-              <tr><td colSpan={4} className="px-4 py-8 text-center text-text-tertiary">No users found</td></tr>
+              <tr><td colSpan={5} className="px-4 py-8 text-center text-text-tertiary">No users found</td></tr>
             ) : users.map(u => (
               <tr key={u.id} className="border-b border-border/50 last:border-0 hover:bg-surface/60 transition-colors">
                 <td className="px-4 py-3 text-text-primary font-medium">
@@ -131,6 +164,24 @@ export default function UserManagement() {
                   }`}>
                     {u.role}
                   </span>
+                </td>
+                <td className="px-4 py-3">
+                  <select
+                    value={u.chat_profile || ''}
+                    onChange={(e) =>
+                      profileMutation.mutate({ userId: u.id, profile: e.target.value || null })
+                    }
+                    disabled={profileMutation.isPending}
+                    aria-label={`Chat profile for ${u.username}`}
+                    className="rounded-md border border-border bg-bg-base px-2 py-1 text-xs text-text-secondary focus:outline-none focus:ring-1 focus:ring-accent"
+                  >
+                    <option value="">— none (legacy map) —</option>
+                    {(profileOptions || []).map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td className="px-4 py-3 text-text-tertiary text-xs font-mono">
                   {u.created_at ? new Date(u.created_at).toLocaleDateString() : '-'}

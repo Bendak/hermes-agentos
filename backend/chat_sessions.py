@@ -125,6 +125,25 @@ def profile_for(username: Optional[str]) -> Optional[str]:
     return profile_map().get(name)
 
 
+def profile_for_user(user_id: int, username: Optional[str]) -> Optional[str]:
+    """Profile do chat para ESTE usuário: coluna `users.chat_profile` (admin) > mapa legado.
+
+    O admin define o profile na tela de usuários; NULL/'' cai no mapa
+    AGENTOS_CHAT_PROFILES (default-deny para quem não estiver lá).
+    """
+    try:
+        with _connect() as conn:
+            row = conn.execute(
+                "SELECT chat_profile FROM users WHERE id = ?", (user_id,)
+            ).fetchone()
+            if row is not None and row["chat_profile"]:
+                return str(row["chat_profile"]).strip().lower()
+    except sqlite3.OperationalError:
+        # DB antigo sem a coluna (migração roda no init do app) — usa o mapa
+        pass
+    return profile_for(username)
+
+
 def _new_ids(user_id: int) -> tuple[str, str, str]:
     local = uuid.uuid4().hex
     hermes_id = f"agentos_{local}"

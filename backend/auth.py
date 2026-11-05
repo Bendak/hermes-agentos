@@ -56,6 +56,8 @@ def _init_db() -> None:
         for ddl in (
             "ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 1",
             "ALTER TABLE users ADD COLUMN refresh_jti TEXT",
+            # profile de chat mapeado pelo admin (User config); NULL = usa o mapa legado
+            "ALTER TABLE users ADD COLUMN chat_profile TEXT",
         ):
             try:
                 conn.execute(ddl)
@@ -365,7 +367,7 @@ def list_all_users() -> list[dict]:
     conn = _get_db()
     try:
         rows = conn.execute(
-            "SELECT id, username, role, created_at FROM users ORDER BY id"
+            "SELECT id, username, role, created_at, chat_profile FROM users ORDER BY id"
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -481,3 +483,29 @@ def verify_and_rotate_refresh(token: str) -> tuple[dict, str]:
         "exp": (now + REFRESH_TOKEN_EXPIRY).timestamp(),
     }
     return user, _create_token(new_payload, get_jwt_secret())
+
+
+def set_user_chat_profile(user_id: int, profile: str | None) -> bool:
+    """Admin: define (ou limpa) o profile de chat de um usuário.
+
+    None/'' volta ao mapa legado (AGENTOS_CHAT_PROFILES / default interno).
+    """
+    conn = _get_db()
+    try:
+        cur = conn.execute(
+            "UPDATE users SET chat_profile = ? WHERE id = ?",
+            (profile or None, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        conn.close()
+
+
+def get_user_chat_profile(user_id: int) -> str | None:
+    conn = _get_db()
+    try:
+        row = conn.execute("SELECT chat_profile FROM users WHERE id = ?", (user_id,)).fetchone()
+        return (row["chat_profile"] if row and row["chat_profile"] else None)
+    finally:
+        conn.close()
