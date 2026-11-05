@@ -62,3 +62,7 @@ def hidden_profiles() -> set[str]:
     """
     raw = (settings.HIDDEN_PROFILES or "").strip() or _DEFAULT_HIDDEN
     return {p.strip().lower() for p in raw.split(",") if p.strip()}
+
+
+def is_hidden(profile_id: str | None) -> bool:
+    return bool(profile_id) and profile_id.strip().lower() in hidden_profiles()

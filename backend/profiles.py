@@ -43,7 +43,8 @@ def _ensure_visible(profile_id: str, user: dict) -> None:
     from backend.config import hidden_profiles
 
     if user.get("role") != "admin" and profile_id.lower() in {h.lower() for h in hidden_profiles()}:
-        raise HTTPException(status_code=403, detail="Admin access required")
+        # 404, not 403: don't confirm that a hidden profile exists.
+        raise HTTPException(status_code=404, detail="Profile not found")
 
 
 def _profile_dir(profile_id: str) -> str:
@@ -414,7 +415,7 @@ async def list_profiles(selectable: bool = False, user: dict = Depends(require_a
 
 
 @router.get("/skills-summary")
-async def profile_skills_summary() -> list[dict[str, Any]]:
+async def profile_skills_summary(user: dict = Depends(require_auth)) -> list[dict[str, Any]]:
     """Skills-enabled/disabled counts per profile (skills-hub knowledge).
 
     Lived at GET /api/profiles in main.py but the router shadowed it —
@@ -422,7 +423,14 @@ async def profile_skills_summary() -> list[dict[str, Any]]:
     static path wins the Starlette match. Feeds the future skills-per-profile UI.
     """
     from backend.skills_hub import list_profiles_summary
-    return await list_profiles_summary()
+
+    rows = await list_profiles_summary()
+    if user.get("role") != "admin":
+        from backend.config import is_hidden
+
+        rows = [r for r in rows
+                if not is_hidden(r.get("name") or r.get("id") or r.get("profile"))]
+    return rows
 
 
 @router.get("/{profile_id}")

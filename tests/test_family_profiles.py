@@ -22,10 +22,12 @@ def family_profiles(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTOS_PROFILES_DIR", str(root))
     # profiles.py resolves PROFILES_DIR at import; reload is not needed because
     # the module reads it at import time — patch the module attribute instead.
+    import backend.agents as agents
     import backend.profile_discovery as discovery
     import backend.profiles as profiles
     monkeypatch.setattr(profiles, "PROFILES_DIR", str(root))
     monkeypatch.setattr(discovery, "PROFILES_DIR", str(root))
+    monkeypatch.setattr(agents, "PROFILES_DIR", str(root))
     return root
 
 
@@ -63,8 +65,20 @@ def test_viewer_cannot_read_hidden_profile_content(client, admin_headers, viewer
     assert all(p["id"] != "familia_anna" for p in listed)
 
     # ...nem o detail nem o SOUL
-    assert client.get("/api/profiles/familia_anna", headers=viewer_headers).status_code == 403
-    assert client.get("/api/profiles/familia_anna/soul", headers=viewer_headers).status_code == 403
+    # 404 (não 403): não confirma nem a existência do profile escondido
+    assert client.get("/api/profiles/familia_anna", headers=viewer_headers).status_code == 404
+    assert client.get("/api/profiles/familia_anna/soul", headers=viewer_headers).status_code == 404
+
+    # /api/agents* e skills-summary não podem vazar nome/SOUL/profile
+    agents = client.get("/api/agents", headers=viewer_headers).json()
+    assert all(a["id"] != "familia_anna" for a in agents)
+    assert client.get("/api/agents/familia_anna", headers=viewer_headers).status_code == 404
+    assert client.get("/api/agents/familia_anna/health", headers=viewer_headers).status_code == 404
+    summary = client.get("/api/profiles/skills-summary", headers=viewer_headers).json()
+    assert all("familia_anna" not in str(row) for row in summary)
+
+    # admin vê tudo
+    assert any(a["id"] == "familia_anna" for a in client.get("/api/agents", headers=admin_headers).json())
 
     # admin lê normalmente
     assert client.get("/api/profiles/familia_anna", headers=admin_headers).status_code == 200
