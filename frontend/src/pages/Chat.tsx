@@ -111,44 +111,6 @@ function fmtTs(ts?: string | number): string {
   return `${get('day')}/${get('month')} ${get('hour')}:${get('minute')}`
 }
 
-function ThinkingBlock({ text, live }: { text: string; live?: boolean }) {
-  return (
-    <div className="w-full border-l-2 border-accent/60 pl-3">
-      <p className={'text-[11px] font-semibold uppercase tracking-wider ' + 'text-accent'}>
-        Thinking{live ? '…' : ''}
-      </p>
-      <p className="mt-1 max-h-72 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-relaxed text-text-secondary">
-        {text}
-      </p>
-    </div>
-  )
-}
-
-function ToolBar({ tool }: { tool: RenderTool }) {
-  const hasBody = Boolean(tool.args || tool.output)
-  return (
-    <details className="w-full rounded-lg border border-border bg-bg-elevated/60">
-      <summary className="flex cursor-pointer items-center gap-2 px-3 py-2 text-xs text-text-secondary">
-        <span className="text-[10px] uppercase tracking-wider text-text-tertiary">Tool</span>
-        <span className="font-medium">{tool.name}</span>
-        {!hasBody && <span className="ml-auto text-text-tertiary">·</span>}
-      </summary>
-      <div className="space-y-2 px-3 pb-3">
-        {tool.args && (
-          <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-base/60 p-2 text-[11px] text-text-tertiary">
-            {tool.args}
-          </pre>
-        )}
-        {tool.output && (
-          <pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded bg-bg-base/60 p-2 text-[11px] text-text-secondary">
-            {tool.output.slice(0, 6000)}
-          </pre>
-        )}
-      </div>
-    </details>
-  )
-}
-
 function authHeaders(json = false): Record<string, string> {
   const token = localStorage.getItem('agentos_access_token')
   const h: Record<string, string> = {}
@@ -210,6 +172,65 @@ async function streamTurn(
       }
     }
   }
+}
+
+function ThinkingBlock({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div className="mb-1 w-full min-w-0">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-label={expanded ? 'Hide reasoning' : 'Show reasoning'}
+        className="text-caption text-text-tertiary italic transition hover:text-text-secondary"
+      >
+        {expanded ? 'Hide thinking…' : 'Thinking…'}
+      </button>
+      {expanded && (
+        <div className="mt-1 max-h-80 w-full min-w-0 overflow-y-auto rounded-lg border border-border bg-bg-base/40 p-2 text-caption italic text-text-tertiary whitespace-pre-wrap">
+          <div className="w-full min-w-0" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+            <MarkdownRenderer content={text} />
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolBar({ tool }: { tool: RenderTool }) {
+  const [expanded, setExpanded] = useState(false)
+  const body = [tool.args ? 'ARGS\n' + tool.args : '', tool.output ? 'OUTPUT\n' + tool.output : '']
+    .filter(Boolean)
+    .join('\n\n')
+  return (
+    <div className="my-2 w-full min-w-0 overflow-hidden rounded-lg border border-border bg-bg-elevated font-mono">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+        aria-label={expanded ? `Collapse ${tool.name} output` : `Expand ${tool.name} output`}
+        className="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-mono-sm text-text-secondary transition hover:bg-surface-hover/40"
+      >
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="inline-block shrink-0 rounded bg-surface px-1.5 py-0.5 text-overline uppercase">Tool</span>
+          <span className="truncate text-mono-sm text-text-secondary">{tool.name || 'unknown'}</span>
+        </span>
+        <span
+          className="shrink-0 text-text-tertiary transition-transform duration-200"
+          style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+          aria-hidden="true"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </span>
+      </button>
+      {expanded && (
+        <div className="max-h-96 w-full min-w-0 overflow-y-auto overflow-x-hidden border-t border-border px-3 py-2" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+          <pre className="whitespace-pre-wrap break-words text-[11px] text-text-tertiary">{body || '—'}</pre>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function ChatPage() {
@@ -718,11 +739,11 @@ export default function ChatPage() {
                 if (item.role === 'user') {
                   return (
                     <div key={i} className="flex flex-col items-end gap-1">
-                      <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-accent px-4 py-2.5 text-sm leading-relaxed text-white">
+                      <div className="w-full max-w-[80%] rounded-2xl rounded-br-sm bg-accent-subtle px-4 py-2.5 text-sm leading-relaxed text-accent">
                         <span className="whitespace-pre-wrap">{item.content}</span>
                       </div>
                       {fmtTs(item.ts) && (
-                        <span className="pr-1 text-[10px] text-text-tertiary">{fmtTs(item.ts)}</span>
+                        <span className="mt-1 text-caption text-text-tertiary">{fmtTs(item.ts)}</span>
                       )}
                     </div>
                   )
@@ -730,14 +751,14 @@ export default function ChatPage() {
                 return (
                   <div key={i} className="flex w-full flex-col items-start gap-2">
                     {fmtTs(item.ts) && (
-                      <span className="pl-1 text-[10px] text-text-tertiary">{fmtTs(item.ts)}</span>
+                      <span className="text-caption text-text-tertiary">{fmtTs(item.ts)}</span>
                     )}
                     {item.reasoning && <ThinkingBlock text={item.reasoning} />}
                     {item.tools.map((t, k) => (
                       <ToolBar key={k} tool={t} />
                     ))}
                     {item.content && (
-                      <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-bg-elevated px-4 py-2.5 text-sm leading-relaxed text-text-primary">
+                      <div className="w-full max-w-[80%] rounded-2xl rounded-bl-sm bg-surface/60 px-4 py-2.5 text-sm leading-relaxed text-text-primary">
                         <div className="prose-invert max-w-full">
                           <MarkdownRenderer content={item.content} />
                         </div>
@@ -748,8 +769,8 @@ export default function ChatPage() {
               })}
               {sending && (
                 <div className="flex w-full flex-col items-start gap-2">
-                  <span className="pl-1 text-[10px] text-text-tertiary">{fmtTs(Date.now() / 1000)}</span>
-                  {thinking && <ThinkingBlock text={thinking} live />}
+                  <span className="text-caption text-text-tertiary">{fmtTs(Date.now() / 1000)}</span>
+                  {thinking && <ThinkingBlock text={thinking} />}
                   {liveTools.map((t, k) => (
                     <div
                       key={k}
@@ -764,7 +785,7 @@ export default function ChatPage() {
                     </div>
                   ))}
                   {streamText ? (
-                    <div className="max-w-[85%] rounded-2xl rounded-bl-sm border border-border bg-bg-elevated px-4 py-2.5 text-sm leading-relaxed text-text-primary">
+                    <div className="w-full max-w-[80%] rounded-2xl rounded-bl-sm bg-surface/60 px-4 py-2.5 text-sm leading-relaxed text-text-primary">
                       <div className="prose-invert max-w-full">
                         <MarkdownRenderer content={streamText} />
                         <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-accent align-middle" />
