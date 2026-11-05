@@ -10,6 +10,8 @@ the Hermes docker-compose environment.
 import asyncio
 import json
 import os
+import secrets
+import time
 import re
 from typing import List, Optional
 
@@ -211,6 +213,39 @@ async def _acquire_turn_lock(session_id: str) -> "asyncio.Lock":
     return lock
 
 
+def _ensure_profile_key(profile: str) -> None:
+    """Admin abriu conversa num profile sem API_SERVER_KEY: provisiona uma.
+
+    O adaptador `/p/<profile>/` valida a chave NO ESCOPO do profile e falha
+    fechado. Sem isso, qualquer profile sem `.env` próprio responde 401/500 e
+    o dropdown do admin só funcionaria para os três que já tinham chave.
+
+    Escrita append no MESMO inode (não troca owner) e chmod 600; o gateway relê
+    o `.env` do profile por turno (memoizado por bytes), sem restart.
+    """
+    if profile == "default":
+        return
+    prof_dir = os.path.join(_profiles_dir(), profile)
+    env_path = os.path.join(prof_dir, ".env")
+    try:
+        if os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    if line.startswith("API_SERVER_KEY=") and line.split("=", 1)[1].strip():
+                        return
+    except OSError:
+        pass
+    key = secrets.token_urlsafe(48)
+    created = not os.path.exists(env_path)
+    with open(env_path, "a", encoding="utf-8") as fh:  # append preserva o inode/owner
+        if created:
+            st = os.stat(prof_dir)
+            os.fchown(fh.fileno(), st.st_uid, st.st_gid)
+        fh.write(f"\n# provisionada pelo AgentOS (admin) em {time.strftime('%Y-%m-%d')}\n")
+        fh.write(f"API_SERVER_KEY={key}\n")
+    os.chmod(env_path, 0o600)
+
+
 def _validate_profile(profile: str) -> str:
     """A profile name we are willing to put in a URL path.
 
@@ -222,7 +257,9 @@ def _validate_profile(profile: str) -> str:
         return "default"
     if not _PROFILE_RE.fullmatch(profile):
         raise HTTPException(status_code=400, detail="profile inválido")
-    if not os.path.isdir(os.path.join(_profiles_dir(), profile)):
+    # Mesmo critério da descoberta: dir sem config.yaml é profile morto (o delete
+    # da API remove só config/SOUL). Roteá-lo criaria sessão órfã sem identidade.
+    if not os.path.isfile(os.path.join(_profiles_dir(), profile, "config.yaml")):
         raise HTTPException(status_code=400, detail="profile inexistente")
     return profile
 
@@ -262,6 +299,13 @@ async def _create_remote_session(profile: str, session_id: str, title: str | Non
         # Transport faults (refused, timeout, DNS) are not HTTPException: they
         # used to escape as a 500 and leave a ghost row listed.
         raise HTTPException(status_code=502, detail=f"gateway indisponível: {type(exc).__name__}")
+    if r.status_code == 503:
+        # Home do profile ainda não inicializado (state.db): não é falha do
+        # gateway — é um profile que nunca rodou no CLI.
+        raise HTTPException(
+            status_code=400,
+            detail="profile ainda não inicializado (state.db ausente)",
+        )
     if r.status_code not in (200, 201):
         raise HTTPException(
             status_code=502,
@@ -385,6 +429,10 @@ async def create_chat_session(body: dict, user: dict = Depends(require_auth)):
     title = body.get("title")
     if title is not None and not isinstance(title, str):
         raise HTTPException(status_code=400, detail="title must be a string")
+
+    if user.get("role") == "admin" and profile != "default":
+        # dropdown do admin: provisiona a chave do profile na primeira conversa
+        _ensure_profile_key(profile)
 
     row = chat_sessions.create(user["user_id"], profile, title=title)
     try:

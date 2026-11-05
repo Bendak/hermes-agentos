@@ -393,6 +393,9 @@ async def list_profiles(selectable: bool = False, user: dict = Depends(require_a
             cfg = _read_config(entry)
             summary = _to_summary(entry, cfg)
             summary["selectable"] = entry.lower() not in hidden
+            # Chat só funciona com o home inicializado (state.db): o gateway
+            # responde 503 session_db_unavailable sem ele.
+            summary["chat_ready"] = os.path.isfile(os.path.join(dir_path, "state.db"))
             results.append(summary)
         except Exception as e:
             # Broken config must NOT vanish from the list (M10-08) — surface
@@ -410,6 +413,7 @@ async def list_profiles(selectable: bool = False, user: dict = Depends(require_a
                 "gateway_timeout": 0,
                 "error": f"Invalid config.yaml: {getattr(e, 'message', str(e))}",
                 "selectable": entry.lower() not in hidden,
+                "chat_ready": os.path.isfile(os.path.join(dir_path, "state.db")),
             })
     return results
 
