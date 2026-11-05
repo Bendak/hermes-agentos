@@ -370,13 +370,13 @@ export function NavBar() {
             <div className="hidden xl:flex items-center gap-1 ml-2">
               {navLink('/', 'Dashboard')}
               {navLink('/chat', 'Chat')}
-              {navGroup('Operação', [['/sessions', 'Sessions'], ['/tasks', 'Tasks'], ['/cron', 'Cron']])}
-              {navGroup('IA', [['/skills', 'Skills'], ['/profiles', 'Profiles'], ['/workflows', 'Workflows']])}
-              {navGroup('Sistema', [
-                ...(admin ? [['/analytics', 'Analytics'] as [string, string]] : []),
+              {admin && navGroup('Operação', [['/sessions', 'Sessions'], ['/tasks', 'Tasks'], ['/cron', 'Cron']])}
+              {admin && navGroup('IA', [['/skills', 'Skills'], ['/profiles', 'Profiles'], ['/workflows', 'Workflows']])}
+              {admin && navGroup('Sistema', [
+                ['/analytics', 'Analytics'],
                 ['/config', 'Config'],
                 ['/settings', 'Settings'],
-                ...(admin ? [['/memory', 'Memória'] as [string, string]] : []),
+                ['/memory', 'Memória'],
               ])}
             </div>
           </div>
@@ -431,7 +431,7 @@ export function NavBar() {
           <div className="flex flex-col gap-1">
             {navLink('/', 'Dashboard')}
             {navLink('/chat', 'Chat')}
-            {['Operação', 'IA', 'Sistema'].map((g) => (
+            {(admin ? ['Operação', 'IA', 'Sistema'] : []).map((g) => (
               <div key={g}>
                 <p className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-text-tertiary">{g}</p>
                 {g === 'Operação' && [navLink('/sessions', 'Sessions'), navLink('/tasks', 'Tasks'), navLink('/cron', 'Cron')]}
