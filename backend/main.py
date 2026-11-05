@@ -223,9 +223,10 @@ async def list_agents(user: dict = Depends(require_auth)) -> list[dict]:
 async def get_agent(profile_id: str, user: dict = Depends(require_auth)) -> dict:
     from backend.config import is_hidden  # noqa: PLC0415
 
-    if user.get("role") != "admin" and is_hidden(profile_id):
-        raise HTTPException(status_code=404, detail="Profile not found")
     detail = await get_profile_detail(profile_id)
+    if user.get("role") != "admin" and is_hidden(profile_id):
+        # depois do lookup: mesmo custo do 404 de inexistente (sem oráculo de tempo)
+        raise HTTPException(status_code=404, detail="Profile not found")
     if detail is None:
         raise HTTPException(status_code=404, detail="Profile not found")
     return detail
@@ -235,10 +236,11 @@ async def get_agent(profile_id: str, user: dict = Depends(require_auth)) -> dict
 async def get_agent_health(profile_id: str, user: dict = Depends(require_auth)) -> dict:
     from backend.config import is_hidden  # noqa: PLC0415
 
-    if user.get("role") != "admin" and is_hidden(profile_id):
-        raise HTTPException(status_code=404, detail="Profile not found")
     # Basic process-level health
     profiles = get_profiles()
+    if user.get("role") != "admin" and is_hidden(profile_id):
+        # depois do scan: mesmo custo do 404 de inexistente
+        raise HTTPException(status_code=404, detail="Profile not found")
     profile = next((p for p in profiles if p["id"] == profile_id), None)
     if profile is None:
         raise HTTPException(status_code=404, detail="Profile not found")
@@ -259,6 +261,22 @@ async def get_agent_health(profile_id: str, user: dict = Depends(require_auth)) 
 from backend.sessions import list_sessions, get_session, search_sessions_fts, get_session_messages  # noqa: E402
 
 
+def _session_allowed_profile(user: dict) -> str | None:
+    """Profile a non-admin may read sessions from; None = no access at all."""
+    from backend.chat_sessions import profile_for
+    try:
+        return profile_for(user.get("username"))
+    except Exception:
+        return None
+
+
+def _can_read_session(detail: dict, user: dict) -> bool:
+    if user.get("role") == "admin":
+        return True
+    allowed = _session_allowed_profile(user)
+    return bool(allowed) and detail.get("profile") == allowed
+
+
 @app.get("/api/sessions")
 async def sessions_list(
     user: dict = Depends(require_auth),
@@ -268,7 +286,13 @@ async def sessions_list(
     source: str | None = Query(default=None),
     model: str | None = Query(default=None),
 ) -> dict:
-    return await list_sessions(limit=limit, offset=offset, search=search, source=source, model=model)
+    result = await list_sessions(limit=limit, offset=offset, search=search, source=source, model=model)
+    if user.get("role") != "admin":
+        allowed = _session_allowed_profile(user)
+        items = [x for x in result.get("sessions", []) if allowed and x.get("profile") == allowed]
+        # total também é informação: para viewer vale só o que ele pode ver
+        result = {**result, "sessions": items, "total": len(items)}
+    return result
 
 
 @app.get("/api/sessions/search")
@@ -277,13 +301,18 @@ async def sessions_search(
     q: str = Query(min_length=1),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[dict]:
-    return await search_sessions_fts(query=q, limit=limit)
+    hits = await search_sessions_fts(query=q, limit=limit)
+    if user.get("role") != "admin":
+        allowed = _session_allowed_profile(user)
+        hits = [h for h in hits if allowed and h.get("profile") == allowed]
+    return hits
 
 
 @app.get("/api/sessions/{session_id}")
 async def sessions_detail(session_id: str, user: dict = Depends(require_auth)) -> dict:
     detail = await get_session(session_id)
-    if detail is None:
+    if detail is None or not _can_read_session(detail, user):
+        # 404 para não confirmar a existência de sessão de outra pessoa
         raise HTTPException(status_code=404, detail="Session not found")
     return detail
 
@@ -297,7 +326,7 @@ async def session_messages(
 ) -> dict:
     # Verify session exists
     detail = await get_session(session_id)
-    if detail is None:
+    if detail is None or not _can_read_session(detail, user):
         raise HTTPException(status_code=404, detail="Session not found")
     return await get_session_messages(session_id, limit=limit, offset=offset)
 
@@ -633,7 +662,20 @@ async def config_edit(body: dict, user: dict = Depends(require_admin)):
 
 @app.get("/api/skills")
 async def skills_list(user: dict = Depends(require_auth)):
-    return await list_skills()
+    rows = await list_skills()
+    if user.get("role") != "admin":
+        from backend.config import hidden_profiles
+
+        hidden = hidden_profiles()
+        cleaned = []
+        for row in rows:
+            slug = str(row.get("slug") or "")
+            if any(f"profiles/{h}/" in slug for h in hidden):
+                continue  # skill que só existe dentro do profile de família
+            profs = [p for p in (row.get("profiles") or []) if str(p).lower() not in hidden]
+            cleaned.append({**row, "profiles": profs})
+        rows = cleaned
+    return rows
 
 
 @app.get("/api/skills/{slug:path}")  # M7-01: slugs aninhados (devops/kanban-worker)
@@ -656,7 +698,7 @@ from backend.honcho import summary as honcho_summary  # noqa: E402
 app.include_router(cron_router)
 
 from backend.analytics import router as analytics_router  # noqa: E402
-app.include_router(analytics_router)
+app.include_router(analytics_router, dependencies=[Depends(require_admin)])
 
 
 @app.get("/api/workflows")
