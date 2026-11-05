@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     title        TEXT,
     created_at   INTEGER NOT NULL,
     updated_at   INTEGER NOT NULL,
-    archived     INTEGER NOT NULL DEFAULT 0
+    archived     INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_chat_sessions_user
     ON chat_sessions(user_id, updated_at DESC);
@@ -66,6 +67,10 @@ class ProfileConfigError(RuntimeError):
 def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
+    # FK enforcement is per-connection in SQLite; without it the DDL clause is
+    # decorative. Existing installs keep their old table (no FK) — the explicit
+    # delete_for_user covers them.
+    conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
@@ -102,7 +107,7 @@ def profile_map() -> dict[str, str]:
     mapping: dict[str, str] = {}
     for key, value in data.items():
         if isinstance(key, str) and isinstance(value, str):
-            name, profile = key.strip().lower(), value.strip()
+            name, profile = key.strip().lower(), value.strip().lower()
             if name and profile:
                 mapping[name] = profile
     return mapping
