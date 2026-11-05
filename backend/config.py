@@ -51,5 +51,14 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+_DEFAULT_HIDDEN = "familia_simone,familia_anna"
+
+
 def hidden_profiles() -> set[str]:
-    return {p.strip() for p in (settings.HIDDEN_PROFILES or "").split(",") if p.strip()}
+    """Profiles that must not be picked/read by non-admins.
+
+    Empty/whitespace config falls back to the default list: a blank env must
+    never silently disable the guard (fail-closed).
+    """
+    raw = (settings.HIDDEN_PROFILES or "").strip() or _DEFAULT_HIDDEN
+    return {p.strip().lower() for p in raw.split(",") if p.strip()}

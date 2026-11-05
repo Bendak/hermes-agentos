@@ -55,3 +55,43 @@ def test_family_profile_cannot_be_a_kanban_assignee(client, admin_headers, famil
     task_id = ok.json()["id"]
     bad = client.patch(f"/api/tasks/{task_id}", json={"assignee": "familia_anna"}, headers=admin_headers)
     assert bad.status_code == 400, bad.text
+
+
+def test_viewer_cannot_read_hidden_profile_content(client, admin_headers, viewer_headers, family_profiles):
+    # viewer não vê nem o nome na lista
+    listed = client.get("/api/profiles", headers=viewer_headers).json()
+    assert all(p["id"] != "familia_anna" for p in listed)
+
+    # ...nem o detail nem o SOUL
+    assert client.get("/api/profiles/familia_anna", headers=viewer_headers).status_code == 403
+    assert client.get("/api/profiles/familia_anna/soul", headers=viewer_headers).status_code == 403
+
+    # admin lê normalmente
+    assert client.get("/api/profiles/familia_anna", headers=admin_headers).status_code == 200
+    assert client.get("/api/profiles/familia_anna/soul", headers=admin_headers).status_code == 200
+
+    # profile normal continua visível para viewer
+    assert client.get("/api/profiles/coder", headers=viewer_headers).status_code == 200
+
+
+def test_empty_hidden_env_is_fail_closed(client, admin_headers, family_profiles, monkeypatch):
+    from backend.config import settings
+    monkeypatch.setattr(settings, "HIDDEN_PROFILES", "   ")
+    r = client.post("/api/tasks", json={"title": "t3", "assignee": "familia_anna"}, headers=admin_headers)
+    assert r.status_code == 400, r.text
+    ids = {p["id"] for p in client.get("/api/profiles?selectable=1", headers=admin_headers).json()}
+    assert "familia_anna" not in ids
+
+
+def test_non_string_assignee_is_rejected(client, admin_headers, family_profiles):
+    for bad in (1234, 1, {"x": 1}, ["a"]):
+        r = client.post("/api/tasks", json={"title": "t4", "assignee": bad}, headers=admin_headers)
+        assert r.status_code == 400, (bad, r.text)
+
+
+def test_bulk_update_with_hidden_assignee_is_400(client, admin_headers, family_profiles):
+    ok = client.post("/api/tasks", json={"title": "t5", "assignee": "coder"}, headers=admin_headers)
+    tid = ok.json()["id"]
+    r = client.post("/api/tasks/bulk", json={"ids": [tid], "updates": {"assignee": "familia_anna"}},
+                    headers=admin_headers)
+    assert r.status_code == 400, r.text

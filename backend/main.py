@@ -543,7 +543,11 @@ async def tasks_bulk(body: dict, user: dict = Depends(require_admin)):
         raise HTTPException(status_code=400, detail="'ids' must be a non-empty list")
     if not isinstance(updates, dict) or not updates:
         raise HTTPException(status_code=400, detail="'updates' must be a non-empty object")
-    return await bulk_update(ids, updates, actor=user["username"])
+    try:
+        return await bulk_update(ids, updates, actor=user["username"])
+    except ValueError as e:
+        # hidden/typo assignee is a client error, not a 500
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/kanban/stats")

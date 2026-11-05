@@ -209,9 +209,13 @@ VALID_STATUSES = {"todo", "ready", "running", "done", "blocked", "archived", "tr
 
 VALID_WORKSPACE_KINDS = {"scratch", "workspace", "dir"}
 
-def _reject_hidden_assignee(assignee: str | None) -> None:
+def _reject_hidden_assignee(assignee) -> None:
     """Family profiles are chat-only: never a kanban worker."""
-    if not assignee:
+    if assignee is None:
+        return
+    if not isinstance(assignee, str):
+        raise ValueError("assignee must be a string or null")
+    if not assignee.strip():
         return
     from backend.config import hidden_profiles
     if assignee.strip().lower() in {p.lower() for p in hidden_profiles()}:
@@ -641,7 +645,7 @@ async def update_task(task_id: str, updates: dict, actor: str = "api") -> dict |
             if v not in VALID_WORKSPACE_KINDS:
                 return None
         if k == "assignee":
-            _reject_hidden_assignee(v if isinstance(v, str) else None)
+            _reject_hidden_assignee(v)
         if k == "workspace_path" and v is not None:
             # F-M4-01: raise ValueError (mapped to 400 by the endpoint) instead
             # of silently accepting an arbitrary filesystem path.
