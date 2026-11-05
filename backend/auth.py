@@ -389,14 +389,25 @@ def update_user_password(user_id: int, new_password: str) -> bool:
 
 
 def delete_user(user_id: int) -> bool:
-    """Delete a user by ID. Returns True if user existed."""
+    """Delete a user by ID. Returns True if user existed.
+
+    Also drops their chat session index rows (the transcripts stay in the
+    gateway, which has its own retention policy).
+    """
     conn = _get_db()
     try:
         cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         conn.commit()
-        return cursor.rowcount > 0
+        existed = cursor.rowcount > 0
     finally:
         conn.close()
+    if existed:
+        try:
+            from backend import chat_sessions
+            chat_sessions.delete_for_user(user_id)
+        except Exception:  # never block a user deletion on chat cleanup
+            pass
+    return existed
 
 
 # ── Token revocation & refresh rotation (WI-3) ───────────────────────

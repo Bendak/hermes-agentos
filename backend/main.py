@@ -41,6 +41,11 @@ from backend.chat import router as chat_router  # noqa: E402
 
 app.include_router(chat_router)
 
+# Chat sessions table: create once at import/boot, not on the hot path.
+from backend.chat_sessions import init_db as _chat_sessions_init  # noqa: E402
+
+_chat_sessions_init()
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:5173", "http://localhost:9120"],
