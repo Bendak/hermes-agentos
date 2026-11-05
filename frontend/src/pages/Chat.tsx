@@ -315,7 +315,13 @@ export default function ChatPage() {
         const rows = await res.json()
         const list = Array.isArray(rows) ? rows : []
         const opts = [{ id: 'default', name: 'default' }].concat(
-          list.map((r: { id?: string; name?: string }) => ({ id: String(r.id || r.name || ''), name: String(r.name || r.id || '') })),
+          list
+            // só profiles com home inicializado (state.db) conseguem abrir sessão
+            .filter((r: { chat_ready?: boolean }) => r.chat_ready !== false)
+            .map((r: { id?: string; name?: string }) => ({
+              id: String(r.id || r.name || ''),
+              name: String(r.name || r.id || ''),
+            })),
         ).filter((o) => o.id)
         setProfiles(opts)
       } catch {
@@ -323,6 +329,21 @@ export default function ChatPage() {
       }
     })()
   }, [user?.role])
+
+  // Profile selecionado pode morrer (delete na tela de Profiles). Normaliza para
+  // um que exista: o <select> mostra a 1ª opção quando o value não casa, mas o
+  // estado continuaria apontando para o morto.
+  useEffect(() => {
+    if (user?.role !== 'admin' || profiles.length === 0) return
+    const ids = new Set(profiles.map((p) => p.id))
+    if (active?.profile && ids.has(active.profile)) {
+      if (selectedProfile !== active.profile) setSelectedProfile(active.profile)
+      return
+    }
+    if (!ids.has(selectedProfile)) {
+      setSelectedProfile(ids.has('default') ? 'default' : profiles[0].id)
+    }
+  }, [profiles, active?.profile, selectedProfile, user?.role])
 
   useEffect(() => {
     void loadSessions().then((rows) => {
@@ -354,7 +375,10 @@ export default function ChatPage() {
     const body: Record<string, unknown> = {}
     if (user?.role === 'admin') {
       // fonte única: o que o dropdown mostra é o profile da sessão ativa
-      body.profile = profileOverride || active?.profile || selectedProfile || 'default'
+      const wanted = profileOverride || active?.profile || selectedProfile || 'default'
+      // lista carregada e o profile não está nela (deletado) -> não manda fantasma
+      const exists = profiles.length === 0 || profiles.some((p) => p.id === wanted)
+      body.profile = exists ? wanted : 'default'
     }
     const res = await fetch('/api/chat/sessions', {
       method: 'POST',

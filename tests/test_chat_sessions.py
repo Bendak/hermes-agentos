@@ -20,7 +20,10 @@ def _sandbox(monkeypatch, tmp_path):
                        json.dumps({"zz_admin": "default", "zz_viewer": "default"}))
     monkeypatch.setenv("AGENTOS_PROFILES_DIR", str(tmp_path / "profiles"))
     monkeypatch.setenv("API_SERVER_KEY", "test-gateway-key-" + "x" * 20)
-    (tmp_path / "profiles" / "private_b").mkdir(parents=True, exist_ok=True)
+    # profile vivo = dir COM config.yaml (mesmo critério da descoberta/roteamento)
+    user_b_dir = tmp_path / "profiles" / "private_b"
+    user_b_dir.mkdir(parents=True, exist_ok=True)
+    (user_b_dir / "config.yaml").write_text("model:\n  default: test\n")
     cs.reset_initialized_for_tests()
 
     async def fake_create(profile, session_id, title):
