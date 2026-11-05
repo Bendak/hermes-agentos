@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     HERMES_API_KEY: str | None = None
     AGENTOS_PORT: int = 9120
     AGENTOS_HOST: str = "0.0.0.0"
+    # Profiles that exist but must not be picked as a kanban assignee or a chat
+    # profile in the UI (they answer their own user only).
+    HIDDEN_PROFILES: str = "private_b,private_a"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -46,3 +49,7 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def hidden_profiles() -> set[str]:
+    return {p.strip() for p in (settings.HIDDEN_PROFILES or "").split(",") if p.strip()}

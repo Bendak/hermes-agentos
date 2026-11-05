@@ -359,19 +359,30 @@ class ProfileCreate(BaseModel):
 # ── Endpoints ────────────────────────────────────────────────────────
 
 @router.get("")
-async def list_profiles() -> list[dict[str, Any]]:
-    """List all profiles in a summary format for grid display."""
+async def list_profiles(selectable: bool = False) -> list[dict[str, Any]]:
+    """List all profiles in a summary format for grid display.
+
+    ``?selectable=1`` hides reserved family profiles (one-person chat) so they
+    never show up in a generic picker. The admin grid keeps seeing them.
+    """
+    from backend.config import hidden_profiles
+
+    hidden = hidden_profiles()
     if not os.path.isdir(PROFILES_DIR):
         return []
     results = []
     for entry in iter_sub_profile_ids():  # M10-16 single source (M12-1)
+        if selectable and entry in hidden:
+            continue
         dir_path = os.path.join(PROFILES_DIR, entry)
         cfg_path = os.path.join(dir_path, "config.yaml")
         if not os.path.isfile(cfg_path):
             continue
         try:
             cfg = _read_config(entry)
-            results.append(_to_summary(entry, cfg))
+            summary = _to_summary(entry, cfg)
+            summary["selectable"] = entry not in hidden
+            results.append(summary)
         except Exception as e:
             # Broken config must NOT vanish from the list (M10-08) — surface
             # a degraded entry with the error so the UI can offer a repair.
@@ -387,6 +398,7 @@ async def list_profiles() -> list[dict[str, Any]]:
                 "max_turns": 0,
                 "gateway_timeout": 0,
                 "error": f"Invalid config.yaml: {getattr(e, 'message', str(e))}",
+                "selectable": entry not in hidden,
             })
     return results
 
