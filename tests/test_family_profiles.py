@@ -43,8 +43,9 @@ def test_selectable_list_hides_family_profiles(client, admin_headers, family_pro
 
 
 def test_family_profile_cannot_be_a_kanban_assignee(client, admin_headers, family_profiles):
-    r = client.post("/api/tasks", json={"title": "t1", "assignee": "private_a"}, headers=admin_headers)
-    assert r.status_code == 400, r.text
+    for assignee in ("private_a", "Private_A", "  PRIVATE_A  "):
+        r = client.post("/api/tasks", json={"title": "t1", "assignee": assignee}, headers=admin_headers)
+        assert r.status_code == 400, (assignee, r.text)
     assert "não pode receber tarefas" in r.text
 
     ok = client.post("/api/tasks", json={"title": "t2", "assignee": "coder"}, headers=admin_headers)
