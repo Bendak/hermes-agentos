@@ -151,7 +151,7 @@ export default function UserManagement() {
             ) : users.length === 0 ? (
               <tr><td colSpan={5} className="px-4 py-8 text-center text-text-tertiary">No users found</td></tr>
             ) : users.map(u => (
-              <tr key={u.id} className="border-b border-border/50 last:border-0 hover:bg-surface/60 transition-colors">
+              <tr key={u.id} className="border-b border-border last:border-0 hover:bg-surface/60 transition-colors">
                 <td className="px-4 py-3 text-text-primary font-medium">
                   {u.username}
                   {u.id === user?.id && (

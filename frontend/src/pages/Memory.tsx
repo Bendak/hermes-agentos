@@ -129,7 +129,7 @@ function WorkspaceCard({ ws, series }: { ws: HonchoWorkspace; series: number[] }
           { label: 'Peers', value: ws.peers },
           { label: 'Representação', value: ws.representation_chars != null ? `${ws.representation_chars.toLocaleString('pt-BR')} chars` : '—' },
         ].map((c) => (
-          <div key={c.label} className="rounded-lg border border-border/60 p-3">
+          <div key={c.label} className="rounded-lg border border-border p-3">
             <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1">{c.label}</p>
             <p className="text-sm font-semibold text-text-primary tabular-nums">
               {c.value ?? '—'}
@@ -139,11 +139,11 @@ function WorkspaceCard({ ws, series }: { ws: HonchoWorkspace; series: number[] }
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="rounded-lg border border-border/60 p-3">
+        <div className="rounded-lg border border-border p-3">
           <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-2">Histórico (sessões)</p>
           <Sparkline points={series} />
         </div>
-        <div className="rounded-lg border border-border/60 p-3 text-xs space-y-1.5">
+        <div className="rounded-lg border border-border p-3 text-xs space-y-1.5">
           <p className="text-[10px] uppercase tracking-wider text-text-tertiary mb-1">Saúde</p>
           <p className="text-text-secondary">
             Última conclusão: <span className="text-text-primary">{brt(ws.latest_conclusion_at)}</span>
@@ -183,7 +183,7 @@ function WorkspaceCard({ ws, series }: { ws: HonchoWorkspace; series: number[] }
           {openConc && (
             <ul className="mt-3 space-y-2">
               {ws.recent_conclusions!.map((c) => (
-                <li key={c.id} className="rounded-lg border border-border/60 bg-bg-base/40 p-3">
+                <li key={c.id} className="rounded-lg border border-border bg-bg-base/40 p-3">
                   <p className="text-[11px] text-text-tertiary mb-1">
                     {brt(c.created_at)}
                     {c.truncated && (
@@ -305,7 +305,7 @@ export default function MemoryPage() {
         />
       ))}
 
-      <div className="rounded-lg border border-border/60 p-4 text-xs text-text-tertiary">
+      <div className="rounded-lg border border-border p-4 text-xs text-text-tertiary">
         <p className="font-medium text-text-secondary mb-1">Backup</p>
         <p>
           Volume Postgres do Honcho: <code>honcho-database-1</code> (pgvector/pg15). Sugestão: snapshot

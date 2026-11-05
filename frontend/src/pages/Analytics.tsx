@@ -223,7 +223,7 @@ function TokenUsageSection() {
             </thead>
             <tbody>
               {data.top_sessions.map((s) => (
-                <tr key={s.session_id} className="border-b border-border/50 hover:bg-surface/60 transition">
+                <tr key={s.session_id} className="border-b border-border hover:bg-surface/60 transition">
                   <td className="py-2.5 pr-4 text-text-primary font-mono text-xs">
                     {s.display_name || s.session_id}
                   </td>
