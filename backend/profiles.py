@@ -38,6 +38,14 @@ router = APIRouter(prefix="/api/profiles", tags=["profiles"], dependencies=[Depe
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+def _ensure_visible(profile_id: str, user: dict) -> None:
+    """Hidden (family) profiles are private: only admin may read their content."""
+    from backend.config import hidden_profiles
+
+    if user.get("role") != "admin" and profile_id.lower() in {h.lower() for h in hidden_profiles()}:
+        raise HTTPException(status_code=403, detail="Admin access required")
+
+
 def _profile_dir(profile_id: str) -> str:
     return os.path.join(PROFILES_DIR, profile_id)
 
@@ -359,7 +367,7 @@ class ProfileCreate(BaseModel):
 # ── Endpoints ────────────────────────────────────────────────────────
 
 @router.get("")
-async def list_profiles(selectable: bool = False) -> list[dict[str, Any]]:
+async def list_profiles(selectable: bool = False, user: dict = Depends(require_auth)) -> list[dict[str, Any]]:
     """List all profiles in a summary format for grid display.
 
     ``?selectable=1`` hides reserved family profiles (one-person chat) so they
@@ -372,6 +380,8 @@ async def list_profiles(selectable: bool = False) -> list[dict[str, Any]]:
         return []
     results = []
     for entry in iter_sub_profile_ids():  # M10-16 single source (M12-1)
+        if user.get("role") != "admin" and entry.lower() in hidden:
+            continue  # família: nem o nome aparece para viewer
         if selectable and entry.lower() in hidden:
             continue
         dir_path = os.path.join(PROFILES_DIR, entry)
@@ -416,9 +426,10 @@ async def profile_skills_summary() -> list[dict[str, Any]]:
 
 
 @router.get("/{profile_id}")
-async def get_profile(profile_id: str) -> dict[str, Any]:
+async def get_profile(profile_id: str, user: dict = Depends(require_auth)) -> dict[str, Any]:
     """Get full profile detail (editable fields only, sensitive stripped)."""
     pid = _sanitize_id(profile_id)
+    _ensure_visible(pid, user)
     try:
         cfg = _read_config(pid)
     except FileNotFoundError:
@@ -602,9 +613,10 @@ class SoulUpdate(BaseModel):
 
 
 @router.get("/{profile_id}/soul")
-async def get_soul(profile_id: str) -> dict[str, Any]:
+async def get_soul(profile_id: str, user: dict = Depends(require_auth)) -> dict[str, Any]:
     """Return the SOUL.md content for a profile."""
     pid = _sanitize_id(profile_id)
+    _ensure_visible(pid, user)
     dir_path = _profile_dir(pid)
     if not os.path.isdir(dir_path):
         raise HTTPException(status_code=404, detail="Profile not found")
