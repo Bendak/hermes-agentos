@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
+from backend import chat_sessions
 from backend.auth import require_auth
 from backend.config import settings
 
@@ -129,6 +130,206 @@ async def chat(
                         yield line + "\n\n"
                     else:
                         yield f"data: {line}\n\n"
+            finally:
+                await resp.aclose()
+                await client.aclose()
+
+        return StreamingResponse(
+            sse_gen(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=f"Hermes API unreachable: {exc}")
+
+
+
+# ── Sessões (Lote 1 — chat da família) ───────────────────────────────────────
+
+def _gateway_base(profile: str) -> str:
+    """Profile-routed gateway root (`/p/<profile>`), default keeps the bare root."""
+    if profile and profile != "default":
+        return f"{HERMES_API_URL}/p/{profile}"
+    return HERMES_API_URL
+
+
+def _gateway_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {_hermes_api_key()}",
+        "Content-Type": "application/json",
+    }
+
+
+async def _create_remote_session(profile: str, session_id: str, title: str | None) -> None:
+    """Create the session row in the gateway so the transcript exists there.
+
+    We mint the id ourselves (`agentos_<uuid>`) — the API accepts `id`, so there
+    is no second round trip and no chance of a duplicate.
+    """
+    payload = {"id": session_id, "source": "api_server"}
+    if title:
+        payload["title"] = title
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+        r = await client.post(
+            f"{_gateway_base(profile)}/api/sessions",
+            headers=_gateway_headers(),
+            json=payload,
+        )
+    if r.status_code not in (200, 201):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Hermes session create failed {r.status_code}: {r.text[:300]}",
+        )
+
+
+async def _remote_messages(profile: str, session_id: str, limit: int, offset: int) -> dict:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+        r = await client.get(
+            f"{_gateway_base(profile)}/api/sessions/{session_id}/messages",
+            headers=_gateway_headers(),
+            params={"limit": limit, "offset": offset},
+        )
+    if r.status_code == 404:
+        raise HTTPException(status_code=404, detail="Sessão não existe no Hermes")
+    if r.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"Hermes messages failed {r.status_code}: {r.text[:300]}")
+    data = r.json()
+    out = []
+    for m in data.get("data") or []:
+        role = m.get("role")
+        if role not in ("user", "assistant", "tool", "system"):
+            continue
+        out.append({
+            "role": role,
+            "content": m.get("content") or "",
+            "timestamp": m.get("timestamp"),
+            "tool_name": m.get("tool_name"),
+        })
+    return {"data": out, "pagination": data.get("pagination") or {}}
+
+
+def _owned_or_404(session_id: str, user: dict) -> dict:
+    row = chat_sessions.get_owned(session_id, user["user_id"])
+    if row is None:
+        # 404 (not 403): another user's session must not even be confirmed to exist.
+        raise HTTPException(status_code=404, detail="Sessão não encontrada")
+    return row
+
+
+@router.get("/api/chat/sessions")
+async def list_chat_sessions(
+    include_archived: bool = False,
+    user: dict = Depends(require_auth),
+):
+    chat_sessions.init_db()
+    rows = chat_sessions.list_for_user(user["user_id"], include_archived=include_archived)
+    return {"data": [chat_sessions.public(r) for r in rows]}
+
+
+@router.post("/api/chat/sessions")
+async def create_chat_session(body: dict, user: dict = Depends(require_auth)):
+    chat_sessions.init_db()
+    # O perfil vem do usuário logado; admin pode pedir outro (teste/suporte).
+    profile = chat_sessions.profile_for(user["username"])
+    if user.get("role") == "admin" and isinstance(body.get("profile"), str) and body["profile"].strip():
+        profile = body["profile"].strip()
+    title = body.get("title")
+    if title is not None and not isinstance(title, str):
+        raise HTTPException(status_code=400, detail="title must be a string")
+
+    row = chat_sessions.create(user["user_id"], profile, title=title)
+    try:
+        await _create_remote_session(profile, row["hermes_id"], title)
+    except HTTPException:
+        chat_sessions.set_archived(row["id"], user["user_id"], True)  # não deixa sessão órfã na lista
+        raise
+    return chat_sessions.public(row)
+
+
+@router.patch("/api/chat/sessions/{session_id}")
+async def patch_chat_session(session_id: str, body: dict, user: dict = Depends(require_auth)):
+    _owned_or_404(session_id, user)
+    if "title" in body:
+        if chat_sessions.rename(session_id, user["user_id"], str(body["title"])) is None:
+            raise HTTPException(status_code=400, detail="Título vazio")
+    if "archived" in body:
+        chat_sessions.set_archived(session_id, user["user_id"], bool(body["archived"]))
+    row = chat_sessions.get_owned(session_id, user["user_id"])
+    assert row is not None
+    return chat_sessions.public(row)
+
+
+@router.delete("/api/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: str, user: dict = Depends(require_auth)):
+    """Arquiva (soft delete) — o transcript continua no gateway."""
+    _owned_or_404(session_id, user)
+    row = chat_sessions.set_archived(session_id, user["user_id"], True)
+    assert row is not None
+    return chat_sessions.public(row)
+
+
+@router.get("/api/chat/sessions/{session_id}/messages")
+async def chat_session_messages(
+    session_id: str,
+    limit: int = 200,
+    offset: int = 0,
+    user: dict = Depends(require_auth),
+):
+    row = _owned_or_404(session_id, user)
+    if limit < 1 or limit > 500 or offset < 0:
+        raise HTTPException(status_code=400, detail="limit/offset inválidos")
+    return await _remote_messages(row["profile"], row["hermes_id"], limit, offset)
+
+
+@router.post("/api/chat/sessions/{session_id}/stream")
+async def chat_session_stream(session_id: str, body: dict, user: dict = Depends(require_auth)):
+    """Turno SSE na sessão: identidade do JWT + author para a memória."""
+    row = _owned_or_404(session_id, user)
+    message = body.get("message") or body.get("input")
+    if not isinstance(message, str) or not message.strip():
+        raise HTTPException(status_code=400, detail="Mensagem vazia")
+
+    chat_sessions.touch(session_id, title=chat_sessions.title_from_message(message))
+
+    payload = {
+        "message": message,
+        "author": {"id": user["username"], "name": user["username"]},
+    }
+    headers = _gateway_headers()
+    headers["X-Hermes-Session-Key"] = row["session_key"]
+
+    client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=10.0))
+    try:
+        req = client.build_request(
+            "POST",
+            f"{_gateway_base(row['profile'])}/api/sessions/{row['hermes_id']}/chat/stream",
+            headers=headers,
+            json=payload,
+        )
+        resp = await client.send(req, stream=True)
+        if resp.status_code != 200:
+            detail = (await resp.aread()).decode("utf-8", "replace")
+            await client.aclose()
+            raise HTTPException(
+                status_code=resp.status_code,
+                detail=f"Hermes stream error {resp.status_code}: {detail[:400]}",
+            )
+
+        async def sse_gen():
+            # Passthrough CRU: o gateway emite eventos SSE completos
+            # (`event:`, `data:`, linha em branco). Reescrever linha a linha
+            # quebrava o framing (prefixava `data:` em `event:`).
+            try:
+                async for chunk in resp.aiter_raw():
+                    if chunk:
+                        yield chunk
             finally:
                 await resp.aclose()
                 await client.aclose()
