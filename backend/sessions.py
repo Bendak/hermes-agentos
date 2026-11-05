@@ -303,6 +303,7 @@ async def list_sessions(
     source: Optional[str] = None,
     model: Optional[str] = None,
     include_hidden: bool = False,
+    profile: Optional[str] = None,
 ) -> dict:
     """Return paginated session list, aggregated across ALL profile state.dbs
     (WI-7). Each item carries `profile` = COALESCE(profile_name, owner).
@@ -337,17 +338,26 @@ async def list_sessions(
             continue
         try:
             async with aiosqlite.connect(path) as db:
-                prof_expr = "COALESCE(profile_name, ?)" if await _has_profile_name(db, path) else "?"
+                has_col = await _has_profile_name(db, path)
+                prof_expr = "COALESCE(profile_name, ?)" if has_col else "?"
+                db_where = where_sql
+                bind = [owner] + list(params)
+                if profile is not None:
+                    # Filtro no SQL: paginação/total honestos (não filtrar depois do LIMIT)
+                    clause = f"{prof_expr} = ?"
+                    db_where = ("WHERE " + " AND ".join(where_clauses + [clause])) if where_clauses else f"WHERE {clause}"
+                    # prof_expr tem um ? no SELECT e outro no WHERE quando existe a coluna
+                    bind = [owner] + list(params) + ([owner, profile] if has_col else [profile])
                 sql = f"""
                     SELECT
                         id, source, model, title, started_at, ended_at,
                         message_count, tool_call_count, chat_type, archived,
                         {prof_expr}
                     FROM sessions
-                    {where_sql}
+                    {db_where}
                     ORDER BY started_at DESC
                 """
-                async with db.execute(sql, [owner] + params) as cursor:
+                async with db.execute(sql, bind) as cursor:
                     merged.extend(_row_to_session(r) for r in await cursor.fetchall())
         except Exception:
             continue  # M24-1: db corrupto não derruba a listagem inteira
@@ -552,7 +562,7 @@ def _fts_quote(query: str) -> str:
     return " ".join(kept)
 
 
-async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:
+async def search_sessions_fts(query: str, limit: int = 20, profile: Optional[str] = None) -> list[dict]:
     """Search sessions using FTS5 on messages_fts table — WI-7/M24-3:
     aggregated across ALL profile state.dbs (messages_fts exists in every
     store), merged by relevance (match_count DESC).
@@ -567,7 +577,7 @@ async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:
         if not os.path.exists(path):
             continue
         try:
-            rows = await _search_sessions_fts_run(query, limit, path)
+            rows = await _search_sessions_fts_run(query, limit, path, profile, owner)
             for r in rows:
                 r.setdefault("profile", owner)
             merged.extend(rows)
@@ -587,7 +597,8 @@ async def search_sessions_fts(query: str, limit: int = 20) -> list[dict]:
     return out
 
 
-async def _search_sessions_fts_run(query: str, limit: int = 20, db_path: Optional[str] = None) -> list[dict]:
+async def _search_sessions_fts_run(query: str, limit: int = 20, db_path: Optional[str] = None,
+                                    profile: Optional[str] = None, owner: Optional[str] = None) -> list[dict]:
     db_path = db_path or STATE_DB
     if not os.path.exists(db_path):
         return []
@@ -597,6 +608,14 @@ async def _search_sessions_fts_run(query: str, limit: int = 20, db_path: Optiona
 
     results: list[dict] = []
     async with aiosqlite.connect(db_path) as db:
+        # Filtro de profile no SQL (não depois do LIMIT): evita "starvation" da página
+        prof_cond, prof_params = "", []
+        if profile is not None:
+            cols = {row[1] for row in await (await db.execute("PRAGMA table_info(sessions)")).fetchall()}
+            if "profile_name" in cols:
+                prof_cond, prof_params = " AND COALESCE(s.profile_name, ?) = ?", [owner, profile]
+            elif owner is not None and owner != profile:
+                return []  # store de um único profile, e não é o do usuário
         # First gather matching session IDs with their best snippet
         async with db.execute(
             f"""
@@ -616,12 +635,12 @@ async def _search_sessions_fts_run(query: str, limit: int = 20, db_path: Optiona
             FROM messages_fts
             JOIN messages m ON m.rowid = messages_fts.rowid
             JOIN sessions s ON s.id = m.session_id
-            WHERE messages_fts MATCH ? AND s.hidden = 0{_display_where('m')}
+            WHERE messages_fts MATCH ? AND s.hidden = 0{_display_where('m')}{prof_cond}
             GROUP BY s.id
             ORDER BY COUNT(messages_fts.rowid) DESC
             LIMIT ?
             """,
-            (_fts_quote(query), limit),  # M20-3: sintaxe FTS5 vira dado
+            (_fts_quote(query), *prof_params, limit),  # M20-3: sintaxe FTS5 vira dado
         ) as cursor:
             rows = await cursor.fetchall()
 

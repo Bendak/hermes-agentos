@@ -2,7 +2,7 @@ import { isAdmin } from "./lib/admin"
 import { apiErrorMessage } from "./lib/api"
 import { ToastProvider, useToast } from "./lib/toast"
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Routes, Route, Link, useParams, useNavigate, useSearchParams } from 'react-router-dom'
+import { Routes, Route, Link, Navigate, useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import LoginPage from './auth/LoginPage'
 import ProtectedRoute from './auth/ProtectedRoute'
@@ -373,7 +373,7 @@ export function NavBar() {
               {navGroup('Operação', [['/sessions', 'Sessions'], ['/tasks', 'Tasks'], ['/cron', 'Cron']])}
               {navGroup('IA', [['/skills', 'Skills'], ['/profiles', 'Profiles'], ['/workflows', 'Workflows']])}
               {navGroup('Sistema', [
-                ['/analytics', 'Analytics'],
+                ...(admin ? [['/analytics', 'Analytics'] as [string, string]] : []),
                 ['/config', 'Config'],
                 ['/settings', 'Settings'],
                 ...(admin ? [['/memory', 'Memória'] as [string, string]] : []),
@@ -437,7 +437,7 @@ export function NavBar() {
                 {g === 'Operação' && [navLink('/sessions', 'Sessions'), navLink('/tasks', 'Tasks'), navLink('/cron', 'Cron')]}
                 {g === 'IA' && [navLink('/skills', 'Skills'), navLink('/profiles', 'Profiles'), navLink('/workflows', 'Workflows')]}
                 {g === 'Sistema' && [
-                  navLink('/analytics', 'Analytics'),
+                  ...(admin ? [navLink('/analytics', 'Analytics')] : []),
                   navLink('/config', 'Config'),
                   navLink('/settings', 'Settings'),
                   ...(admin ? [navLink('/memory', 'Memória')] : []),
@@ -5260,7 +5260,7 @@ function AppInner() {
           <Route path="/workflows/:id" element={<ProtectedRoute><WorkflowEditorPage /></ProtectedRoute>} />
           <Route path="/cron" element={<ProtectedRoute><CronPage /></ProtectedRoute>} />
           <Route path="/profiles" element={<ProtectedRoute><ProfilesPage /></ProtectedRoute>} />
-          <Route path="/analytics" element={<ProtectedRoute><AnalyticsPage /></ProtectedRoute>} />
+          <Route path="/analytics" element={<ProtectedRoute>{isAdmin() ? <AnalyticsPage /> : <Navigate to="/" replace />}</ProtectedRoute>} />
           <Route path="/memory" element={<ProtectedRoute><MemoryPage /></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
           <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />

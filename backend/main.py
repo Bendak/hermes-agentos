@@ -286,13 +286,14 @@ async def sessions_list(
     source: str | None = Query(default=None),
     model: str | None = Query(default=None),
 ) -> dict:
-    result = await list_sessions(limit=limit, offset=offset, search=search, source=source, model=model)
-    if user.get("role") != "admin":
-        allowed = _session_allowed_profile(user)
-        items = [x for x in result.get("sessions", []) if allowed and x.get("profile") == allowed]
-        # total também é informação: para viewer vale só o que ele pode ver
-        result = {**result, "sessions": items, "total": len(items)}
-    return result
+    if user.get("role") == "admin":
+        return await list_sessions(limit=limit, offset=offset, search=search, source=source, model=model)
+    allowed = _session_allowed_profile(user)
+    if not allowed:
+        return {"sessions": [], "total": 0, "limit": limit, "offset": offset}
+    # filtro no SQL (LIMIT/offset/total contam só o que ele pode ver)
+    return await list_sessions(limit=limit, offset=offset, search=search, source=source, model=model,
+                               profile=allowed)
 
 
 @app.get("/api/sessions/search")
@@ -301,11 +302,12 @@ async def sessions_search(
     q: str = Query(min_length=1),
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[dict]:
-    hits = await search_sessions_fts(query=q, limit=limit)
-    if user.get("role") != "admin":
-        allowed = _session_allowed_profile(user)
-        hits = [h for h in hits if allowed and h.get("profile") == allowed]
-    return hits
+    if user.get("role") == "admin":
+        return await search_sessions_fts(query=q, limit=limit)
+    allowed = _session_allowed_profile(user)
+    if not allowed:
+        return []
+    return await search_sessions_fts(query=q, limit=limit, profile=allowed)
 
 
 @app.get("/api/sessions/{session_id}")
