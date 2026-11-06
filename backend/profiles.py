@@ -13,6 +13,7 @@ import logging
 import os
 import re
 import tempfile
+import threading
 import time
 from typing import Any
 
@@ -503,7 +504,12 @@ async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]
     return _to_detail(pid, cfg)
 
 
-_PURGED_MARKER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "purged_profiles.json")
+# Fora da árvore do repo (volume persistente): o marcador não pode deixar o
+# checkout sujo nem sumir num git clean/redeploy.
+_PURGED_MARKER = os.path.join(
+    os.environ.get("AGENTOS_STATE_DIR") or "/opt/data/.agentos",
+    "purged_profiles.json",
+)
 
 
 def _gateway_runtime_identity() -> dict[str, Any]:
@@ -551,8 +557,8 @@ def _mark_purged(pid: str) -> None:
         with open(tmp, "w", encoding="utf-8") as fh:
             json.dump(data, fh)
         os.replace(tmp, _PURGED_MARKER)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("não foi possível gravar o marcador de profiles purgados: %s", exc)
 
 
 def _purged_name_blocked(pid: str) -> bool:
@@ -560,21 +566,44 @@ def _purged_name_blocked(pid: str) -> bool:
     if not isinstance(entry, dict):
         return False
     ident = _gateway_runtime_identity()
-    same = (
-        entry.get("pid") == ident.get("pid")
-        and entry.get("instance_id") == ident.get("instance_id")
-    )
-    if not same:
-        # gateway reiniciou: autoridade velha morreu, nome pode ser reusado
-        data = _load_purged()
-        data.pop(pid, None)
+    cur_pid, cur_inst = ident.get("pid"), ident.get("instance_id")
+    if not cur_pid and not cur_inst:
+        # D-E: identidade desconhecida -> FAIL-CLOSED (não libera nem apaga)
+        return True
+    same = entry.get("pid") == cur_pid and entry.get("instance_id") == cur_inst
+    if same:
+        return True
+    # identidade CONFIRMADAMENTE diferente: autoridade velha morreu
+    data = _load_purged()
+    data.pop(pid, None)
+    try:
+        os.makedirs(os.path.dirname(_PURGED_MARKER), exist_ok=True)
+        tmp = _PURGED_MARKER + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, _PURGED_MARKER)
+    except Exception as exc:
+        logger.warning("não foi possível limpar o marcador de profile purgado: %s", exc)
+    return False
+
+
+def _reap_shell_later(dir_path: str, delay: float = 1.5) -> None:
+    """D-F: o gateway recria uma casca `logs/` logo após o rmtree do purge.
+
+    Uma segunda passada depois do unserve deixa "purge = sumiu" verdadeiro sem
+    bloquear a resposta da API.
+    """
+
+    def _run() -> None:
         try:
-            with open(_PURGED_MARKER, "w", encoding="utf-8") as fh:
-                json.dump(data, fh)
+            time.sleep(delay)
+            if os.path.isdir(dir_path) and not os.path.isfile(os.path.join(dir_path, "config.yaml")):
+                import shutil as _shutil
+                _shutil.rmtree(dir_path, ignore_errors=True)
         except Exception:
             pass
-        return False
-    return True
+
+    threading.Thread(target=_run, daemon=True).start()
 
 
 def _notify_gateway_profile_change(pid: str, *, removed: bool) -> None:
@@ -627,11 +656,9 @@ async def create_profile(body: ProfileCreate) -> dict[str, Any]:
     if os.path.exists(dir_path):
         if os.path.isfile(_config_path(pid)):
             raise HTTPException(status_code=409, detail=f"Profile '{pid}' already exists")
-        # D-B: purge deixa (ou o gateway recria) uma casca sem config — o nome
-        # não está em uso pelo produto, então reutilizar é correto; 409 aqui
-        # travava o nome para sempre.
-        import shutil as _shutil
-        _shutil.rmtree(dir_path, ignore_errors=True)
+        # Casca sem config: REUSA o diretório em vez de rmtree. Apagar um
+        # state.db que o gateway ainda segura trava o nome (D-D).
+        pass
 
     os.makedirs(dir_path, mode=0o700, exist_ok=True)
     _fix_owner(dir_path)
@@ -680,6 +707,7 @@ async def delete_profile(profile_id: str, purge: bool = False) -> dict[str, Any]
         shutil.rmtree(dir_path)
         _notify_gateway_profile_change(pid, removed=True)
         _mark_purged(pid)
+        _reap_shell_later(dir_path)
         return {"deleted": pid, "purged": True}
 
     removed = []
@@ -695,6 +723,9 @@ async def delete_profile(profile_id: str, purge: bool = False) -> dict[str, Any]
     except OSError:
         pass
     _notify_gateway_profile_change(pid, removed=True)
+    # D-D: recriar o MESMO nome depois de um delete sem purge também deixava a
+    # autoridade velha presa; o mesmo guard se aplica.
+    _mark_purged(pid)
     return {"deleted": pid, "purged": False, "removed": removed}
 
 
