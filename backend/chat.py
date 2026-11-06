@@ -213,6 +213,60 @@ async def _acquire_turn_lock(session_id: str) -> "asyncio.Lock":
     return lock
 
 
+def _ensure_profile_home(profile: str) -> None:
+    """Garante um `state.db` VÁLIDO no home do profile antes de criar sessão.
+
+    Profile recém-criado (ou recriado após purge) não tem o store. Um arquivo
+    vazio não basta: o gateway responde 503 e não inicializa nesse fluxo. Usamos
+    o próprio SessionDB do Hermes para criar o schema; fallback = touch (o tick
+    do gateway pode inicializar depois).
+    """
+    if profile == "default":
+        return
+    prof_dir = os.path.join(_profiles_dir(), profile)
+    db_path = os.path.join(prof_dir, "state.db")
+    if os.path.exists(db_path) and os.path.getsize(db_path) > 0:
+        return
+    try:
+        import sys
+        if "/opt/hermes" not in sys.path:
+            sys.path.insert(0, "/opt/hermes")
+        from pathlib import Path as _Path
+        from hermes_state import SessionDB
+
+        SessionDB(_Path(db_path))
+    except Exception:
+        flags = os.O_WRONLY | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+        fd = os.open(db_path, flags, 0o600)
+        os.close(fd)
+    try:
+        st = os.stat(prof_dir)
+        os.chown(db_path, st.st_uid, st.st_gid)
+        os.chmod(db_path, 0o600)
+    except OSError:
+        pass
+
+
+def _hot_serve_profile(profile: str) -> None:
+    """Pede ao gateway para servir o profile agora (inicializa o home).
+
+    Best-effort: sem socket/verb antigo o tick periódico cobre; 'already served' ok.
+    """
+    if profile == "default":
+        return
+    try:
+        import sys
+        if "/opt/hermes" not in sys.path:
+            sys.path.insert(0, "/opt/hermes")
+        from pathlib import Path as _Path
+        from gateway.control_socket import request_serve_profile_hot
+
+        home = _Path(os.environ.get("HERMES_HOME") or "/opt/data")
+        request_serve_profile_hot(home, profile)
+    except Exception:
+        pass
+
+
 def _ensure_profile_key(profile: str) -> None:
     """Admin abriu conversa num profile sem API_SERVER_KEY: provisiona uma.
 
@@ -235,14 +289,25 @@ def _ensure_profile_key(profile: str) -> None:
                         return
     except OSError:
         pass
+    if os.path.islink(env_path):
+        # escrever seguindo symlink escaparia do profile (D-C do round 6)
+        raise HTTPException(status_code=400, detail="profile .env é symlink — recusando escrever")
     key = secrets.token_urlsafe(48)
-    created = not os.path.exists(env_path)
-    with open(env_path, "a", encoding="utf-8") as fh:  # append preserva o inode/owner
+    flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(env_path, flags, 0o600)
+    except OSError:
+        raise HTTPException(status_code=400, detail="não foi possível gravar a chave do profile")
+    try:
+        created = os.fstat(fd).st_size == 0
         if created:
             st = os.stat(prof_dir)
-            os.fchown(fh.fileno(), st.st_uid, st.st_gid)
-        fh.write(f"\n# provisionada pelo AgentOS (admin) em {time.strftime('%Y-%m-%d')}\n")
-        fh.write(f"API_SERVER_KEY={key}\n")
+            os.fchown(fd, st.st_uid, st.st_gid)
+        with os.fdopen(fd, "a", encoding="utf-8", closefd=False) as fh:
+            fh.write(f"\n# provisionada pelo AgentOS (admin) em {time.strftime('%Y-%m-%d')}\n")
+            fh.write(f"API_SERVER_KEY={key}\n")
+    finally:
+        os.close(fd)
     os.chmod(env_path, 0o600)
 
 
@@ -288,29 +353,56 @@ async def _create_remote_session(profile: str, session_id: str, title: str | Non
     payload = {"id": session_id, "source": "api_server"}
     if title:
         payload["title"] = title
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
-            r = await client.post(
-                f"{_gateway_base(profile)}/api/sessions",
-                headers=_gateway_headers(profile),
-                json=payload,
-            )
-    except httpx.HTTPError as exc:
-        # Transport faults (refused, timeout, DNS) are not HTTPException: they
-        # used to escape as a 500 and leave a ghost row listed.
-        raise HTTPException(status_code=502, detail=f"gateway indisponível: {type(exc).__name__}")
+
+    r = None
+    for attempt in range(4):
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+                r = await client.post(
+                    f"{_gateway_base(profile)}/api/sessions",
+                    headers=_gateway_headers(profile),
+                    json=payload,
+                )
+        except httpx.HTTPError as exc:
+            # Transport faults (refused, timeout, DNS) are not HTTPException: they
+            # used to escape as a 500 and leave a ghost row listed.
+            raise HTTPException(status_code=502, detail=f"gateway indisponível: {type(exc).__name__}")
+        if r.status_code in (200, 201):
+            return
+        if r.status_code == 503 and attempt < 3:
+            await asyncio.sleep(2.0)  # home do profile inicializando
+            continue
+        break
+
+    if r is None:
+        raise HTTPException(status_code=502, detail="gateway indisponível")
     if r.status_code == 503:
-        # Home do profile ainda não inicializado (state.db): não é falha do
-        # gateway — é um profile que nunca rodou no CLI.
         raise HTTPException(
             status_code=400,
             detail="profile ainda não inicializado (state.db ausente)",
         )
-    if r.status_code not in (200, 201):
+    if r.status_code == 500:
+        # Runtime com autoridade apontando para store perdido (D-A): o arquivo
+        # pode existir e o home continuar quebrado.
         raise HTTPException(
-            status_code=502,
-            detail=f"Hermes session create failed ({r.status_code})",
+            status_code=400,
+            detail="profile sem estado — home do profile precisa ser reinicializado",
         )
+    if r.status_code == 400:
+        detail = "pedido recusado pelo Hermes"
+        try:
+            body = r.json()
+            err = body.get("error") if isinstance(body, dict) else None
+            msg = (err or {}).get("message") if isinstance(err, dict) else None
+            if msg:
+                detail = f"Hermes recusou a sessão: {msg}"
+        except Exception:
+            pass
+        raise HTTPException(status_code=400, detail=detail)
+    raise HTTPException(
+        status_code=502,
+        detail=f"Hermes session create failed ({r.status_code})",
+    )
 
 
 async def _remote_messages(profile: str, session_id: str, limit: int, offset: int) -> dict:
@@ -431,8 +523,11 @@ async def create_chat_session(body: dict, user: dict = Depends(require_auth)):
         raise HTTPException(status_code=400, detail="title must be a string")
 
     if user.get("role") == "admin" and profile != "default":
-        # dropdown do admin: provisiona a chave do profile na primeira conversa
+        # dropdown do admin: prepara o home (state.db) e provisiona a chave na
+        # primeira conversa — sem isso o profile recém-criado não abre sessão.
+        _ensure_profile_home(profile)
         _ensure_profile_key(profile)
+        _hot_serve_profile(profile)
 
     row = chat_sessions.create(user["user_id"], profile, title=title)
     try:
