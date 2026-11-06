@@ -8,10 +8,12 @@ Never exposes api_key / token fields to the API.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 import tempfile
+import time
 from typing import Any
 
 import yaml
@@ -501,6 +503,111 @@ async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]
     return _to_detail(pid, cfg)
 
 
+_PURGED_MARKER = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "purged_profiles.json")
+
+
+def _gateway_runtime_identity() -> dict[str, Any]:
+    """pid/instance do gateway vivo (para saber se um nome purgado já foi liberado)."""
+    try:
+        import sys
+        if "/opt/hermes" not in sys.path:
+            sys.path.insert(0, "/opt/hermes")
+        from pathlib import Path as _Path
+        from gateway.control_socket import query_gateway_control
+
+        home = _Path(os.environ.get("HERMES_HOME") or "/opt/data")
+        return query_gateway_control(home, "identify", timeout=4.0) or {}
+    except Exception:
+        return {}
+
+
+def _load_purged() -> dict[str, Any]:
+    try:
+        with open(_PURGED_MARKER, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _mark_purged(pid: str) -> None:
+    """Registra que o NOME foi purgado nesta execução do gateway.
+
+    Reusar o mesmo nome depois de purge prende a autoridade antiga no runtime
+    (toda sessão vira 503) — só um restart do gateway libera. O marcador
+    guarda o pid/instance para (a) recusar re-create com erro claro e (b)
+    liberar sozinho quando o gateway for outro processo.
+    """
+    ident = _gateway_runtime_identity()
+    data = _load_purged()
+    data[pid] = {
+        "pid": ident.get("pid"),
+        "instance_id": ident.get("instance_id"),
+        "at": int(time.time()),
+    }
+    try:
+        os.makedirs(os.path.dirname(_PURGED_MARKER), exist_ok=True)
+        tmp = _PURGED_MARKER + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, _PURGED_MARKER)
+    except Exception:
+        pass
+
+
+def _purged_name_blocked(pid: str) -> bool:
+    entry = _load_purged().get(pid)
+    if not isinstance(entry, dict):
+        return False
+    ident = _gateway_runtime_identity()
+    same = (
+        entry.get("pid") == ident.get("pid")
+        and entry.get("instance_id") == ident.get("instance_id")
+    )
+    if not same:
+        # gateway reiniciou: autoridade velha morreu, nome pode ser reusado
+        data = _load_purged()
+        data.pop(pid, None)
+        try:
+            with open(_PURGED_MARKER, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+        except Exception:
+            pass
+        return False
+    return True
+
+
+def _notify_gateway_profile_change(pid: str, *, removed: bool) -> None:
+    """Aviza o gateway para reconciliar `profiles/` agora (verbo rescan-profiles).
+
+    Sem isso, purge + re-create do MESMO nome fica travado: o reconciler recria
+    o diretório apagado e o create volta a bater em 409/500 com autoridade
+    velha (D-B do round 6). Best-effort: sem socket/verb antigo, o tick de 30s
+    cobre — nunca falha a operação da API por causa disto.
+    """
+    try:
+        import sys
+        if "/opt/hermes" not in sys.path:
+            sys.path.insert(0, "/opt/hermes")
+        from pathlib import Path as _Path
+        from gateway.control_socket import (
+            query_gateway_control,
+            request_unserve_profile,
+            rescan_gateway_profiles,
+        )
+
+        home = _Path(os.environ.get("HERMES_HOME") or "/opt/data")
+        if removed:
+            # D-B: sem purgar a IDENTIDADE o runtime mantém autoridade velha do
+            # nome e o re-create fica preso em 409/500. O CLI de delete usa
+            # este mesmo verbo.
+            query_gateway_control(home, "purge-profile-identity", params={"name": pid}, timeout=8.0)
+            request_unserve_profile(home, pid)
+        rescan_gateway_profiles(home, timeout=5.0)
+    except Exception:
+        pass
+
+
 @router.post("", dependencies=[Depends(require_admin)])
 async def create_profile(body: ProfileCreate) -> dict[str, Any]:
     """Create a new profile directory with config.yaml."""
@@ -508,9 +615,23 @@ async def create_profile(body: ProfileCreate) -> dict[str, Any]:
     if not raw:
         raise HTTPException(status_code=400, detail="'name' is required")
     pid = _sanitize_id(raw)
+    if _purged_name_blocked(pid):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"O nome '{pid}' foi purgado nesta execução do gateway: reusá-lo deixaria "
+                "sessões presas em 503. Use outro nome ou reinicie o gateway."
+            ),
+        )
     dir_path = _profile_dir(pid)
     if os.path.exists(dir_path):
-        raise HTTPException(status_code=409, detail=f"Profile '{pid}' already exists")
+        if os.path.isfile(_config_path(pid)):
+            raise HTTPException(status_code=409, detail=f"Profile '{pid}' already exists")
+        # D-B: purge deixa (ou o gateway recria) uma casca sem config — o nome
+        # não está em uso pelo produto, então reutilizar é correto; 409 aqui
+        # travava o nome para sempre.
+        import shutil as _shutil
+        _shutil.rmtree(dir_path, ignore_errors=True)
 
     os.makedirs(dir_path, mode=0o700, exist_ok=True)
     _fix_owner(dir_path)
@@ -537,6 +658,7 @@ async def create_profile(body: ProfileCreate) -> dict[str, Any]:
 
     yaml_text = yaml.safe_dump(cfg, default_flow_style=False, sort_keys=False, allow_unicode=True)
     _atomic_write(_config_path(pid), yaml_text)
+    _notify_gateway_profile_change(pid, removed=False)
     return _to_detail(pid, cfg)
 
 
@@ -556,6 +678,8 @@ async def delete_profile(profile_id: str, purge: bool = False) -> dict[str, Any]
     import shutil
     if purge:
         shutil.rmtree(dir_path)
+        _notify_gateway_profile_change(pid, removed=True)
+        _mark_purged(pid)
         return {"deleted": pid, "purged": True}
 
     removed = []
@@ -570,6 +694,7 @@ async def delete_profile(profile_id: str, purge: bool = False) -> dict[str, Any]
             os.rmdir(dir_path)
     except OSError:
         pass
+    _notify_gateway_profile_change(pid, removed=True)
     return {"deleted": pid, "purged": False, "removed": removed}
 
 
