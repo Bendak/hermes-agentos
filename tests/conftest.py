@@ -30,6 +30,7 @@ os.environ["AGENTOS_JWT_SECRET"] = "test-only-secret-not-real"
 os.environ["AGENTOS_WORKSPACE_ROOTS"] = os.path.join(SANDBOX, "wsroot")
 os.environ["AGENTOS_PROFILES_DIR"] = os.path.join(SANDBOX, "profiles")
 os.environ["AGENTOS_CRON_HOME"] = SANDBOX
+os.environ["AGENTOS_STATE_DIR"] = os.path.join(SANDBOX, "agentos-state")
 os.makedirs(os.environ["AGENTOS_WORKSPACE_ROOTS"], exist_ok=True)
 
 import backend.auth as auth  # noqa: E402  (env must be set first)
@@ -202,3 +203,16 @@ def make_task(client, admin_headers, wsroot):
         shutil.rmtree(ws, ignore_errors=True)
     conn.commit()
     conn.close()
+
+
+@pytest.fixture(autouse=True)
+def _clear_purged_marker():
+    """O marcador de profiles purgados é estado GLOBAL; testes não podem
+    herdá-lo de uma execução anterior (era o que deixava a suíte vermelha no
+    segundo run)."""
+    path = os.path.join(os.environ["AGENTOS_STATE_DIR"], "purged_profiles.json")
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    yield
