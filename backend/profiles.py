@@ -8,6 +8,7 @@ Never exposes api_key / token fields to the API.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
 import os
@@ -18,6 +19,7 @@ import time
 from typing import Any
 
 import yaml
+from contextlib import contextmanager
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
@@ -506,7 +508,7 @@ async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]
 
 # Fora da árvore do repo (volume persistente): o marcador não pode deixar o
 # checkout sujo nem sumir num git clean/redeploy.
-_PURGED_LOCK = threading.Lock()
+_PURGED_LOCK = threading.RLock()
 
 _PURGED_MARKER = os.path.join(
     os.environ.get("AGENTOS_STATE_DIR") or "/opt/data/.agentos",
@@ -538,23 +540,45 @@ def _load_purged() -> dict[str, Any]:
         return {}
 
 
-def _write_purged(data: dict[str, Any]) -> None:
-    """Escrita atômica com tmp ÚNICO (RMW concorrente não pode rasgar o JSON)."""
+@contextmanager
+def _purged_guard():
+    """Serializa o RMW do marcador: RLock (threads) + flock (processos)."""
+    os.makedirs(os.path.dirname(_PURGED_MARKER), exist_ok=True)
+    lock_path = _PURGED_MARKER + ".lock"
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
     with _PURGED_LOCK:
-        os.makedirs(os.path.dirname(_PURGED_MARKER), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(
-            prefix=".purged-", suffix=".tmp", dir=os.path.dirname(_PURGED_MARKER)
-        )
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(data, fh)
-            os.replace(tmp, _PURGED_MARKER)
-        except Exception:
+        with os.fdopen(fd, "a+") as lf:
+            fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
             try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+                yield
+            finally:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
+def _write_purged_unlocked(data: dict[str, Any]) -> None:
+    """tmp ÚNICO + replace. O caller precisa segurar _purged_guard()."""
+    fd, tmp = tempfile.mkstemp(
+        prefix=".purged-", suffix=".tmp", dir=os.path.dirname(_PURGED_MARKER)
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(data, fh)
+        os.replace(tmp, _PURGED_MARKER)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _update_purged(mutate) -> dict[str, Any]:
+    """RMW atômico: lê, muta e grava DENTRO do lock (threads e processos)."""
+    with _purged_guard():
+        data = _load_purged()
+        mutate(data)
+        _write_purged_unlocked(data)
+        return data
 
 
 def _mark_purged(pid: str) -> None:
@@ -566,14 +590,13 @@ def _mark_purged(pid: str) -> None:
     liberar sozinho quando o gateway for outro processo.
     """
     ident = _gateway_runtime_identity()
-    data = _load_purged()
-    data[pid] = {
+    entry = {
         "pid": ident.get("pid"),
         "instance_id": ident.get("instance_id"),
         "at": int(time.time()),
     }
     try:
-        _write_purged(data)
+        _update_purged(lambda data: data.__setitem__(pid, entry))
     except Exception as exc:
         logger.warning("não foi possível gravar o marcador de profiles purgados: %s", exc)
 
@@ -593,10 +616,8 @@ def _purged_name_blocked(pid: str) -> bool:
     if same:
         return True
     # identidade CONFIRMADAMENTE diferente: autoridade velha morreu
-    data = _load_purged()
-    data.pop(pid, None)
     try:
-        _write_purged(data)
+        _update_purged(lambda data: data.pop(pid, None))
     except Exception as exc:
         logger.warning("não foi possível limpar o marcador de profile purgado: %s", exc)
     return False
