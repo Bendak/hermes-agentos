@@ -506,6 +506,8 @@ async def update_profile(profile_id: str, body: ProfileUpdate) -> dict[str, Any]
 
 # Fora da árvore do repo (volume persistente): o marcador não pode deixar o
 # checkout sujo nem sumir num git clean/redeploy.
+_PURGED_LOCK = threading.Lock()
+
 _PURGED_MARKER = os.path.join(
     os.environ.get("AGENTOS_STATE_DIR") or "/opt/data/.agentos",
     "purged_profiles.json",
@@ -536,6 +538,25 @@ def _load_purged() -> dict[str, Any]:
         return {}
 
 
+def _write_purged(data: dict[str, Any]) -> None:
+    """Escrita atômica com tmp ÚNICO (RMW concorrente não pode rasgar o JSON)."""
+    with _PURGED_LOCK:
+        os.makedirs(os.path.dirname(_PURGED_MARKER), exist_ok=True)
+        fd, tmp = tempfile.mkstemp(
+            prefix=".purged-", suffix=".tmp", dir=os.path.dirname(_PURGED_MARKER)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(data, fh)
+            os.replace(tmp, _PURGED_MARKER)
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+
 def _mark_purged(pid: str) -> None:
     """Registra que o NOME foi purgado nesta execução do gateway.
 
@@ -552,11 +573,7 @@ def _mark_purged(pid: str) -> None:
         "at": int(time.time()),
     }
     try:
-        os.makedirs(os.path.dirname(_PURGED_MARKER), exist_ok=True)
-        tmp = _PURGED_MARKER + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh)
-        os.replace(tmp, _PURGED_MARKER)
+        _write_purged(data)
     except Exception as exc:
         logger.warning("não foi possível gravar o marcador de profiles purgados: %s", exc)
 
@@ -567,8 +584,10 @@ def _purged_name_blocked(pid: str) -> bool:
         return False
     ident = _gateway_runtime_identity()
     cur_pid, cur_inst = ident.get("pid"), ident.get("instance_id")
-    if not cur_pid and not cur_inst:
-        # D-E: identidade desconhecida -> FAIL-CLOSED (não libera nem apaga)
+    if not cur_pid or not cur_inst:
+        # D-E: identidade desconhecida/parcial -> FAIL-CLOSED (não libera nem apaga)
+        return True
+    if entry.get("pid") is None or entry.get("instance_id") is None:
         return True
     same = entry.get("pid") == cur_pid and entry.get("instance_id") == cur_inst
     if same:
@@ -577,11 +596,7 @@ def _purged_name_blocked(pid: str) -> bool:
     data = _load_purged()
     data.pop(pid, None)
     try:
-        os.makedirs(os.path.dirname(_PURGED_MARKER), exist_ok=True)
-        tmp = _PURGED_MARKER + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as fh:
-            json.dump(data, fh)
-        os.replace(tmp, _PURGED_MARKER)
+        _write_purged(data)
     except Exception as exc:
         logger.warning("não foi possível limpar o marcador de profile purgado: %s", exc)
     return False
@@ -649,7 +664,9 @@ async def create_profile(body: ProfileCreate) -> dict[str, Any]:
             status_code=409,
             detail=(
                 f"O nome '{pid}' foi purgado nesta execução do gateway: reusá-lo deixaria "
-                "sessões presas em 503. Use outro nome ou reinicie o gateway."
+                "sessões presas em 503. Use outro nome ou reinicie o gateway; se o gateway "
+                "estiver indisponível, aguarde — o nome é liberado quando a identidade dele "
+                "for confirmada."
             ),
         )
     dir_path = _profile_dir(pid)
@@ -742,6 +759,16 @@ async def duplicate_profile(profile_id: str, body: dict | None = None) -> dict[s
 
     new_name = (body or {}).get("name", f"{pid}-copy") if body else f"{pid}-copy"
     new_pid = _sanitize_id(new_name)
+    if _purged_name_blocked(new_pid):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"O nome '{new_pid}' foi purgado nesta execução do gateway: reusá-lo deixaria "
+                "sessões presas em 503. Use outro nome ou reinicie o gateway; se o gateway "
+                "estiver indisponível, aguarde — o nome é liberado quando a identidade dele "
+                "for confirmada."
+            ),
+        )
     new_dir = _profile_dir(new_pid)
     if os.path.exists(new_dir):
         raise HTTPException(status_code=409, detail=f"Profile '{new_pid}' already exists")
