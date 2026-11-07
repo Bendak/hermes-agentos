@@ -643,19 +643,37 @@ async def _channel_turn_stream(row: dict, user: dict, body: dict):
     thread_id = row["hermes_id"]
     client = get_client()
     turn_attachments: list[dict] = []
+    thinking_text = ""
+    turn_tools: list[dict] = []
 
     async def persist_frame(frame: dict) -> None:
         # This callback runs in the ChannelClient dispatcher, independent of the
         # SSE consumer.  A refresh/Stop therefore cannot lose the final answer:
         # the transcript is written even when the queue is already gone.
+        nonlocal thinking_text
         kind = frame.get("type")
-        if kind == "attachment":
+        if kind == "thinking":
+            # Keep the reasoning visible after the live panel clears at final.
+            text = frame.get("text") or ""
+            if text and not thinking_text.endswith(text):
+                thinking_text += text
+        elif kind == "tool" and frame.get("event") == "finished":
+            name = frame.get("name") or "tool"
+            preview = frame.get("error") or frame.get("preview") or ""
+            turn_tools.append({"function": {"name": name, "arguments": preview}})
+        elif kind == "attachment":
             turn_attachments.append({k: frame.get(k) for k in
                                      ("kind", "name", "mime", "caption", "path", "url")})
         elif kind == "final":
+            meta: dict = {}
+            if thinking_text:
+                meta["reasoning_content"] = thinking_text
+            if turn_tools:
+                meta["tool_calls"] = list(turn_tools)
+            if turn_attachments:
+                meta["attachments"] = list(turn_attachments)
             chat_transcript.append(
-                session_id, "assistant", frame.get("text") or "",
-                {"attachments": list(turn_attachments)} if turn_attachments else None)
+                session_id, "assistant", frame.get("text") or "", meta or None)
 
     turn_lock = await _acquire_turn_lock(session_id)
     try:
