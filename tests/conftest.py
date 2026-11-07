@@ -31,6 +31,8 @@ os.environ["AGENTOS_WORKSPACE_ROOTS"] = os.path.join(SANDBOX, "wsroot")
 os.environ["AGENTOS_PROFILES_DIR"] = os.path.join(SANDBOX, "profiles")
 os.environ["AGENTOS_CRON_HOME"] = SANDBOX
 os.environ["AGENTOS_STATE_DIR"] = os.path.join(SANDBOX, "agentos-state")
+# Tests exercise the legacy HTTP branch; production may be in plugin mode.
+os.environ["AGENTOS_CHANNEL"] = "http"
 os.makedirs(os.environ["AGENTOS_WORKSPACE_ROOTS"], exist_ok=True)
 
 import backend.auth as auth  # noqa: E402  (env must be set first)

@@ -63,6 +63,11 @@ def test_frames_cancel_keeps_turn_lock_until_terminal():
         except asyncio.CancelledError:
             pass
         assert lock.locked()
+        # The queue stays registered while the remote turn is still live;
+        # otherwise a terminal arriving later cannot release the lock.
+        assert client._queues.get("t") is queue
+        await client._dispatch({"type": "final", "thread_id": "t", "text": "ok"})
+        assert not lock.locked()
         assert "t" not in client._queues
 
     asyncio.run(run())

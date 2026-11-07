@@ -157,6 +157,10 @@ class ChannelClient:
                 self._queues.pop(thread_id, None)
             if queue is not None:
                 self.release(queue)
+            else:
+                lock = self._turn_locks.get(thread_id)
+                if lock is not None and lock.locked():
+                    lock.release()
 
     async def _ensure(self) -> None:
         if self._task is None:
@@ -236,10 +240,11 @@ class ChannelClient:
             await asyncio.sleep(timeout)
         except asyncio.CancelledError:
             return
-        # Drop the callback first so a very late terminal cannot be written
-        # under a subsequent turn; then release the thread for a new turn.
-        if self._queues.get(thread_id) is queue:
-            self._queues.pop(thread_id, None)
+        # A stale watchdog belongs to a queue that is no longer current: it
+        # must never touch the callback or lock of a subsequent turn.
+        if self._queues.get(thread_id) is not queue:
+            return
+        self._queues.pop(thread_id, None)
         self._callbacks.pop(thread_id, None)
         if lock.locked():
             lock.release()
@@ -265,10 +270,11 @@ class ChannelClient:
             yield {"type": "error", "code": "timeout",
                    "message": "AgentOS channel turn timed out"}
         finally:
-            if self._queues.get(thread_id) is queue:
-                self._queues.pop(thread_id, None)
+            # On a cancelled SSE consumer keep the queue registered so the
+            # dispatcher's terminal can still release the turn.  On a normal
+            # terminal the dispatcher already popped it.
             if terminal_seen and self._queues.get(thread_id) is queue:
-                # With no callback, the consumer owns the terminal release.
+                self._queues.pop(thread_id, None)
                 self.release(queue)
 
     async def approve(self, thread_id: str, prompt_id: str, option_id: str,
