@@ -20,6 +20,35 @@ interface ToolCall {
   function?: { name?: string; arguments?: string }
 }
 
+interface ChatAttachment {
+  kind?: string
+  name?: string
+  mime?: string
+  caption?: string
+  path?: string
+  url?: string
+}
+
+interface PendingAttachment {
+  path: string
+  name: string
+  mime: string
+  size: number
+}
+
+interface ApprovalOption {
+  id: string
+  label: string
+  style?: string
+}
+
+interface ApprovalCard {
+  prompt_id: string
+  kind: string
+  text: string
+  options: ApprovalOption[]
+}
+
 interface ChatMsg {
   role: 'user' | 'assistant' | 'tool' | 'system'
   content: string
@@ -28,6 +57,7 @@ interface ChatMsg {
   reasoning_content?: string | null
   tool_calls?: ToolCall[] | null
   display_kind?: string | null
+  attachments?: ChatAttachment[]
 }
 
 interface LiveTool {
@@ -55,6 +85,7 @@ interface RenderItem {
   content: string
   reasoning?: string
   tools: RenderTool[]
+  attachments: ChatAttachment[]
   ts?: string | number
 }
 
@@ -64,7 +95,7 @@ function buildItems(messages: ChatMsg[]): RenderItem[] {
   for (const m of messages) {
     if (m.role === 'system') continue
     if (m.role === 'user') {
-      items.push({ role: 'user', content: m.content, tools: [], ts: m.timestamp })
+      items.push({ role: 'user', content: m.content, tools: [], attachments: m.attachments || [], ts: m.timestamp })
       continue
     }
     if (m.role === 'tool') {
@@ -75,7 +106,7 @@ function buildItems(messages: ChatMsg[]): RenderItem[] {
         if (slot) slot.output = m.content
         else last.tools.push({ name, output: m.content })
       } else {
-        items.push({ role: 'agent', content: '', tools: [{ name, output: m.content }], ts: m.timestamp })
+        items.push({ role: 'agent', content: '', tools: [{ name, output: m.content }], attachments: [], ts: m.timestamp })
       }
       continue
     }
@@ -88,6 +119,7 @@ function buildItems(messages: ChatMsg[]): RenderItem[] {
       content: m.content || '',
       reasoning: m.reasoning_content || '',
       tools,
+      attachments: m.attachments || [],
       ts: m.timestamp,
     })
   }
@@ -137,11 +169,17 @@ async function streamTurn(
   text: string,
   onEvent: (event: string, payload: Record<string, unknown>) => void,
   signal: AbortSignal,
+  media: PendingAttachment[] = [],
 ): Promise<void> {
   const res = await fetch('/api/chat/sessions/' + sessionId + '/stream', {
     method: 'POST',
     headers: authHeaders(true),
-    body: JSON.stringify({ message: text }),
+    body: JSON.stringify({
+      message: text,
+      media_urls: media.map((m) => m.path),
+      media_types: media.map((m) => m.mime),
+      media_filenames: media.map((m) => m.name),
+    }),
     signal,
   })
   if (!res.ok) throw new Error(await apiErrorMessage(res))
@@ -233,6 +271,22 @@ function ToolBar({ tool }: { tool: RenderTool }) {
   )
 }
 
+function AttachmentCard({ item }: { item: ChatAttachment }) {
+  const label = item.name || item.kind || 'attachment'
+  return (
+    <div className="flex w-full max-w-[80%] items-center gap-3 rounded-xl border border-border bg-bg-elevated px-3 py-2 text-xs">
+      <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-tertiary">
+        {item.kind || 'file'}
+      </span>
+      <span className="min-w-0 flex-1 truncate text-text-secondary" title={label}>{label}</span>
+      {item.url ? (
+        <a href={item.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">open</a>
+      ) : null}
+      {item.caption ? <span className="max-w-[40%] truncate text-text-tertiary">{item.caption}</span> : null}
+    </div>
+  )
+}
+
 export default function ChatPage() {
   const { user } = useAuth()
   const [sessions, setSessions] = useState<ChatSession[]>([])
@@ -252,11 +306,15 @@ export default function ChatPage() {
 
   const [thinking, setThinking] = useState('')
   const [liveTools, setLiveTools] = useState<LiveTool[]>([])
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([])
+  const [liveAttachments, setLiveAttachments] = useState<ChatAttachment[]>([])
+  const [approvalCards, setApprovalCards] = useState<ApprovalCard[]>([])
   const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([])
   const [selectedProfile, setSelectedProfile] = useState<string>('default')
 
   const bottomRef = useRef<HTMLDivElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const abortRef = useRef<AbortController | null>(null)
   const activeIdRef = useRef<string | null>(null)
@@ -368,6 +426,8 @@ export default function ChatPage() {
     setStreamText('')
     setThinking('')
     setLiveTools([])
+    setLiveAttachments([])
+    setApprovalCards([])
     void loadMessages(id)
   }
 
@@ -419,13 +479,17 @@ export default function ChatPage() {
 
   async function sendMessage(text: string) {
     const trimmed = text.trim()
-    if (!trimmed || sending) return
+    const attached = pendingAttachments
+    if ((!trimmed && attached.length === 0) || sending) return
     setInput('')
+    setPendingAttachments([])
     setError(null)
     setSending(true)
     setStreamText('')
     setThinking('')
     setLiveTools([])
+    setLiveAttachments([])
+    setApprovalCards([])
 
     try {
       let id = activeIdRef.current
@@ -433,7 +497,7 @@ export default function ChatPage() {
         const row = await createChat()
         id = row.id
       }
-      setMessages((prev) => [...prev, { role: 'user', content: trimmed }])
+      setMessages((prev) => [...prev, { role: 'user', content: trimmed || attached.map((a) => a.name).join(', ') }])
       const controller = new AbortController()
       abortRef.current = controller
       await streamTurn(
@@ -442,6 +506,17 @@ export default function ChatPage() {
         (event, payload) => {
           if (event === 'assistant.delta' && typeof payload.delta === 'string') {
             setStreamText((prev) => prev + (payload.delta as string))
+          } else if (event === 'assistant.attachment') {
+            setLiveAttachments((prev) => [...prev, payload as unknown as ChatAttachment])
+          } else if (event === 'approval.card') {
+            setApprovalCards((prev) => [
+              ...prev.filter((c) => c.prompt_id !== String(payload.prompt_id)),
+              payload as unknown as ApprovalCard,
+            ])
+          } else if (event === 'approval.result') {
+            setApprovalCards((prev) => prev.filter((c) => c.prompt_id !== String(payload.prompt_id)))
+          } else if (event === 'error') {
+            setError(String(payload.message || payload.code || 'Erro no canal'))
           } else if (event === 'tool.progress' && payload.tool_name === '_thinking') {
             setThinking((prev) => prev + String(payload.delta || ''))
           } else if (event === 'tool.started') {
@@ -471,11 +546,14 @@ export default function ChatPage() {
           }
         },
         controller.signal,
+        attached,
       )
       await loadMessages(id)
       setStreamText('')
       setThinking('')
       setLiveTools([])
+      setLiveAttachments([])
+      setApprovalCards([])
       await loadSessions()
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
@@ -574,6 +652,43 @@ export default function ChatPage() {
       const text: string = data.text ?? ''
       if (text) setInput((prev) => (prev ? prev + ' ' + text : text))
       else setError('Could not understand the audio — try again.')
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  async function uploadFiles(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setError(null)
+    const added: PendingAttachment[] = []
+    for (const file of Array.from(files).slice(0, 10)) {
+      const fd = new FormData()
+      fd.append('file', file, file.name)
+      const res = await fetch('/api/chat/uploads', {
+        method: 'POST', headers: authHeaders(), body: fd,
+      })
+      if (!res.ok) {
+        setError(await apiErrorMessage(res))
+        continue
+      }
+      added.push(await res.json() as PendingAttachment)
+    }
+    if (added.length) setPendingAttachments((prev) => [...prev, ...added].slice(0, 10))
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  async function answerApproval(card: ApprovalCard, option: ApprovalOption) {
+    const id = activeIdRef.current
+    if (!id) return
+    setApprovalCards((prev) => prev.filter((c) => c.prompt_id !== card.prompt_id))
+    try {
+      const res = await fetch('/api/chat/approvals', {
+        method: 'POST', headers: authHeaders(true),
+        body: JSON.stringify({
+          session_id: id, prompt_id: card.prompt_id, option_id: option.id,
+        }),
+      })
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
     } catch (err) {
       setError((err as Error).message)
     }
@@ -771,6 +886,9 @@ export default function ChatPage() {
                     <div key={i} className="flex flex-col items-end gap-1">
                       <div className="w-full max-w-[80%] rounded-2xl rounded-br-sm bg-accent-subtle px-4 py-2.5 text-sm leading-relaxed text-accent">
                         <span className="whitespace-pre-wrap">{item.content}</span>
+                        {item.attachments.map((a, k) => (
+                          <div key={k} className="mt-2"><AttachmentCard item={a} /></div>
+                        ))}
                       </div>
                       {fmtTs(item.ts) && (
                         <span className="mt-1 text-caption text-text-tertiary">{fmtTs(item.ts)}</span>
@@ -792,6 +910,9 @@ export default function ChatPage() {
                         <div className="prose-invert max-w-full">
                           <MarkdownRenderer content={item.content} />
                         </div>
+                        {item.attachments.map((a, k) => (
+                          <div key={k} className="mt-2"><AttachmentCard item={a} /></div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -814,6 +935,25 @@ export default function ChatPage() {
                       {t.preview && <span className="max-w-[45%] truncate opacity-70">{t.preview}</span>}
                     </div>
                   ))}
+                  {liveAttachments.map((a, k) => (
+                    <AttachmentCard key={k} item={a} />
+                  ))}
+                  {approvalCards.map((card) => (
+                    <div key={card.prompt_id} className="w-full max-w-[80%] rounded-xl border border-accent/40 bg-accent-subtle/30 p-3">
+                      <p className="mb-2 text-xs text-text-primary whitespace-pre-wrap">{card.text}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {card.options.map((opt) => (
+                          <button key={opt.id} onClick={() => void answerApproval(card, opt)}
+                            className={'rounded-lg px-3 py-1.5 text-xs font-medium ' +
+                              (opt.style === 'danger'
+                                ? 'border border-red-500/40 text-red-300 hover:bg-red-500/10'
+                                : 'bg-accent text-white hover:opacity-90')}>
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
                   {streamText ? (
                     <div className="w-full max-w-[80%] rounded-2xl rounded-bl-sm bg-surface/60 px-4 py-2.5 text-sm leading-relaxed text-text-primary">
                       <div className="prose-invert max-w-full">
@@ -833,7 +973,23 @@ export default function ChatPage() {
           </div>
 
           <div className="border-t border-border p-3">
+            {pendingAttachments.length > 0 && (
+              <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-1.5">
+                {pendingAttachments.map((a) => (
+                  <span key={a.path} className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-elevated px-2 py-1 text-[11px] text-text-secondary">
+                    {a.name}
+                    <button onClick={() => setPendingAttachments((prev) => prev.filter((x) => x.path !== a.path))}
+                      className="text-text-tertiary hover:text-red-400" aria-label={'Remove ' + a.name}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="mx-auto flex max-w-3xl items-end gap-2">
+              <input ref={fileInputRef} type="file" multiple className="hidden"
+                onChange={(e) => void uploadFiles(e.target.files)} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={sending || !active}
+                className="h-[42px] shrink-0 rounded-xl border border-border px-3 text-sm text-text-secondary hover:text-text-primary disabled:opacity-40"
+                title="Attach files" aria-label="Attach files">📎</button>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -875,7 +1031,7 @@ export default function ChatPage() {
               </button>
               <button
                 onClick={() => void sendMessage(input)}
-                disabled={sending || !input.trim()}
+                disabled={sending || (!input.trim() && pendingAttachments.length === 0)}
                 className="h-[42px] shrink-0 rounded-xl bg-accent px-4 text-sm font-medium text-white disabled:opacity-40"
               >
                 Send

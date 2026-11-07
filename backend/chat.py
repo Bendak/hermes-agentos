@@ -9,6 +9,7 @@ the Hermes docker-compose environment.
 """
 import asyncio
 import json
+import mimetypes
 import os
 import secrets
 import time
@@ -17,14 +18,15 @@ from typing import List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 import logging
 
-from backend import chat_sessions
+from backend import chat_sessions, chat_transcript
 from backend.auth import require_auth
 from backend.config import settings
+from backend.channel_client import channel_mode, get_client
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -347,9 +349,12 @@ def _gateway_headers(profile: str = "default") -> dict:
 async def _create_remote_session(profile: str, session_id: str, title: str | None) -> None:
     """Create the session row in the gateway so the transcript exists there.
 
-    We mint the id ourselves (`agentos_<uuid>`) — the API accepts `id`, so there
-    is no second round trip and no chance of a duplicate.
+    In channel mode the plugin creates the gateway session on the first
+    MessageEvent; creating an API-server row here would leave an unused ghost.
     """
+    if channel_mode():
+        return
+
     payload = {"id": session_id, "source": "api_server"}
     if title:
         payload["title"] = title
@@ -461,6 +466,8 @@ async def _patch_remote_session(row: dict, *, archived: bool | None = None,
     if title is not None:
         body["title"] = title
     if not body:
+        return
+    if channel_mode():
         return
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=5.0)) as client:
@@ -584,7 +591,122 @@ async def chat_session_messages(
     row = _owned_or_404(session_id, user)
     if limit < 1 or limit > 500 or offset < 0:
         raise HTTPException(status_code=400, detail="limit/offset inválidos")
+    if channel_mode():
+        data = chat_transcript.list_messages(session_id, limit, offset)
+        return {"data": data, "pagination": {"total": len(data), "limit": limit, "offset": offset}}
     return await _remote_messages(row["profile"], row["hermes_id"], limit, offset)
+
+
+def _sse(event: str, payload: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def _channel_media_root() -> str:
+    return os.environ.get("AGENTOS_CHANNEL_MEDIA_ROOT") or os.path.join(
+        settings.AGENTOS_DATA_DIR, "agentos", "uploads")
+
+
+def _channel_media_paths(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        raise HTTPException(status_code=400, detail="media_urls inválido")
+    root = os.path.realpath(_channel_media_root())
+    out: list[str] = []
+    for item in raw[:10]:
+        if not isinstance(item, str) or not item:
+            raise HTTPException(status_code=400, detail="media_urls inválido")
+        real = os.path.realpath(item)
+        if real != root and not real.startswith(root + os.sep):
+            raise HTTPException(status_code=400, detail="anexo fora do diretório permitido")
+        if not os.path.isfile(real):
+            raise HTTPException(status_code=400, detail="anexo não encontrado")
+        out.append(real)
+    return out
+
+
+async def _channel_turn_stream(row: dict, user: dict, body: dict):
+    """Translate agentos-channel frames to the existing Chat.tsx SSE contract."""
+    message = body.get("message") or body.get("input") or ""
+    if not isinstance(message, str):
+        raise HTTPException(status_code=400, detail="Mensagem inválida")
+    media_urls = _channel_media_paths(body.get("media_urls") or [])
+    if not message.strip() and not media_urls:
+        raise HTTPException(status_code=400, detail="Mensagem vazia")
+    media_types = body.get("media_types") if isinstance(body.get("media_types"), list) else []
+    media_names = body.get("media_filenames") if isinstance(body.get("media_filenames"), list) else []
+    if not media_types:
+        media_types = [mimetypes.guess_type(path)[0] or "application/octet-stream"
+                       for path in media_urls]
+    if not media_names:
+        media_names = [os.path.basename(path) for path in media_urls]
+
+    session_id = row["id"]
+    thread_id = row["hermes_id"]
+    client = get_client()
+    turn_lock = await _acquire_turn_lock(session_id)
+    try:
+        queue = await client.send_turn(
+            thread_id, user_id=f"agentos:{user['user_id']}",
+            user_name=user["username"], text=message,
+            media_urls=media_urls, media_types=media_types,
+            media_filenames=media_names, profile=row.get("profile"))
+    except RuntimeError:
+        turn_lock.release()
+        raise HTTPException(status_code=409, detail="Turno já em andamento nesta sessão")
+    except Exception as exc:
+        turn_lock.release()
+        raise HTTPException(status_code=502, detail=f"canal indisponível: {type(exc).__name__}")
+
+    chat_sessions.touch(session_id, title=chat_sessions.title_from_message(message or "Anexo"))
+    chat_transcript.append(session_id, "user", message or "[anexo]")
+
+    async def gen():
+        attachments: list[dict] = []
+        try:
+            async for frame in client.frames(thread_id, queue):
+                kind = frame.get("type")
+                if kind == "delta":
+                    yield _sse("assistant.delta", {"delta": frame.get("text") or ""})
+                elif kind == "thinking":
+                    yield _sse("tool.progress", {"tool_name": "_thinking",
+                                                 "delta": frame.get("text") or ""})
+                elif kind == "commentary":
+                    yield _sse("assistant.commentary", {"text": frame.get("text") or ""})
+                elif kind == "tool":
+                    event = "tool.started" if frame.get("event") == "started" else (
+                        "tool.completed" if frame.get("ok") else "tool.failed")
+                    yield _sse(event, {"tool_name": frame.get("name") or "tool",
+                                       "preview": frame.get("preview") or "",
+                                       "index": frame.get("index")})
+                elif kind == "attachment":
+                    attachments.append({k: frame.get(k) for k in
+                                        ("kind", "name", "mime", "caption", "path", "url")})
+                    yield _sse("assistant.attachment",
+                               {**attachments[-1], "message_id": frame.get("message_id")})
+                elif kind == "approval":
+                    yield _sse("approval.card", frame)
+                elif kind == "approval_result":
+                    yield _sse("approval.result", frame)
+                elif kind == "approval_retired":
+                    yield _sse("approval.retired", frame)
+                elif kind == "final":
+                    text = frame.get("text") or ""
+                    chat_transcript.append(
+                        session_id, "assistant", text,
+                        {"attachments": attachments} if attachments else None)
+                    yield _sse("assistant.final", {"text": text})
+                    return
+                elif kind == "error":
+                    yield _sse("error", {"code": frame.get("code"),
+                                         "message": frame.get("message") or "erro no canal"})
+                    return
+        finally:
+            if turn_lock.locked():
+                turn_lock.release()
+
+    return StreamingResponse(
+        gen(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "Connection": "keep-alive",
+                 "X-Accel-Buffering": "no"})
 
 
 @router.post("/api/chat/sessions/{session_id}/stream")
@@ -593,6 +715,8 @@ async def chat_session_stream(session_id: str, body: dict, user: dict = Depends(
     row = _owned_or_404(session_id, user)
     if row["archived"]:
         raise HTTPException(status_code=409, detail="Sessão arquivada")
+    if channel_mode():
+        return await _channel_turn_stream(row, user, body)
     message = body.get("message") or body.get("input")
     if not isinstance(message, str) or not message.strip():
         raise HTTPException(status_code=400, detail="Mensagem vazia")
@@ -668,6 +792,83 @@ async def chat_session_stream(session_id: str, body: dict, user: dict = Depends(
         if turn_lock.locked():
             turn_lock.release()
         raise HTTPException(status_code=502, detail="Hermes API unreachable")
+
+
+_UPLOAD_EXTS = {
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg",
+    ".pdf", ".txt", ".md", ".csv", ".json", ".doc", ".docx", ".odt", ".rtf",
+    ".mp3", ".wav", ".ogg", ".m4a", ".webm", ".mp4", ".mov",
+}
+
+
+@router.post("/api/chat/uploads")
+async def chat_upload(file: UploadFile = File(...), user: dict = Depends(require_auth)):
+    """Store a browser attachment under the channel's confined upload root."""
+    name = os.path.basename(file.filename or "anexo")
+    ext = os.path.splitext(name)[1].lower()
+    if ext not in _UPLOAD_EXTS:
+        raise HTTPException(status_code=400, detail="Tipo de anexo não permitido")
+    root = os.path.realpath(_channel_media_root())
+    os.makedirs(root, exist_ok=True)
+    stored = os.path.join(root, f"{user['user_id']}-{secrets.token_hex(16)}{ext}")
+    total = 0
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(stored, flags, 0o600)
+        with os.fdopen(fd, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > 25 * 1024 * 1024:
+                    raise HTTPException(status_code=413, detail="Anexo muito grande")
+                out.write(chunk)
+    except HTTPException:
+        try:
+            os.unlink(stored)
+        except OSError:
+            pass
+        raise
+    except OSError:
+        raise HTTPException(status_code=500, detail="Falha ao salvar anexo")
+    # Derive the type from the allowlisted extension, never trust the browser's
+    # declared content type (an HTML body renamed .png must not be served as HTML).
+    mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+    return {"path": stored, "name": name, "mime": mime, "size": total}
+
+
+@router.get("/api/chat/uploads/{stored_name}")
+async def chat_upload_read(stored_name: str, user: dict = Depends(require_auth)):
+    """Serve an uploaded attachment; only names directly under the upload root."""
+    if os.path.basename(stored_name) != stored_name:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    path = os.path.join(os.path.realpath(_channel_media_root()), stored_name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Anexo não encontrado")
+    return FileResponse(
+        path, media_type=mimetypes.guess_type(path)[0] or "application/octet-stream",
+        headers={"X-Content-Type-Options": "nosniff",
+                 "Content-Security-Policy": "default-src 'none'; sandbox"})
+
+
+@router.post("/api/chat/approvals")
+async def chat_approval(body: dict, user: dict = Depends(require_auth)):
+    """Forward a card answer to the plugin; the gateway resolves the primitive."""
+    if not channel_mode():
+        raise HTTPException(status_code=404, detail="Aprovação disponível apenas no modo plugin")
+    session_id = str(body.get("session_id") or "")
+    prompt_id = str(body.get("prompt_id") or "")
+    option_id = str(body.get("option_id") or "")
+    text = body.get("text") if isinstance(body.get("text"), str) else ""
+    if not session_id or not prompt_id or not option_id:
+        raise HTTPException(status_code=400, detail="prompt/opção inválidos")
+    row = _owned_or_404(session_id, user)
+    try:
+        await get_client().approve(row["hermes_id"], prompt_id, option_id, text)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"canal indisponível: {type(exc).__name__}")
+    return {"status": "forwarded"}
 
 
 @router.post("/api/voice")
