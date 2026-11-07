@@ -332,6 +332,7 @@ export default function ChatPage() {
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const abortRef = useRef<AbortController | null>(null)
+  const turnIdRef = useRef<string | null>(null)
   const activeIdRef = useRef<string | null>(null)
 
   const active = useMemo(() => sessions.find((s) => s.id === activeId) || null, [sessions, activeId])
@@ -449,7 +450,8 @@ export default function ChatPage() {
   async function resetTurn() {
     abortRef.current?.abort()
     abortRef.current = null
-    if (activeId) await resetChannelTurn(activeId)
+    if (activeId) await resetChannelTurn(activeId, turnIdRef.current)
+    turnIdRef.current = null
     setSending(false)
     setStreamText('')
     setThinking('')
@@ -504,14 +506,19 @@ export default function ChatPage() {
     }
   }
 
-  async function resetChannelTurn(id: string) {
+  async function resetChannelTurn(id: string, turnId: string | null): Promise<boolean> {
+    if (!turnId) return false
     try {
-      await fetch('/api/chat/sessions/' + id + '/reset-channel', {
+      const res = await fetch('/api/chat/sessions/' + id + '/reset-channel', {
         method: 'POST',
         headers: authHeaders(true),
+        body: JSON.stringify({ turn_id: turnId }),
       })
+      if (!res.ok) return false
+      const data = await res.json().catch(() => ({}))
+      return data.status === 'reset'
     } catch {
-      /* recovery is best-effort; the next send will surface any remaining error */
+      return false
     }
   }
 
@@ -536,13 +543,16 @@ export default function ChatPage() {
         id = row.id
       }
       setMessages((prev) => [...prev, { role: 'user', content: trimmed || attached.map((a) => a.name).join(', ') }])
+      turnIdRef.current = null
       const controller = new AbortController()
       abortRef.current = controller
       await streamTurn(
         id,
         trimmed,
         (event, payload) => {
-          if (event === 'assistant.delta' && typeof payload.delta === 'string') {
+          if (event === 'turn.started' && typeof payload.turn_id === 'string') {
+            turnIdRef.current = payload.turn_id
+          } else if (event === 'assistant.delta' && typeof payload.delta === 'string') {
             setStreamText((prev) => prev + (payload.delta as string))
           } else if (event === 'assistant.attachment') {
             setLiveAttachments((prev) => [...prev, payload as unknown as ChatAttachment])
@@ -555,7 +565,9 @@ export default function ChatPage() {
             setApprovalCards((prev) => prev.filter((c) => c.prompt_id !== String(payload.prompt_id)))
           } else if (event === 'error') {
             setError(String(payload.message || payload.code || 'Erro no canal'))
-            if (payload.code === 'timeout') void resetChannelTurn(id)
+            if (payload.code === 'timeout' && turnIdRef.current) {
+              void resetChannelTurn(id, turnIdRef.current)
+            }
           } else if (event === 'tool.progress' && payload.tool_name === '_thinking') {
             setThinking((prev) => prev + String(payload.delta || ''))
           } else if (event === 'tool.started') {
@@ -594,14 +606,17 @@ export default function ChatPage() {
       setLiveAttachments([])
       setApprovalCards([])
       await loadSessions()
+      turnIdRef.current = null
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         const message = (err as Error).message
         setError(message)
         const id = activeIdRef.current
-        if (id && message.includes('Turno')) {
-          await resetChannelTurn(id)
-          setError('Turno anterior liberado. Envie a mensagem novamente.')
+        if (id && message.includes('Turno') && turnIdRef.current) {
+          const recovered = await resetChannelTurn(id, turnIdRef.current)
+          if (recovered) {
+            setError('Turno anterior liberado. Envie a mensagem novamente.')
+          }
         }
         // não limpar o erro no reload: o 409 de turno concorrente tem que ficar visível
         if (id) await loadMessages(id, false)

@@ -585,14 +585,20 @@ async def delete_chat_session(session_id: str, user: dict = Depends(require_auth
 @router.post("/api/chat/sessions/{session_id}/reset-channel")
 async def chat_session_reset_channel(
     session_id: str,
+    body: dict | None = None,
     user: dict = Depends(require_auth),
 ):
-    """Recover a channel turn that never emitted a terminal frame."""
+    """Recover a specific channel turn that never emitted a terminal frame."""
     row = _owned_or_404(session_id, user)
     if not channel_mode():
         raise HTTPException(status_code=409, detail="Sessão não usa o canal nativo")
-    released = get_client().force_release(row["hermes_id"])
+    turn_id = (body or {}).get("turn_id")
+    if not isinstance(turn_id, str) or not turn_id:
+        raise HTTPException(status_code=400, detail="turn_id obrigatório")
+    client = get_client()
+    released = client.force_release(row["hermes_id"], turn_id)
     if released:
+        client.forget_thread(row["hermes_id"])
         chat_sessions.rotate_hermes_id(session_id, user["user_id"])
     return {"status": "reset" if released else "idle"}
 
@@ -692,6 +698,9 @@ async def _channel_turn_stream(row: dict, user: dict, body: dict):
 
     async def gen():
         attachments: list[dict] = []
+        yield _sse("turn.started", {
+            "turn_id": getattr(queue, "_agentos_turn_id", None),
+        })
         async for frame in client.frames(thread_id, queue):
             kind = frame.get("type")
             if kind == "delta":

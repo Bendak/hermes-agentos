@@ -241,3 +241,23 @@ def test_terminal_without_queue_does_not_release_foreign_lock():
         assert lock.locked()
 
     asyncio.run(run())
+
+
+def test_force_release_requires_matching_turn_id():
+    async def run():
+        client = ChannelClient(url="ws://unused", token="")
+        lock = asyncio.Lock()
+        await lock.acquire()
+        queue = asyncio.Queue()
+        queue._agentos_lock = lock
+        queue._agentos_turn_id = "turn-a"
+        client._queues["t"] = queue
+        client._callbacks["t"] = lambda frame: None
+        assert client.force_release("t", "turn-b") is False
+        assert client._queues.get("t") is queue
+        assert lock.locked()
+        assert client.force_release("t", "turn-a") is True
+        assert not lock.locked()
+        assert "t" not in client._queues
+
+    asyncio.run(run())

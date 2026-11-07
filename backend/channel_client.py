@@ -193,13 +193,15 @@ class ChannelClient:
                 except Exception:
                     pass
         queue: asyncio.Queue = asyncio.Queue()
+        turn_id = message_id or f"agentos-{uuid.uuid4().hex}"
+        queue._agentos_turn_id = turn_id  # type: ignore[attr-defined]
         self._queues[thread_id] = queue
         if on_frame is not None:
             self._callbacks[thread_id] = on_frame
         frame = {
             "type": "message", "thread_id": thread_id, "user_id": user_id,
             "user_name": user_name, "text": text,
-            "message_id": message_id or f"agentos-{uuid.uuid4().hex}",
+            "message_id": turn_id,
             "media_urls": media_urls or [], "media_types": media_types or [],
             "media_filenames": media_filenames or [],
         }
@@ -225,22 +227,28 @@ class ChannelClient:
         if lock is not None and lock.locked():
             lock.release()
 
-    def force_release(self, thread_id: str) -> bool:
-        """Drop a stuck turn's callback/queue and release its lock.
+    def force_release(self, thread_id: str, turn_id: str | None = None) -> bool:
+        """Drop a specific stuck turn's callback/queue and release its lock.
 
-        This is the explicit recovery path for a remote turn that never emits
-        a terminal.  Late frames from the abandoned turn are ignored because
-        its callback/queue are gone.  The caller must have decided the turn is
-        dead; normal completion should always use the terminal frame.
+        ``turn_id`` is the identity returned in the ``turn.started`` SSE event.
+        A reset without a matching live turn is a no-op: releasing a foreign
+        lock here would let a second tab or a delayed timeout kill a healthy
+        turn.  The caller must have decided the turn is dead.
         """
-        queue = self._queues.pop(thread_id, None)
-        callback = self._callbacks.pop(thread_id, None)
-        lock = self._turn_locks.get(thread_id)
-        if lock is not None and lock.locked():
-            lock.release()
-        if queue is not None:
-            self.release(queue)
-        return queue is not None or callback is not None
+        queue = self._queues.get(thread_id)
+        if queue is None:
+            return False
+        if turn_id is not None and getattr(queue, "_agentos_turn_id", None) != turn_id:
+            return False
+        self._queues.pop(thread_id, None)
+        self._callbacks.pop(thread_id, None)
+        self.release(queue)
+        return True
+
+    def forget_thread(self, thread_id: str) -> None:
+        """Stop resuming an abandoned thread after a reset/rotation."""
+        self._threads.discard(thread_id)
+        self._last_seq.pop(thread_id, None)
 
     async def frames(self, thread_id: str, queue: asyncio.Queue,
                      timeout: float = 300.0) -> AsyncIterator[dict[str, Any]]:
