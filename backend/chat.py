@@ -24,6 +24,7 @@ from starlette.background import BackgroundTask
 import logging
 
 from backend import chat_sessions, chat_transcript
+from backend.channel_turn import ChannelTurnRecorder
 from backend.auth import require_auth
 from backend.config import settings
 from backend.channel_client import channel_mode, get_client
@@ -642,40 +643,21 @@ async def _channel_turn_stream(row: dict, user: dict, body: dict):
     session_id = row["id"]
     thread_id = row["hermes_id"]
     client = get_client()
-    turn_attachments: list[dict] = []
-    thinking_text = ""
-    turn_tools: list[dict] = []
+    recorder = ChannelTurnRecorder(session_id, chat_transcript.append)
+    queue = None
+    started = False
+    pending_frames: list[dict] = []
 
     async def persist_frame(frame: dict) -> None:
-        # This callback runs in the ChannelClient dispatcher, independent of the
-        # SSE consumer.  A refresh/Stop therefore cannot lose the final answer:
-        # the transcript is written even when the queue is already gone.
-        nonlocal thinking_text
-        kind = frame.get("type")
-        if kind == "thinking":
-            # Keep the reasoning visible after the live panel clears at final.
-            text = frame.get("text") or ""
-            if text and not thinking_text.endswith(text):
-                thinking_text += text
-        elif kind == "tool" and frame.get("event") == "finished":
-            name = frame.get("name") or "tool"
-            preview = frame.get("error") or frame.get("preview") or ""
-            turn_tools.append({"function": {"name": name, "arguments": preview}})
-        elif kind == "attachment":
-            turn_attachments.append({k: frame.get(k) for k in
-                                     ("kind", "name", "mime", "caption", "path", "url")})
-        elif kind == "final":
-            meta: dict = {}
-            if thinking_text:
-                meta["reasoning_content"] = thinking_text
-            if turn_tools:
-                meta["tool_calls"] = list(turn_tools)
-            if turn_attachments:
-                meta["attachments"] = list(turn_attachments)
-            chat_transcript.append(
-                session_id, "assistant", frame.get("text") or "", meta or None)
+        # Runs in the ChannelClient dispatcher, independent of the SSE consumer.
+        # A refresh/Stop therefore cannot lose a completed turn.  Hold frames
+        # until the user row is written so an unusually fast final cannot be
+        # persisted before its prompt.
+        if not started:
+            pending_frames.append(frame)
+            return
+        recorder.on_frame(frame)
 
-    turn_lock = await _acquire_turn_lock(session_id)
     try:
         queue = await client.send_turn(
             thread_id, user_id=f"agentos:{user['user_id']}",
@@ -684,55 +666,51 @@ async def _channel_turn_stream(row: dict, user: dict, body: dict):
             media_filenames=media_names, profile=row.get("profile"),
             on_frame=persist_frame)
     except RuntimeError:
-        turn_lock.release()
         raise HTTPException(status_code=409, detail="Turno já em andamento nesta sessão")
     except Exception as exc:
-        turn_lock.release()
         raise HTTPException(status_code=502, detail=f"canal indisponível: {type(exc).__name__}")
-
     chat_sessions.touch(session_id, title=chat_sessions.title_from_message(message or "Anexo"))
     chat_transcript.append(session_id, "user", message or "[anexo]")
+    started = True
+    for pending in pending_frames:
+        recorder.on_frame(pending)
 
     async def gen():
         attachments: list[dict] = []
-        try:
-            async for frame in client.frames(thread_id, queue):
-                kind = frame.get("type")
-                if kind == "delta":
-                    yield _sse("assistant.delta", {"delta": frame.get("text") or ""})
-                elif kind == "thinking":
-                    yield _sse("tool.progress", {"tool_name": "_thinking",
-                                                 "delta": frame.get("text") or ""})
-                elif kind == "commentary":
-                    yield _sse("assistant.commentary", {"text": frame.get("text") or ""})
-                elif kind == "tool":
-                    event = "tool.started" if frame.get("event") == "started" else (
-                        "tool.completed" if frame.get("ok") else "tool.failed")
-                    yield _sse(event, {"tool_name": frame.get("name") or "tool",
-                                       "preview": frame.get("preview") or "",
-                                       "index": frame.get("index")})
-                elif kind == "attachment":
-                    attachments.append({k: frame.get(k) for k in
-                                        ("kind", "name", "mime", "caption", "path", "url")})
-                    yield _sse("assistant.attachment",
-                               {**attachments[-1], "message_id": frame.get("message_id")})
-                elif kind == "approval":
-                    yield _sse("approval.card", frame)
-                elif kind == "approval_result":
-                    yield _sse("approval.result", frame)
-                elif kind == "approval_retired":
-                    yield _sse("approval.retired", frame)
-                elif kind == "final":
-                    yield _sse("assistant.final", {"text": frame.get("text") or ""})
-                    return
-                elif kind == "error":
-                    yield _sse("error", {"code": frame.get("code"),
-                                         "message": frame.get("message") or "erro no canal"})
-                    return
-        finally:
-            if turn_lock.locked():
-                turn_lock.release()
-
+        async for frame in client.frames(thread_id, queue):
+            kind = frame.get("type")
+            if kind == "delta":
+                yield _sse("assistant.delta", {"delta": frame.get("text") or ""})
+            elif kind == "thinking":
+                yield _sse("tool.progress", {"tool_name": "_thinking",
+                                             "delta": frame.get("text") or ""})
+            elif kind == "commentary":
+                yield _sse("assistant.commentary", {"text": frame.get("text") or ""})
+            elif kind == "tool":
+                event = "tool.started" if frame.get("event") == "started" else (
+                    "tool.completed" if frame.get("ok") else "tool.failed")
+                yield _sse(event, {"tool_name": frame.get("name") or "tool",
+                                   "preview": frame.get("preview") or "",
+                                   "index": frame.get("index")})
+            elif kind == "attachment":
+                attachments.append({k: frame.get(k) for k in
+                                    ("kind", "name", "mime", "caption", "path", "url")})
+                yield _sse("assistant.attachment",
+                           {**attachments[-1], "message_id": frame.get("message_id")})
+            elif kind == "approval":
+                yield _sse("approval.card", frame)
+            elif kind == "approval_result":
+                yield _sse("approval.result", frame)
+            elif kind == "approval_retired":
+                yield _sse("approval.retired", frame)
+            elif kind == "final":
+                yield _sse("assistant.final", {"text": frame.get("text") or ""})
+                return
+            elif kind == "error":
+                recorder.on_frame(frame)
+                yield _sse("error", {"code": frame.get("code"),
+                                     "message": frame.get("message") or "erro no canal"})
+                return
     return StreamingResponse(
         gen(), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive",

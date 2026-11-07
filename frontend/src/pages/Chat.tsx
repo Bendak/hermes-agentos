@@ -237,6 +237,7 @@ function ThinkingBlock({ text }: { text: string }) {
 
 function ToolBar({ tool }: { tool: RenderTool }) {
   const [expanded, setExpanded] = useState(false)
+  const label = tool.name && tool.name !== 'tool' ? tool.name : (tool.args || 'command')
   const body = [tool.args ? 'ARGS\n' + tool.args : '', tool.output ? 'OUTPUT\n' + tool.output : '']
     .filter(Boolean)
     .join('\n\n')
@@ -245,12 +246,12 @@ function ToolBar({ tool }: { tool: RenderTool }) {
       <button
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        aria-label={expanded ? `Collapse ${tool.name} output` : `Expand ${tool.name} output`}
+        aria-label={expanded ? `Collapse ${label} output` : `Expand ${label} output`}
         className="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-mono-sm text-text-secondary transition hover:bg-surface-hover/40"
       >
         <span className="flex min-w-0 items-center gap-2">
           <span className="inline-block shrink-0 rounded bg-surface px-1.5 py-0.5 text-overline uppercase">Tool</span>
-          <span className="truncate text-mono-sm text-text-secondary">{tool.name || 'unknown'}</span>
+          <span className="truncate text-mono-sm text-text-secondary">{label || 'unknown'}</span>
         </span>
         <span
           className="shrink-0 text-text-tertiary transition-transform duration-200"

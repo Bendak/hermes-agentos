@@ -21,6 +21,7 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 _TERMINAL = {"final", "error"}
+_TURN_TIMEOUT = 360.0
 
 
 def _env(name: str, default: str = "") -> str:
@@ -148,7 +149,14 @@ class ChannelClient:
         if queue is not None:
             await queue.put(frame)
         if frame.get("type") in _TERMINAL:
+            # Remove both registrations before releasing the lock.  A new turn
+            # must not inherit this terminal frame or overwrite the queue that
+            # the old SSE generator still owns.
             self._callbacks.pop(thread_id, None)
+            if self._queues.get(thread_id) is queue:
+                self._queues.pop(thread_id, None)
+            if queue is not None:
+                self.release(queue)
 
     async def _ensure(self) -> None:
         if self._task is None:
@@ -205,30 +213,63 @@ class ChannelClient:
         # Attach the lock to the queue so the SSE generator can release it
         # exactly once in its finally block.
         queue._agentos_lock = lock  # type: ignore[attr-defined]
+        watchdog = asyncio.create_task(
+            self._expire_turn(thread_id, queue, lock, _TURN_TIMEOUT),
+            name=f"agentos-turn-watchdog-{thread_id}")
+        queue._agentos_watchdog = watchdog  # type: ignore[attr-defined]
         return queue
 
     async def _send_hello(self, threads: set[str]) -> None:
         await self._send({"type": "hello", "threads": sorted(threads)})
 
     def release(self, queue: asyncio.Queue) -> None:
+        watchdog = getattr(queue, "_agentos_watchdog", None)
+        if watchdog is not None and not watchdog.done():
+            watchdog.cancel()
         lock = getattr(queue, "_agentos_lock", None)
         if lock is not None and lock.locked():
             lock.release()
 
+    async def _expire_turn(self, thread_id: str, queue: asyncio.Queue,
+                           lock: asyncio.Lock, timeout: float) -> None:
+        try:
+            await asyncio.sleep(timeout)
+        except asyncio.CancelledError:
+            return
+        # Drop the callback first so a very late terminal cannot be written
+        # under a subsequent turn; then release the thread for a new turn.
+        if self._queues.get(thread_id) is queue:
+            self._queues.pop(thread_id, None)
+        self._callbacks.pop(thread_id, None)
+        if lock.locked():
+            lock.release()
+
     async def frames(self, thread_id: str, queue: asyncio.Queue,
                      timeout: float = 300.0) -> AsyncIterator[dict[str, Any]]:
+        terminal_seen = False
         try:
             while True:
                 frame = await asyncio.wait_for(queue.get(), timeout=timeout)
                 yield frame
                 if frame.get("type") in _TERMINAL:
+                    terminal_seen = True
                     return
         except asyncio.TimeoutError:
+            # No consumer may be left to receive a late final. Remove this
+            # turn's callback/queue before yielding the synthetic error so a
+            # subsequent turn cannot inherit it.
+            if self._queues.get(thread_id) is queue:
+                self._callbacks.pop(thread_id, None)
+                self._queues.pop(thread_id, None)
+                self.release(queue)
             yield {"type": "error", "code": "timeout",
                    "message": "AgentOS channel turn timed out"}
         finally:
-            self._queues.pop(thread_id, None)
-            self.release(queue)
+            if self._queues.get(thread_id) is queue:
+                self._queues.pop(thread_id, None)
+            if terminal_seen and self._queues.get(thread_id) is queue:
+                # With no callback, the consumer owns the terminal release.
+                self.release(queue)
 
     async def approve(self, thread_id: str, prompt_id: str, option_id: str,
                       text: str = "") -> None:
