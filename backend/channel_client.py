@@ -124,11 +124,15 @@ class ChannelClient:
     async def _dispatch(self, frame: dict[str, Any]) -> None:
         thread_id = str(frame.get("thread_id") or "")
         if not thread_id:
-            # A turn-specific error emitted before the adapter could echo the
-            # thread id must not strand a single waiting turn until timeout.
-            if frame.get("type") == "error" and len(self._queues) == 1:
-                queue = next(iter(self._queues.values()))
-                await queue.put(frame)
+            # Only a legacy turn-scoped invalid_message may be rescued when
+            # exactly one turn is waiting. Approval/resume errors are not turn
+            # errors and must never terminate an unrelated session.
+            if (frame.get("type") == "error"
+                    and frame.get("code") == "invalid_message"
+                    and len(self._queues) == 1):
+                waiting = next(iter(self._queues))
+                await self._queues[waiting].put(frame)
+                self._callbacks.pop(waiting, None)
             return
         self._last_seq[thread_id] = max(self._last_seq.get(thread_id, 0),
                                         int(frame.get("seq") or 0))
