@@ -707,7 +707,10 @@ async def _channel_turn_stream(row: dict, user: dict, body: dict):
                 yield _sse("assistant.final", {"text": frame.get("text") or ""})
                 return
             elif kind == "error":
-                recorder.on_frame(frame)
+                # A synthetic idle timeout is not a terminal gateway error:
+                # keep the recorder open so a late final can still persist.
+                if frame.get("code") != "timeout":
+                    recorder.on_frame(frame)
                 yield _sse("error", {"code": frame.get("code"),
                                      "message": frame.get("message") or "erro no canal"})
                 return

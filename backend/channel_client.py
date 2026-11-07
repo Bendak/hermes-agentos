@@ -21,7 +21,6 @@ from backend.config import settings
 logger = logging.getLogger(__name__)
 
 _TERMINAL = {"final", "error"}
-_TURN_TIMEOUT = 360.0
 
 
 def _env(name: str, default: str = "") -> str:
@@ -217,36 +216,14 @@ class ChannelClient:
         # Attach the lock to the queue so the SSE generator can release it
         # exactly once in its finally block.
         queue._agentos_lock = lock  # type: ignore[attr-defined]
-        watchdog = asyncio.create_task(
-            self._expire_turn(thread_id, queue, lock, _TURN_TIMEOUT),
-            name=f"agentos-turn-watchdog-{thread_id}")
-        queue._agentos_watchdog = watchdog  # type: ignore[attr-defined]
         return queue
 
     async def _send_hello(self, threads: set[str]) -> None:
         await self._send({"type": "hello", "threads": sorted(threads)})
 
     def release(self, queue: asyncio.Queue) -> None:
-        watchdog = getattr(queue, "_agentos_watchdog", None)
-        if watchdog is not None and not watchdog.done():
-            watchdog.cancel()
         lock = getattr(queue, "_agentos_lock", None)
         if lock is not None and lock.locked():
-            lock.release()
-
-    async def _expire_turn(self, thread_id: str, queue: asyncio.Queue,
-                           lock: asyncio.Lock, timeout: float) -> None:
-        try:
-            await asyncio.sleep(timeout)
-        except asyncio.CancelledError:
-            return
-        # A stale watchdog belongs to a queue that is no longer current: it
-        # must never touch the callback or lock of a subsequent turn.
-        if self._queues.get(thread_id) is not queue:
-            return
-        self._queues.pop(thread_id, None)
-        self._callbacks.pop(thread_id, None)
-        if lock.locked():
             lock.release()
 
     async def frames(self, thread_id: str, queue: asyncio.Queue,
@@ -260,13 +237,10 @@ class ChannelClient:
                     terminal_seen = True
                     return
         except asyncio.TimeoutError:
-            # No consumer may be left to receive a late final. Remove this
-            # turn's callback/queue before yielding the synthetic error so a
-            # subsequent turn cannot inherit it.
-            if self._queues.get(thread_id) is queue:
-                self._callbacks.pop(thread_id, None)
-                self._queues.pop(thread_id, None)
-                self.release(queue)
+            # Do not free the queue/lock here.  The remote turn may still be
+            # alive; releasing would let its late final be attributed to the
+            # next turn.  The callback remains registered and the dispatcher
+            # releases the turn when the real terminal arrives.
             yield {"type": "error", "code": "timeout",
                    "message": "AgentOS channel turn timed out"}
         finally:

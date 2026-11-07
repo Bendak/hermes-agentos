@@ -73,7 +73,7 @@ def test_frames_cancel_keeps_turn_lock_until_terminal():
     asyncio.run(run())
 
 
-def test_frames_timeout_drops_callback_and_releases_lock():
+def test_frames_timeout_keeps_turn_open_for_late_final():
     async def run():
         client = ChannelClient(url="ws://unused", token="")
         lock = asyncio.Lock()
@@ -86,8 +86,10 @@ def test_frames_timeout_drops_callback_and_releases_lock():
         frame = await gen.__anext__()
         assert frame["type"] == "error"
         assert frame["code"] == "timeout"
-        assert not lock.locked()
-        assert "t" not in client._callbacks
+        # The remote turn may still finish: keep its callback/queue/lock.
+        assert lock.locked()
+        assert client._queues.get("t") is queue
+        assert "t" in client._callbacks
 
     asyncio.run(run())
 
@@ -134,3 +136,24 @@ def test_old_frames_does_not_pop_a_new_turn_queue():
         assert lock.locked()
 
     asyncio.run(run())
+
+
+def test_recorder_keeps_started_tool_when_finish_is_missing():
+    rows = []
+    rec = ChannelTurnRecorder("s4", lambda *args: rows.append(args))
+    rec.on_frame({"type": "tool", "event": "started", "index": 7,
+                  "name": "ha_get_state", "preview": "entity_id=..."})
+    rec.on_frame({"type": "final", "text": "fim"})
+    tools = rows[0][3]["tool_calls"]
+    assert tools[0]["function"]["name"] == "ha_get_state"
+    assert tools[0]["function"]["arguments"] == "entity_id=..."
+
+
+def test_transcript_exposes_error_metadata():
+    from backend import chat_transcript
+    sid = "error-meta-test"
+    chat_transcript.clear(sid)
+    chat_transcript.append(sid, "assistant", "falhou",
+                           {"error": {"code": "turn_failed", "message": "falhou"}})
+    row = chat_transcript.list_messages(sid)[0]
+    assert row["error"] == {"code": "turn_failed", "message": "falhou"}
