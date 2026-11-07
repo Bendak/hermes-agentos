@@ -1027,11 +1027,7 @@ export default function ChatPage() {
                         <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-accent align-middle" />
                       </div>
                     </div>
-                  ) : (
-                    !thinking && liveTools.length === 0 && (
-                      <span className="text-xs text-text-tertiary">Thinking…</span>
-                    )
-                  )}
+                  ) : null}
                 </div>
               )}
               <div ref={bottomRef} />
