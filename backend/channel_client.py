@@ -50,6 +50,7 @@ class ChannelClient:
         self._task: Optional[asyncio.Task] = None
         self._send_lock = asyncio.Lock()
         self._queues: dict[str, asyncio.Queue] = {}
+        self._callbacks: dict[str, Any] = {}
         self._threads: set[str] = set()
         self._last_seq: dict[str, int] = {}
         self._closed = False
@@ -122,15 +123,28 @@ class ChannelClient:
 
     async def _dispatch(self, frame: dict[str, Any]) -> None:
         thread_id = str(frame.get("thread_id") or "")
-        if thread_id:
-            self._last_seq[thread_id] = max(self._last_seq.get(thread_id, 0),
-                                            int(frame.get("seq") or 0))
-            queue = self._queues.get(thread_id)
-            if queue is not None:
+        if not thread_id:
+            # A turn-specific error emitted before the adapter could echo the
+            # thread id must not strand a single waiting turn until timeout.
+            if frame.get("type") == "error" and len(self._queues) == 1:
+                queue = next(iter(self._queues.values()))
                 await queue.put(frame)
-            if frame.get("type") in _TERMINAL and queue is not None:
-                # Keep the queue available for the consumer; it removes it.
-                pass
+            return
+        self._last_seq[thread_id] = max(self._last_seq.get(thread_id, 0),
+                                        int(frame.get("seq") or 0))
+        callback = self._callbacks.get(thread_id)
+        if callback is not None:
+            try:
+                result = callback(frame)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception:
+                logger.warning("agentos channel frame callback failed", exc_info=True)
+        queue = self._queues.get(thread_id)
+        if queue is not None:
+            await queue.put(frame)
+        if frame.get("type") in _TERMINAL:
+            self._callbacks.pop(thread_id, None)
 
     async def _ensure(self) -> None:
         if self._task is None:
@@ -151,7 +165,8 @@ class ChannelClient:
                         media_urls: Optional[list[str]] = None,
                         media_types: Optional[list[str]] = None,
                         media_filenames: Optional[list[str]] = None,
-                        profile: Optional[str] = None) -> asyncio.Queue:
+                        profile: Optional[str] = None,
+                        on_frame: Optional[Any] = None) -> asyncio.Queue:
         lock = self._turn_locks.setdefault(thread_id, asyncio.Lock())
         if lock.locked():
             raise RuntimeError("turn_already_running")
@@ -165,6 +180,8 @@ class ChannelClient:
                     pass
         queue: asyncio.Queue = asyncio.Queue()
         self._queues[thread_id] = queue
+        if on_frame is not None:
+            self._callbacks[thread_id] = on_frame
         frame = {
             "type": "message", "thread_id": thread_id, "user_id": user_id,
             "user_name": user_name, "text": text,
@@ -178,6 +195,7 @@ class ChannelClient:
             await self._send(frame)
         except Exception:
             self._queues.pop(thread_id, None)
+            self._callbacks.pop(thread_id, None)
             lock.release()
             raise
         # Attach the lock to the queue so the SSE generator can release it

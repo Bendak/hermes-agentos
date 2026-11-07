@@ -642,13 +642,29 @@ async def _channel_turn_stream(row: dict, user: dict, body: dict):
     session_id = row["id"]
     thread_id = row["hermes_id"]
     client = get_client()
+    turn_attachments: list[dict] = []
+
+    async def persist_frame(frame: dict) -> None:
+        # This callback runs in the ChannelClient dispatcher, independent of the
+        # SSE consumer.  A refresh/Stop therefore cannot lose the final answer:
+        # the transcript is written even when the queue is already gone.
+        kind = frame.get("type")
+        if kind == "attachment":
+            turn_attachments.append({k: frame.get(k) for k in
+                                     ("kind", "name", "mime", "caption", "path", "url")})
+        elif kind == "final":
+            chat_transcript.append(
+                session_id, "assistant", frame.get("text") or "",
+                {"attachments": list(turn_attachments)} if turn_attachments else None)
+
     turn_lock = await _acquire_turn_lock(session_id)
     try:
         queue = await client.send_turn(
             thread_id, user_id=f"agentos:{user['user_id']}",
             user_name=user["username"], text=message,
             media_urls=media_urls, media_types=media_types,
-            media_filenames=media_names, profile=row.get("profile"))
+            media_filenames=media_names, profile=row.get("profile"),
+            on_frame=persist_frame)
     except RuntimeError:
         turn_lock.release()
         raise HTTPException(status_code=409, detail="Turno já em andamento nesta sessão")
@@ -689,11 +705,7 @@ async def _channel_turn_stream(row: dict, user: dict, body: dict):
                 elif kind == "approval_retired":
                     yield _sse("approval.retired", frame)
                 elif kind == "final":
-                    text = frame.get("text") or ""
-                    chat_transcript.append(
-                        session_id, "assistant", text,
-                        {"attachments": attachments} if attachments else None)
-                    yield _sse("assistant.final", {"text": text})
+                    yield _sse("assistant.final", {"text": frame.get("text") or ""})
                     return
                 elif kind == "error":
                     yield _sse("error", {"code": frame.get("code"),

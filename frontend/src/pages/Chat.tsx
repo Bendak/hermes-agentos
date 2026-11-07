@@ -271,16 +271,27 @@ function ToolBar({ tool }: { tool: RenderTool }) {
   )
 }
 
+function safeAttachmentUrl(raw?: string): string | undefined {
+  if (!raw) return undefined
+  try {
+    const url = new URL(raw, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function AttachmentCard({ item }: { item: ChatAttachment }) {
   const label = item.name || item.kind || 'attachment'
+  const href = safeAttachmentUrl(item.url)
   return (
     <div className="flex w-full max-w-[80%] items-center gap-3 rounded-xl border border-border bg-bg-elevated px-3 py-2 text-xs">
       <span className="rounded bg-surface px-1.5 py-0.5 text-[10px] uppercase tracking-wider text-text-tertiary">
         {item.kind || 'file'}
       </span>
       <span className="min-w-0 flex-1 truncate text-text-secondary" title={label}>{label}</span>
-      {item.url ? (
-        <a href={item.url} target="_blank" rel="noreferrer" className="text-accent hover:underline">open</a>
+      {href ? (
+        <a href={href} target="_blank" rel="noreferrer" className="text-accent hover:underline">open</a>
       ) : null}
       {item.caption ? <span className="max-w-[40%] truncate text-text-tertiary">{item.caption}</span> : null}
     </div>
