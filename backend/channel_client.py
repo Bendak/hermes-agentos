@@ -156,10 +156,9 @@ class ChannelClient:
                 self._queues.pop(thread_id, None)
             if queue is not None:
                 self.release(queue)
-            else:
-                lock = self._turn_locks.get(thread_id)
-                if lock is not None and lock.locked():
-                    lock.release()
+            # A terminal with no registered queue touches nothing: the lock is
+            # shared across turns and may belong to a concurrent first-turn
+            # setup (send_turn acquires it before the queue is registered).
 
     async def _ensure(self) -> None:
         if self._task is None:

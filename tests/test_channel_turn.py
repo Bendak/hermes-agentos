@@ -229,3 +229,15 @@ def test_channel_turn_stream_persists_after_user_row(monkeypatch):
     assert [row[1] for row in rows] == ["user", "assistant"]
     assert rows[1][3]["reasoning_content"] == "raciocínio"
     assert rows[1][3]["tool_calls"][0]["function"]["name"] == "ha_get_state"
+
+
+def test_terminal_without_queue_does_not_release_foreign_lock():
+    async def run():
+        client = ChannelClient(url="ws://unused", token="")
+        lock = asyncio.Lock()
+        await lock.acquire()
+        client._turn_locks["t"] = lock
+        await client._dispatch({"type": "final", "thread_id": "t", "text": "stray"})
+        assert lock.locked()
+
+    asyncio.run(run())
