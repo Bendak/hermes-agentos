@@ -82,6 +82,11 @@ interface RenderTool {
   output?: string
 }
 
+interface ToolEntry extends RenderTool {
+  status?: 'running' | 'done' | 'failed'
+  preview?: string
+}
+
 interface RenderItem {
   role: 'user' | 'agent'
   content: string
@@ -102,12 +107,18 @@ function buildItems(messages: ChatMsg[]): RenderItem[] {
       continue
     }
     if (m.role === 'tool') {
-      const last = [...items].reverse().find((i) => i.role === 'agent')
+      const agents = items.filter((i) => i.role === 'agent')
       const name = m.tool_name || 'tool'
-      if (last) {
-        const slot = last.tools.find((t) => t.output === undefined && (!m.tool_name || t.name === m.tool_name))
+      if (agents.length > 0) {
+        // Tool results can arrive after more than one assistant message. Attach
+        // to the oldest unfilled slot that matches, not blindly to the last
+        // agent bubble, so a later intermediate group never steals this output.
+        const target = agents.find((i) =>
+          i.tools.some((t) => t.output === undefined && (!m.tool_name || t.name === name)),
+        ) || agents[agents.length - 1]
+        const slot = target.tools.find((t) => t.output === undefined && (!m.tool_name || t.name === name))
         if (slot) slot.output = m.content
-        else last.tools.push({ name, output: m.content })
+        else target.tools.push({ name, output: m.content })
       } else {
         items.push({ role: 'agent', content: '', tools: [{ name, output: m.content }], attachments: [], ts: m.timestamp })
       }
@@ -239,23 +250,80 @@ function ThinkingBlock({ text }: { text: string }) {
   )
 }
 
-function ToolBar({ tool }: { tool: RenderTool }) {
+function ToolRow({ tool, index }: { tool: ToolEntry; index: number }) {
   const [expanded, setExpanded] = useState(false)
   const label = tool.name && tool.name !== 'tool' ? tool.name : (tool.args || 'command')
-  const body = [tool.args ? 'ARGS\n' + tool.args : '', tool.output ? 'OUTPUT\n' + tool.output : '']
+  const body = [
+    tool.args != null ? 'ARGS\n' + (tool.args || '—') : '',
+    tool.output != null ? 'OUTPUT\n' + (tool.output || '—') : '',
+  ]
     .filter(Boolean)
     .join('\n\n')
+  const hasBody = Boolean(body)
+  const statusIcon = tool.status === 'running'
+    ? '⏳'
+    : tool.status === 'failed'
+      ? '⚠️'
+      : tool.output != null || tool.status === 'done'
+        ? '✓'
+        : ''
   return (
-    <div className="my-2 w-full min-w-0 overflow-hidden rounded-lg border border-border bg-bg-elevated font-mono">
+    <div className="border-t border-border first:border-t-0">
+      <button
+        onClick={() => hasBody && setExpanded((v) => !v)}
+        disabled={!hasBody}
+        aria-expanded={hasBody ? expanded : undefined}
+        aria-label={`Tool ${index}: ${label || 'unknown'}`}
+        className={
+          'flex w-full items-center gap-2 px-3 py-2 text-left text-mono-sm text-text-secondary transition ' +
+          (hasBody ? 'cursor-pointer hover:bg-bg-base/60' : 'cursor-default')
+        }
+      >
+        <span className="min-w-5 shrink-0 px-0.5 text-right text-[10px] tabular-nums text-text-tertiary">{index}.</span>
+        <span className="min-w-0 flex-1 truncate text-mono-sm text-text-secondary">{label || 'unknown'}</span>
+        {statusIcon ? <span className="shrink-0 text-[11px] text-text-tertiary">{statusIcon}</span> : null}
+        {tool.preview && !expanded ? (
+          <span className="max-w-[38%] shrink-0 truncate text-[10px] text-text-tertiary">{tool.preview}</span>
+        ) : null}
+        {hasBody ? (
+          <span
+            className="shrink-0 text-text-tertiary transition-transform duration-200"
+            style={{ transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)' }}
+            aria-hidden="true"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </span>
+        ) : null}
+      </button>
+      {expanded && hasBody && (
+        <div className="max-h-96 w-full min-w-0 overflow-y-auto overflow-x-hidden border-t border-border px-3 py-2" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+          <pre className="whitespace-pre-wrap break-words text-[11px] text-text-tertiary">{body}</pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolGroup({ tools }: { tools: ToolEntry[] }) {
+  const [expanded, setExpanded] = useState(false)
+  if (tools.length === 0) return null
+  const running = tools.some((t) => t.status === 'running')
+  return (
+    <div className="my-1 w-full min-w-0 overflow-hidden rounded-lg border border-border bg-bg-elevated font-mono">
       <button
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        aria-label={expanded ? `Collapse ${label} output` : `Expand ${label} output`}
-        className="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-mono-sm text-text-secondary transition hover:bg-surface-hover/40"
+        aria-label={`${expanded ? 'Collapse' : 'Expand'} ${tools.length} tool call${tools.length === 1 ? '' : 's'}`}
+        className="flex w-full cursor-pointer items-center justify-between px-3 py-2 text-mono-sm text-text-secondary transition hover:bg-bg-base/60"
       >
         <span className="flex min-w-0 items-center gap-2">
-          <span className="inline-block shrink-0 rounded bg-surface px-1.5 py-0.5 text-overline uppercase">Tool</span>
-          <span className="truncate text-mono-sm text-text-secondary">{label || 'unknown'}</span>
+          <span className="inline-block shrink-0 rounded bg-surface px-1.5 py-0.5 text-overline uppercase">Tools</span>
+          <span className="truncate text-mono-sm text-text-secondary">
+            {tools.length} tool{tools.length === 1 ? '' : 's'}
+          </span>
+          {running ? <span className="shrink-0 text-[10px] text-text-tertiary">running…</span> : null}
         </span>
         <span
           className="shrink-0 text-text-tertiary transition-transform duration-200"
@@ -268,8 +336,10 @@ function ToolBar({ tool }: { tool: RenderTool }) {
         </span>
       </button>
       {expanded && (
-        <div className="max-h-96 w-full min-w-0 overflow-y-auto overflow-x-hidden border-t border-border px-3 py-2" style={{ overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
-          <pre className="whitespace-pre-wrap break-words text-[11px] text-text-tertiary">{body || '—'}</pre>
+        <div className="border-t border-border">
+          {tools.map((tool, k) => (
+            <ToolRow key={k} tool={tool} index={k + 1} />
+          ))}
         </div>
       )}
     </div>
@@ -968,9 +1038,9 @@ export default function ChatPage() {
                         ⚠️ {item.error}
                       </div>
                     )}
-                    {item.tools.map((t, k) => (
-                      <ToolBar key={k} tool={t} />
-                    ))}
+                    {item.tools.length > 0 && (
+                      <ToolGroup tools={item.tools} />
+                    )}
                     {item.content && (
                       <div className="w-full max-w-[80%] rounded-2xl rounded-bl-sm bg-surface/60 px-4 py-2.5 text-sm leading-relaxed text-text-primary">
                         <div className="prose-invert max-w-full">
@@ -988,19 +1058,7 @@ export default function ChatPage() {
                 <div className="flex w-full flex-col items-start gap-2">
                   <span className="text-caption text-text-tertiary">{fmtTs(Date.now() / 1000)}</span>
                   {thinking && <ThinkingBlock text={thinking} />}
-                  {liveTools.map((t, k) => (
-                    <div
-                      key={k}
-                      className="flex w-full items-center gap-2 rounded-lg border border-border bg-bg-elevated/60 px-3 py-2 text-xs text-text-secondary"
-                    >
-                      <span className="text-[10px] uppercase tracking-wider text-text-tertiary">Tool</span>
-                      <span className="font-medium">{t.name}</span>
-                      <span className="ml-auto text-text-tertiary">
-                        {t.status === 'running' ? '⏳' : t.status === 'failed' ? '⚠️' : '✓'}
-                      </span>
-                      {t.preview && <span className="max-w-[45%] truncate opacity-70">{t.preview}</span>}
-                    </div>
-                  ))}
+                  {liveTools.length > 0 && <ToolGroup tools={liveTools} />}
                   {liveAttachments.map((a, k) => (
                     <AttachmentCard key={k} item={a} />
                   ))}
