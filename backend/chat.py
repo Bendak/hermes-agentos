@@ -691,16 +691,16 @@ async def _channel_turn_stream(row: dict, user: dict, body: dict):
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"canal indisponível: {type(exc).__name__}")
     chat_sessions.touch(session_id, title=chat_sessions.title_from_message(message or "Anexo"))
-    chat_transcript.append(session_id, "user", message or "[anexo]")
+    turn_id = getattr(queue, "_agentos_turn_id", None)
+    chat_transcript.append(session_id, "user", message or "[anexo]",
+                           meta={"turn_id": turn_id} if turn_id else None)
     started = True
     for pending in pending_frames:
         recorder.on_frame(pending)
 
     async def gen():
         attachments: list[dict] = []
-        yield _sse("turn.started", {
-            "turn_id": getattr(queue, "_agentos_turn_id", None),
-        })
+        yield _sse("turn.started", {"turn_id": turn_id})
         async for frame in client.frames(thread_id, queue):
             kind = frame.get("type")
             if kind == "delta":

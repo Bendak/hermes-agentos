@@ -84,6 +84,7 @@ def list_messages(session_id: str, limit: int = 200, offset: int = 0) -> list[di
             "display_kind": meta.get("display_kind"),
             "error": meta.get("error"),
             "attachments": meta.get("attachments") or [],
+            "turn_id": meta.get("turn_id"),
         })
     return out
 

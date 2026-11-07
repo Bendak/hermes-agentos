@@ -214,7 +214,7 @@ def test_channel_turn_stream_persists_after_user_row(monkeypatch):
     monkeypatch.setattr(chat, "get_client", lambda: fake)
     monkeypatch.setattr(chat.chat_sessions, "touch", lambda *a, **k: None)
     monkeypatch.setattr(chat.chat_transcript, "append",
-                        lambda *args: rows.append(args))
+                        lambda *args, **kwargs: rows.append((args, kwargs)))
 
     async def run():
         response = await chat._channel_turn_stream(
@@ -226,9 +226,10 @@ def test_channel_turn_stream_persists_after_user_row(monkeypatch):
             pass
 
     asyncio.run(run())
-    assert [row[1] for row in rows] == ["user", "assistant"]
-    assert rows[1][3]["reasoning_content"] == "raciocínio"
-    assert rows[1][3]["tool_calls"][0]["function"]["name"] == "ha_get_state"
+    assert [row[0][1] for row in rows] == ["user", "assistant"]
+    assert rows[0][1].get("meta") is None
+    assert rows[1][0][3]["reasoning_content"] == "raciocínio"
+    assert rows[1][0][3]["tool_calls"][0]["function"]["name"] == "ha_get_state"
 
 
 def test_terminal_without_queue_does_not_release_foreign_lock():
@@ -261,3 +262,12 @@ def test_force_release_requires_matching_turn_id():
         assert "t" not in client._queues
 
     asyncio.run(run())
+
+
+def test_transcript_exposes_turn_id_on_user_row():
+    from backend import chat_transcript
+    sid = "turn-id-test"
+    chat_transcript.clear(sid)
+    chat_transcript.append(sid, "user", "oi", meta={"turn_id": "turn-123"})
+    row = chat_transcript.list_messages(sid)[0]
+    assert row["turn_id"] == "turn-123"

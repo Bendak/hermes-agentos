@@ -59,6 +59,7 @@ interface ChatMsg {
   display_kind?: string | null
   error?: { code?: string; message?: string } | null
   attachments?: ChatAttachment[]
+  turn_id?: string | null
 }
 
 interface LiveTool {
@@ -371,7 +372,10 @@ export default function ChatPage() {
       const res = await fetch('/api/chat/sessions/' + id + '/messages?limit=200', { headers: authHeaders() })
       if (!res.ok) throw new Error(await apiErrorMessage(res))
       const body = await res.json()
-      setMessages(body.data || [])
+      const data: ChatMsg[] = body.data || []
+      setMessages(data)
+      const lastUser = [...data].reverse().find((m) => m.role === 'user' && m.turn_id)
+      turnIdRef.current = lastUser?.turn_id || null
     } catch (err) {
       setError((err as Error).message)
       setMessages([])
@@ -543,7 +547,6 @@ export default function ChatPage() {
         id = row.id
       }
       setMessages((prev) => [...prev, { role: 'user', content: trimmed || attached.map((a) => a.name).join(', ') }])
-      turnIdRef.current = null
       const controller = new AbortController()
       abortRef.current = controller
       await streamTurn(
@@ -606,7 +609,6 @@ export default function ChatPage() {
       setLiveAttachments([])
       setApprovalCards([])
       await loadSessions()
-      turnIdRef.current = null
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         const message = (err as Error).message
