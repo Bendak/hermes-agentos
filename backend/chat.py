@@ -592,6 +592,8 @@ async def chat_session_reset_channel(
     if not channel_mode():
         raise HTTPException(status_code=409, detail="Sessão não usa o canal nativo")
     released = get_client().force_release(row["hermes_id"])
+    if released:
+        chat_sessions.rotate_hermes_id(session_id, user["user_id"])
     return {"status": "reset" if released else "idle"}
 
 

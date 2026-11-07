@@ -201,6 +201,25 @@ def list_all(include_archived: bool = True) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def rotate_hermes_id(session_id: str, user_id: int) -> Optional[dict]:
+    """Give a session a fresh gateway thread after a stuck channel turn.
+
+    Keeping the old thread would let late frames from the abandoned turn be
+    routed into the next turn.  The local transcript stays attached to the
+    session row; only the remote thread identity changes.
+    """
+    new_hermes_id = f"agentos_{uuid.uuid4().hex}"
+    now = int(time.time())
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE chat_sessions SET hermes_id = ?, session_key = ?, updated_at = ?"
+            " WHERE id = ? AND user_id = ?",
+            (new_hermes_id, f"agentos:{user_id}:{new_hermes_id}", now,
+             session_id, user_id),
+        )
+    return get_owned(session_id, user_id)
+
+
 def touch(session_id: str, title: Optional[str] = None) -> None:
     """Bump updated_at; optionally seed the title from the first message."""
     now = int(time.time())
