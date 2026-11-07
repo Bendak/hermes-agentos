@@ -449,16 +449,7 @@ export default function ChatPage() {
   async function resetTurn() {
     abortRef.current?.abort()
     abortRef.current = null
-    if (activeId) {
-      try {
-        await fetch('/api/chat/sessions/' + activeId + '/reset-channel', {
-          method: 'POST',
-          headers: authHeaders(true),
-        })
-      } catch {
-        /* o abort local já libera a UI; o reset é best-effort */
-      }
-    }
+    if (activeId) await resetChannelTurn(activeId)
     setSending(false)
     setStreamText('')
     setThinking('')
@@ -513,6 +504,17 @@ export default function ChatPage() {
     }
   }
 
+  async function resetChannelTurn(id: string) {
+    try {
+      await fetch('/api/chat/sessions/' + id + '/reset-channel', {
+        method: 'POST',
+        headers: authHeaders(true),
+      })
+    } catch {
+      /* recovery is best-effort; the next send will surface any remaining error */
+    }
+  }
+
   async function sendMessage(text: string) {
     const trimmed = text.trim()
     const attached = pendingAttachments
@@ -553,6 +555,7 @@ export default function ChatPage() {
             setApprovalCards((prev) => prev.filter((c) => c.prompt_id !== String(payload.prompt_id)))
           } else if (event === 'error') {
             setError(String(payload.message || payload.code || 'Erro no canal'))
+            if (payload.code === 'timeout') void resetChannelTurn(id)
           } else if (event === 'tool.progress' && payload.tool_name === '_thinking') {
             setThinking((prev) => prev + String(payload.delta || ''))
           } else if (event === 'tool.started') {
@@ -593,8 +596,13 @@ export default function ChatPage() {
       await loadSessions()
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
-        setError((err as Error).message)
+        const message = (err as Error).message
+        setError(message)
         const id = activeIdRef.current
+        if (id && message.includes('Turno')) {
+          await resetChannelTurn(id)
+          setError('Turno anterior liberado. Envie a mensagem novamente.')
+        }
         // não limpar o erro no reload: o 409 de turno concorrente tem que ficar visível
         if (id) await loadMessages(id, false)
       }
