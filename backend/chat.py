@@ -851,7 +851,8 @@ async def chat_upload(file: UploadFile = File(...), user: dict = Depends(require
     total = 0
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     try:
-        fd = os.open(stored, flags, 0o600)
+        fd = os.open(stored, flags, 0o644)
+        os.fchmod(fd, 0o644)
         with os.fdopen(fd, "wb") as out:
             while True:
                 chunk = await file.read(1024 * 1024)
