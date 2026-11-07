@@ -52,6 +52,7 @@ def test_frames_cancel_keeps_turn_lock_until_terminal():
         await lock.acquire()
         queue = asyncio.Queue()
         queue._agentos_lock = lock
+        queue._agentos_turn_id = "t"
         client._queues["t"] = queue
         client._callbacks["t"] = lambda frame: None
         gen = client.frames("t", queue, timeout=30)
@@ -66,7 +67,8 @@ def test_frames_cancel_keeps_turn_lock_until_terminal():
         # The queue stays registered while the remote turn is still live;
         # otherwise a terminal arriving later cannot release the lock.
         assert client._queues.get("t") is queue
-        await client._dispatch({"type": "final", "thread_id": "t", "text": "ok"})
+        await client._dispatch({"type": "final", "thread_id": "t",
+                                "turn_id": "t", "text": "ok"})
         assert not lock.locked()
         assert "t" not in client._queues
 
@@ -80,6 +82,7 @@ def test_frames_timeout_keeps_turn_open_for_late_final():
         await lock.acquire()
         queue = asyncio.Queue()
         queue._agentos_lock = lock
+        queue._agentos_turn_id = "t"
         client._queues["t"] = queue
         client._callbacks["t"] = lambda frame: None
         gen = client.frames("t", queue, timeout=0.01)
@@ -101,13 +104,15 @@ def test_dispatch_terminal_releases_and_unregisters_before_return():
         await lock.acquire()
         queue = asyncio.Queue()
         queue._agentos_lock = lock
+        queue._agentos_turn_id = "t"
         seen = []
         client._queues["t"] = queue
         client._callbacks["t"] = lambda frame: seen.append(frame)
-        await client._dispatch({"type": "final", "thread_id": "t", "text": "ok"})
+        await client._dispatch({"type": "final", "thread_id": "t",
+                                "turn_id": "t", "text": "ok"})
         assert seen and seen[0]["type"] == "final"
         assert not lock.locked()
-        assert "t" not in client._callbacks
+        assert client._late_callback("t", "t") is not None
         assert "t" not in client._queues
         assert (await queue.get())["type"] == "final"
 
@@ -166,6 +171,7 @@ def test_force_release_clears_stuck_turn():
         await lock.acquire()
         queue = asyncio.Queue()
         queue._agentos_lock = lock
+        queue._agentos_turn_id = "t"
         client._queues["t"] = queue
         client._callbacks["t"] = lambda frame: None
         assert client.force_release("t") is True

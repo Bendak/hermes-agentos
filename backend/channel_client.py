@@ -139,6 +139,10 @@ class ChannelClient:
         self._last_seq[thread_id] = max(self._last_seq.get(thread_id, 0),
                                         int(frame.get("seq") or 0))
         frame_turn = str(frame.get("turn_id") or "")
+        if frame.get("type") in _TERMINAL and not frame_turn:
+            # A foreign notify/cron final carries no turn identity.  It must
+            # never close the live turn or be flushed as its answer.
+            return
         queue = self._queues.get(thread_id)
         queue_turn = str(getattr(queue, "_agentos_turn_id", "") or "")
         if frame_turn and queue is not None and frame_turn == queue_turn:
