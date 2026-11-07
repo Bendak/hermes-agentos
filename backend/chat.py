@@ -666,7 +666,8 @@ async def _channel_turn_stream(row: dict, user: dict, body: dict):
     session_id = row["id"]
     thread_id = row["hermes_id"]
     client = get_client()
-    recorder = ChannelTurnRecorder(session_id, chat_transcript.append)
+    recorder = ChannelTurnRecorder(session_id, chat_transcript.append,
+                                   chat_transcript.update_meta)
     queue = None
     started = False
     pending_frames: list[dict] = []

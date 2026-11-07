@@ -302,3 +302,30 @@ def test_transcript_tail_returns_latest_rows():
     assert len(rows) == 200
     assert rows[0]["content"] == "m5"
     assert rows[-1]["content"] == "m204"
+
+
+def test_late_thinking_updates_already_flushed_row():
+    updates = []
+
+    def append(session, role, content, meta):
+        return 7
+
+    def update(row_id, patch):
+        updates.append((row_id, patch))
+
+    rec = ChannelTurnRecorder("s-late", append, update)
+    rec.on_frame({"type": "final", "text": "resposta"})
+    rec.on_frame({"type": "thinking", "text": "raciocínio tardio"})
+    assert updates[-1][0] == 7
+    assert updates[-1][1]["reasoning_content"] == "raciocínio tardio"
+
+
+def test_transcript_update_meta_merges_fields():
+    from backend import chat_transcript
+    sid = "update-meta-test"
+    chat_transcript.clear(sid)
+    row_id = chat_transcript.append(sid, "assistant", "ok", {"tool_calls": [1]})
+    chat_transcript.update_meta(row_id, {"reasoning_content": "late"})
+    row = chat_transcript.list_messages(sid)[0]
+    assert row["reasoning_content"] == "late"
+    assert row["tool_calls"] == [1]

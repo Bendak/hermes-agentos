@@ -14,9 +14,12 @@ from typing import Any, Callable, Optional
 
 class ChannelTurnRecorder:
     def __init__(self, session_id: str,
-                 append: Callable[[str, str, str, Optional[dict]], Any]):
+                 append: Callable[[str, str, str, Optional[dict]], Any],
+                 update: Optional[Callable[[int, dict], Any]] = None):
         self.session_id = session_id
         self._append = append
+        self._update = update
+        self.row_id: Optional[int] = None
         self.thinking_text = ""
         self.turn_tools: list[dict] = []
         self.attachments: list[dict] = []
@@ -25,6 +28,13 @@ class ChannelTurnRecorder:
 
     def on_frame(self, frame: dict[str, Any]) -> None:
         if self.done:
+            # The gateway can flush a final before a late thinking frame.  Keep
+            # the flushed row authoritative and merge later reasoning into it.
+            if frame.get("type") == "thinking":
+                text = frame.get("text") or ""
+                if text:
+                    self.thinking_text += text
+                    self._sync_meta()
             return
         kind = frame.get("type")
         if kind == "thinking":
@@ -58,9 +68,7 @@ class ChannelTurnRecorder:
             message = frame.get("message") or "Erro no turno"
             self._flush(message, error={"code": code, "message": message})
 
-    def _flush(self, text: str, error: Optional[dict] = None) -> None:
-        if self.done:
-            return
+    def _meta(self, error: Optional[dict] = None) -> dict[str, Any]:
         meta: dict[str, Any] = {}
         if self.thinking_text:
             meta["reasoning_content"] = self.thinking_text
@@ -78,5 +86,19 @@ class ChannelTurnRecorder:
             meta["attachments"] = list(self.attachments)
         if error:
             meta["error"] = error
-        self._append(self.session_id, "assistant", text, meta or None)
+        return meta
+
+    def _sync_meta(self) -> None:
+        if self.row_id is None or self._update is None:
+            return
+        try:
+            self._update(self.row_id, self._meta())
+        except Exception:
+            pass
+
+    def _flush(self, text: str, error: Optional[dict] = None) -> None:
+        if self.done:
+            return
+        meta = self._meta(error)
+        self.row_id = self._append(self.session_id, "assistant", text, meta or None)
         self.done = True

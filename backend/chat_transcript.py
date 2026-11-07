@@ -98,6 +98,28 @@ def list_messages(session_id: str, limit: int = 200, offset: int = 0,
     return out
 
 
+def update_meta(row_id: int, patch: dict[str, Any]) -> None:
+    """Merge fields into an existing transcript row (late progress frames)."""
+    if not row_id or not patch:
+        return
+    init_db()
+    with sqlite3.connect(DB_PATH, timeout=10) as conn:
+        row = conn.execute(
+            "SELECT meta FROM chat_transcript WHERE id = ?", (row_id,)
+        ).fetchone()
+        if row is None:
+            return
+        try:
+            meta = json.loads(row[0] or "{}")
+        except ValueError:
+            meta = {}
+        meta.update(patch)
+        conn.execute(
+            "UPDATE chat_transcript SET meta = ? WHERE id = ?",
+            (json.dumps(meta, ensure_ascii=False), row_id),
+        )
+
+
 def clear(session_id: str) -> None:
     init_db()
     with sqlite3.connect(DB_PATH, timeout=10) as conn:
