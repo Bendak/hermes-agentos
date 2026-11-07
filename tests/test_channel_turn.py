@@ -157,3 +157,75 @@ def test_transcript_exposes_error_metadata():
                            {"error": {"code": "turn_failed", "message": "falhou"}})
     row = chat_transcript.list_messages(sid)[0]
     assert row["error"] == {"code": "turn_failed", "message": "falhou"}
+
+
+def test_force_release_clears_stuck_turn():
+    async def run():
+        client = ChannelClient(url="ws://unused", token="")
+        lock = asyncio.Lock()
+        await lock.acquire()
+        queue = asyncio.Queue()
+        queue._agentos_lock = lock
+        client._queues["t"] = queue
+        client._callbacks["t"] = lambda frame: None
+        assert client.force_release("t") is True
+        assert not lock.locked()
+        assert "t" not in client._queues
+        assert "t" not in client._callbacks
+        assert client.force_release("t") is False
+
+    asyncio.run(run())
+
+
+def test_channel_turn_stream_persists_after_user_row(monkeypatch):
+    import backend.chat as chat
+
+    rows = []
+    frames = [
+        {"type": "thinking", "text": "raciocínio"},
+        {"type": "tool", "event": "started", "index": 1,
+         "name": "ha_get_state", "preview": "entity_id=x"},
+        {"type": "tool", "event": "finished", "index": 1, "ok": True},
+        {"type": "final", "text": "resposta"},
+    ]
+
+    class FakeClient:
+        def __init__(self):
+            self.queue = asyncio.Queue()
+
+        async def send_turn(self, thread_id, *, on_frame=None, **kwargs):
+            for frame in frames:
+                if on_frame is not None:
+                    await on_frame(frame)
+                self.queue.put_nowait(frame)
+            return self.queue
+
+        async def frames(self, thread_id, queue, timeout=300):
+            while True:
+                frame = await queue.get()
+                yield frame
+                if frame.get("type") in ("final", "error"):
+                    return
+
+        def release(self, queue):
+            return None
+
+    fake = FakeClient()
+    monkeypatch.setattr(chat, "get_client", lambda: fake)
+    monkeypatch.setattr(chat.chat_sessions, "touch", lambda *a, **k: None)
+    monkeypatch.setattr(chat.chat_transcript, "append",
+                        lambda *args: rows.append(args))
+
+    async def run():
+        response = await chat._channel_turn_stream(
+            {"id": "s", "hermes_id": "t", "profile": "default"},
+            {"user_id": 1, "username": "user_a"},
+            {"message": "oi"},
+        )
+        async for _ in response.body_iterator:
+            pass
+
+    asyncio.run(run())
+    assert [row[1] for row in rows] == ["user", "assistant"]
+    assert rows[1][3]["reasoning_content"] == "raciocínio"
+    assert rows[1][3]["tool_calls"][0]["function"]["name"] == "ha_get_state"

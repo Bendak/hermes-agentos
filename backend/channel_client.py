@@ -226,6 +226,23 @@ class ChannelClient:
         if lock is not None and lock.locked():
             lock.release()
 
+    def force_release(self, thread_id: str) -> bool:
+        """Drop a stuck turn's callback/queue and release its lock.
+
+        This is the explicit recovery path for a remote turn that never emits
+        a terminal.  Late frames from the abandoned turn are ignored because
+        its callback/queue are gone.  The caller must have decided the turn is
+        dead; normal completion should always use the terminal frame.
+        """
+        queue = self._queues.pop(thread_id, None)
+        callback = self._callbacks.pop(thread_id, None)
+        lock = self._turn_locks.get(thread_id)
+        if lock is not None and lock.locked():
+            lock.release()
+        if queue is not None:
+            self.release(queue)
+        return queue is not None or callback is not None
+
     async def frames(self, thread_id: str, queue: asyncio.Queue,
                      timeout: float = 300.0) -> AsyncIterator[dict[str, Any]]:
         terminal_seen = False

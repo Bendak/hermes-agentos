@@ -582,6 +582,19 @@ async def delete_chat_session(session_id: str, user: dict = Depends(require_auth
     return chat_sessions.public(updated)
 
 
+@router.post("/api/chat/sessions/{session_id}/reset-channel")
+async def chat_session_reset_channel(
+    session_id: str,
+    user: dict = Depends(require_auth),
+):
+    """Recover a channel turn that never emitted a terminal frame."""
+    row = _owned_or_404(session_id, user)
+    if not channel_mode():
+        raise HTTPException(status_code=409, detail="Sessão não usa o canal nativo")
+    released = get_client().force_release(row["hermes_id"])
+    return {"status": "reset" if released else "idle"}
+
+
 @router.get("/api/chat/sessions/{session_id}/messages")
 async def chat_session_messages(
     session_id: str,

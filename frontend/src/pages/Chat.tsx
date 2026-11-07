@@ -57,6 +57,7 @@ interface ChatMsg {
   reasoning_content?: string | null
   tool_calls?: ToolCall[] | null
   display_kind?: string | null
+  error?: { code?: string; message?: string } | null
   attachments?: ChatAttachment[]
 }
 
@@ -86,6 +87,7 @@ interface RenderItem {
   reasoning?: string
   tools: RenderTool[]
   attachments: ChatAttachment[]
+  error?: string
   ts?: string | number
 }
 
@@ -120,6 +122,7 @@ function buildItems(messages: ChatMsg[]): RenderItem[] {
       reasoning: m.reasoning_content || '',
       tools,
       attachments: m.attachments || [],
+      error: m.error?.message,
       ts: m.timestamp,
     })
   }
@@ -441,6 +444,27 @@ export default function ChatPage() {
     setLiveAttachments([])
     setApprovalCards([])
     void loadMessages(id)
+  }
+
+  async function resetTurn() {
+    abortRef.current?.abort()
+    abortRef.current = null
+    if (activeId) {
+      try {
+        await fetch('/api/chat/sessions/' + activeId + '/reset-channel', {
+          method: 'POST',
+          headers: authHeaders(true),
+        })
+      } catch {
+        /* o abort local já libera a UI; o reset é best-effort */
+      }
+    }
+    setSending(false)
+    setStreamText('')
+    setThinking('')
+    setLiveTools([])
+    setLiveAttachments([])
+    setApprovalCards([])
   }
 
   async function createChat(profileOverride?: string): Promise<ChatSession> {
@@ -914,6 +938,11 @@ export default function ChatPage() {
                       <span className="text-caption text-text-tertiary">{fmtTs(item.ts)}</span>
                     )}
                     {item.reasoning && <ThinkingBlock text={item.reasoning} />}
+                    {item.error && (
+                      <div className="w-full max-w-[80%] rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">
+                        ⚠️ {item.error}
+                      </div>
+                    )}
                     {item.tools.map((t, k) => (
                       <ToolBar key={k} tool={t} />
                     ))}
@@ -1041,13 +1070,22 @@ export default function ChatPage() {
               >
                 🎙
               </button>
-              <button
-                onClick={() => void sendMessage(input)}
-                disabled={sending || (!input.trim() && pendingAttachments.length === 0)}
-                className="h-[42px] shrink-0 rounded-xl bg-accent px-4 text-sm font-medium text-white disabled:opacity-40"
-              >
-                Send
-              </button>
+              {sending ? (
+                <button
+                  onClick={() => void resetTurn()}
+                  className="h-[42px] shrink-0 rounded-xl border border-red-500/50 px-4 text-sm font-medium text-red-300 hover:bg-red-500/10"
+                >
+                  Stop
+                </button>
+              ) : (
+                <button
+                  onClick={() => void sendMessage(input)}
+                  disabled={!input.trim() && pendingAttachments.length === 0}
+                  className="h-[42px] shrink-0 rounded-xl bg-accent px-4 text-sm font-medium text-white disabled:opacity-40"
+                >
+                  Send
+                </button>
+              )}
             </div>
           </div>
         </main>
