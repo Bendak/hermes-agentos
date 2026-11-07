@@ -227,18 +227,22 @@ class ChannelClient:
         if lock is not None and lock.locked():
             lock.release()
 
-    def force_release(self, thread_id: str, turn_id: str | None = None) -> bool:
+    def force_release(self, thread_id: str, turn_id: str | None = None,
+                      force: bool = False) -> bool:
         """Drop a specific stuck turn's callback/queue and release its lock.
 
         ``turn_id`` is the identity returned in the ``turn.started`` SSE event.
-        A reset without a matching live turn is a no-op: releasing a foreign
-        lock here would let a second tab or a delayed timeout kill a healthy
-        turn.  The caller must have decided the turn is dead.
+        A reset without a matching live turn is a no-op.  If an SSE consumer is
+        still attached, only an explicit Stop (``force=True``) may tear the
+        turn down; the automatic timeout/409 reset must never kill a healthy
+        turn owned by another tab.
         """
         queue = self._queues.get(thread_id)
         if queue is None:
             return False
         if turn_id is not None and getattr(queue, "_agentos_turn_id", None) != turn_id:
+            return False
+        if getattr(queue, "_agentos_consumer_active", False) and not force:
             return False
         self._queues.pop(thread_id, None)
         self._callbacks.pop(thread_id, None)
@@ -253,6 +257,7 @@ class ChannelClient:
     async def frames(self, thread_id: str, queue: asyncio.Queue,
                      timeout: float = 300.0) -> AsyncIterator[dict[str, Any]]:
         terminal_seen = False
+        queue._agentos_consumer_active = True  # type: ignore[attr-defined]
         try:
             while True:
                 frame = await asyncio.wait_for(queue.get(), timeout=timeout)
@@ -268,6 +273,7 @@ class ChannelClient:
             yield {"type": "error", "code": "timeout",
                    "message": "AgentOS channel turn timed out"}
         finally:
+            queue._agentos_consumer_active = False  # type: ignore[attr-defined]
             # On a cancelled SSE consumer keep the queue registered so the
             # dispatcher's terminal can still release the turn.  On a normal
             # terminal the dispatcher already popped it.

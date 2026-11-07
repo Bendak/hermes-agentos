@@ -595,8 +595,9 @@ async def chat_session_reset_channel(
     turn_id = (body or {}).get("turn_id")
     if not isinstance(turn_id, str) or not turn_id:
         raise HTTPException(status_code=400, detail="turn_id obrigatório")
+    force = bool((body or {}).get("force"))
     client = get_client()
-    released = client.force_release(row["hermes_id"], turn_id)
+    released = client.force_release(row["hermes_id"], turn_id, force=force)
     if released:
         client.forget_thread(row["hermes_id"])
         chat_sessions.rotate_hermes_id(session_id, user["user_id"])
@@ -608,13 +609,14 @@ async def chat_session_messages(
     session_id: str,
     limit: int = 200,
     offset: int = 0,
+    tail: bool = False,
     user: dict = Depends(require_auth),
 ):
     row = _owned_or_404(session_id, user)
     if limit < 1 or limit > 500 or offset < 0:
         raise HTTPException(status_code=400, detail="limit/offset inválidos")
     if channel_mode():
-        data = chat_transcript.list_messages(session_id, limit, offset)
+        data = chat_transcript.list_messages(session_id, limit, offset, tail=tail)
         return {"data": data, "pagination": {"total": len(data), "limit": limit, "offset": offset}}
     return await _remote_messages(row["profile"], row["hermes_id"], limit, offset)
 

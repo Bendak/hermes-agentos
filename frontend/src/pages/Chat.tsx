@@ -369,7 +369,7 @@ export default function ChatPage() {
     setLoadingMessages(true)
     if (clearError) setError(null)
     try {
-      const res = await fetch('/api/chat/sessions/' + id + '/messages?limit=200', { headers: authHeaders() })
+      const res = await fetch('/api/chat/sessions/' + id + '/messages?limit=200&tail=1', { headers: authHeaders() })
       if (!res.ok) throw new Error(await apiErrorMessage(res))
       const body = await res.json()
       const data: ChatMsg[] = body.data || []
@@ -454,7 +454,7 @@ export default function ChatPage() {
   async function resetTurn() {
     abortRef.current?.abort()
     abortRef.current = null
-    if (activeId) await resetChannelTurn(activeId, turnIdRef.current)
+    if (activeId) await resetChannelTurn(activeId, turnIdRef.current, true)
     turnIdRef.current = null
     setSending(false)
     setStreamText('')
@@ -510,13 +510,13 @@ export default function ChatPage() {
     }
   }
 
-  async function resetChannelTurn(id: string, turnId: string | null): Promise<boolean> {
+  async function resetChannelTurn(id: string, turnId: string | null, force = false): Promise<boolean> {
     if (!turnId) return false
     try {
       const res = await fetch('/api/chat/sessions/' + id + '/reset-channel', {
         method: 'POST',
         headers: authHeaders(true),
-        body: JSON.stringify({ turn_id: turnId }),
+        body: JSON.stringify({ turn_id: turnId, force }),
       })
       if (!res.ok) return false
       const data = await res.json().catch(() => ({}))

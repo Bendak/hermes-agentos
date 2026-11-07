@@ -59,15 +59,24 @@ def append(session_id: str, role: str, content: str = "",
         return int(cur.lastrowid or 0)
 
 
-def list_messages(session_id: str, limit: int = 200, offset: int = 0) -> list[dict[str, Any]]:
+def list_messages(session_id: str, limit: int = 200, offset: int = 0,
+                  tail: bool = False) -> list[dict[str, Any]]:
     init_db()
     with sqlite3.connect(DB_PATH, timeout=10) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT id, role, content, timestamp, meta FROM chat_transcript "
-            "WHERE session_id = ? ORDER BY id ASC LIMIT ? OFFSET ?",
-            (session_id, max(1, min(limit, 500)), max(0, offset)),
-        ).fetchall()
+        if tail:
+            rows = conn.execute(
+                "SELECT id, role, content, timestamp, meta FROM chat_transcript "
+                "WHERE session_id = ? ORDER BY id DESC LIMIT ?",
+                (session_id, max(1, min(limit, 500))),
+            ).fetchall()
+            rows = list(reversed(rows))
+        else:
+            rows = conn.execute(
+                "SELECT id, role, content, timestamp, meta FROM chat_transcript "
+                "WHERE session_id = ? ORDER BY id ASC LIMIT ? OFFSET ?",
+                (session_id, max(1, min(limit, 500)), max(0, offset)),
+            ).fetchall()
     out = []
     for row in rows:
         try:

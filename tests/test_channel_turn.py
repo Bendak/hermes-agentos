@@ -271,3 +271,34 @@ def test_transcript_exposes_turn_id_on_user_row():
     chat_transcript.append(sid, "user", "oi", meta={"turn_id": "turn-123"})
     row = chat_transcript.list_messages(sid)[0]
     assert row["turn_id"] == "turn-123"
+
+
+def test_force_release_refuses_live_consumer_without_force():
+    async def run():
+        client = ChannelClient(url="ws://unused", token="")
+        lock = asyncio.Lock()
+        await lock.acquire()
+        queue = asyncio.Queue()
+        queue._agentos_lock = lock
+        queue._agentos_turn_id = "turn-live"
+        queue._agentos_consumer_active = True
+        client._queues["t"] = queue
+        client._callbacks["t"] = lambda frame: None
+        assert client.force_release("t", "turn-live") is False
+        assert lock.locked()
+        assert client.force_release("t", "turn-live", force=True) is True
+        assert not lock.locked()
+
+    asyncio.run(run())
+
+
+def test_transcript_tail_returns_latest_rows():
+    from backend import chat_transcript
+    sid = "tail-test"
+    chat_transcript.clear(sid)
+    for i in range(205):
+        chat_transcript.append(sid, "user", f"m{i}")
+    rows = chat_transcript.list_messages(sid, limit=200, tail=True)
+    assert len(rows) == 200
+    assert rows[0]["content"] == "m5"
+    assert rows[-1]["content"] == "m204"
