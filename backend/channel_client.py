@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import os
+import time
 import uuid
 from typing import Any, AsyncIterator, Optional
 
@@ -51,6 +52,7 @@ class ChannelClient:
         self._send_lock = asyncio.Lock()
         self._queues: dict[str, asyncio.Queue] = {}
         self._callbacks: dict[str, Any] = {}
+        self._late_callbacks: dict[str, list[tuple[str, Any, float]]] = {}
         self._threads: set[str] = set()
         self._last_seq: dict[str, int] = {}
         self._closed = False
@@ -136,7 +138,21 @@ class ChannelClient:
             return
         self._last_seq[thread_id] = max(self._last_seq.get(thread_id, 0),
                                         int(frame.get("seq") or 0))
-        callback = self._callbacks.get(thread_id)
+        frame_turn = str(frame.get("turn_id") or "")
+        queue = self._queues.get(thread_id)
+        queue_turn = str(getattr(queue, "_agentos_turn_id", "") or "")
+        if frame_turn and queue is not None and frame_turn == queue_turn:
+            callback = self._callbacks.get(thread_id)
+            target_queue = queue
+        elif frame_turn:
+            # Late frame from a turn whose SSE queue is already gone: keep it
+            # out of the current turn's queue and hand it to that turn's
+            # recorder only.
+            callback = self._late_callback(thread_id, frame_turn)
+            target_queue = None
+        else:
+            callback = self._callbacks.get(thread_id)
+            target_queue = queue
         if callback is not None:
             try:
                 result = callback(frame)
@@ -144,18 +160,21 @@ class ChannelClient:
                     await result
             except Exception:
                 logger.warning("agentos channel frame callback failed", exc_info=True)
-        queue = self._queues.get(thread_id)
-        if queue is not None:
-            await queue.put(frame)
+        if target_queue is not None:
+            await target_queue.put(frame)
         if frame.get("type") in _TERMINAL:
-            # Remove both registrations before releasing the lock.  A new turn
-            # must not inherit this terminal frame or overwrite the queue that
-            # the old SSE generator still owns.
-            self._callbacks.pop(thread_id, None)
-            if self._queues.get(thread_id) is queue:
-                self._queues.pop(thread_id, None)
-            if queue is not None:
-                self.release(queue)
+            # A terminal ends only the turn it names.  Preserve its callback
+            # briefly so a thinking frame published after final can still merge
+            # into the already-flushed row; a new turn gets its own identities.
+            closed_turn = frame_turn or queue_turn
+            if target_queue is not None:
+                self._remember_late_callback(thread_id, closed_turn,
+                                             self._callbacks.get(thread_id))
+                if self._queues.get(thread_id) is target_queue:
+                    self._queues.pop(thread_id, None)
+                if self._callbacks.get(thread_id) is not None and not frame_turn:
+                    self._callbacks.pop(thread_id, None)
+                self.release(target_queue)
             # A terminal with no registered queue touches nothing: the lock is
             # shared across turns and may belong to a concurrent first-turn
             # setup (send_turn acquires it before the queue is registered).
@@ -173,6 +192,28 @@ class ChannelClient:
             if self._ws is None:
                 raise RuntimeError("agentos channel disconnected")
             await self._ws.send(json.dumps(frame, ensure_ascii=False))
+
+    def _remember_late_callback(self, thread_id: str, turn_id: str,
+                                callback: Any) -> None:
+        if not turn_id or callback is None:
+            return
+        now = time.monotonic()
+        rows = [row for row in self._late_callbacks.get(thread_id, [])
+                if now - row[2] < 60.0 and row[0] != turn_id]
+        rows.append((turn_id, callback, now))
+        self._late_callbacks[thread_id] = rows[-8:]
+
+    def _late_callback(self, thread_id: str, turn_id: str) -> Any:
+        if not turn_id:
+            return None
+        now = time.monotonic()
+        rows = [row for row in self._late_callbacks.get(thread_id, [])
+                if now - row[2] < 60.0]
+        self._late_callbacks[thread_id] = rows
+        for candidate_turn, callback, _ in reversed(rows):
+            if candidate_turn == turn_id:
+                return callback
+        return None
 
     async def send_turn(self, thread_id: str, *, user_id: str, user_name: str,
                         text: str, message_id: Optional[str] = None,
@@ -253,6 +294,7 @@ class ChannelClient:
         """Stop resuming an abandoned thread after a reset/rotation."""
         self._threads.discard(thread_id)
         self._last_seq.pop(thread_id, None)
+        self._late_callbacks.pop(thread_id, None)
 
     async def frames(self, thread_id: str, queue: asyncio.Queue,
                      timeout: float = 300.0) -> AsyncIterator[dict[str, Any]]:

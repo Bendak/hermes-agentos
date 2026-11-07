@@ -329,3 +329,64 @@ def test_transcript_update_meta_merges_fields():
     row = chat_transcript.list_messages(sid)[0]
     assert row["reasoning_content"] == "late"
     assert row["tool_calls"] == [1]
+
+
+def test_late_frame_after_terminal_reaches_original_callback():
+    async def run():
+        client = ChannelClient(url="ws://unused", token="")
+        lock = asyncio.Lock()
+        await lock.acquire()
+        queue = asyncio.Queue()
+        queue._agentos_lock = lock
+        queue._agentos_turn_id = "turn-a"
+        seen = []
+        client._queues["t"] = queue
+        client._callbacks["t"] = lambda frame: seen.append(frame)
+        await client._dispatch({"type": "final", "thread_id": "t",
+                                "turn_id": "turn-a", "text": "ok"})
+        assert not lock.locked()
+        assert "t" not in client._queues
+        await client._dispatch({"type": "thinking", "thread_id": "t",
+                                "turn_id": "turn-a", "text": "late"})
+        assert [f["type"] for f in seen] == ["final", "thinking"]
+
+    asyncio.run(run())
+
+
+def test_late_frame_does_not_leak_into_a_new_turn_callback():
+    async def run():
+        client = ChannelClient(url="ws://unused", token="")
+        old_seen, new_seen = [], []
+        old_queue = asyncio.Queue()
+        old_queue._agentos_turn_id = "turn-old"
+        client._queues["t"] = old_queue
+        client._callbacks["t"] = lambda frame: old_seen.append(frame)
+        await client._dispatch({"type": "final", "thread_id": "t",
+                                "turn_id": "turn-old", "text": "old"})
+        new_queue = asyncio.Queue()
+        new_queue._agentos_turn_id = "turn-new"
+        client._queues["t"] = new_queue
+        client._callbacks["t"] = lambda frame: new_seen.append(frame)
+        await client._dispatch({"type": "thinking", "thread_id": "t",
+                                "turn_id": "turn-old", "text": "straggler"})
+        assert [f["type"] for f in old_seen] == ["final", "thinking"]
+        assert new_seen == []
+
+    asyncio.run(run())
+
+
+def test_late_thinking_does_not_duplicate_unfinished_tools():
+    updates = []
+
+    def append(session, role, content, meta):
+        return 9
+
+    def update(row_id, patch):
+        updates.append(patch)
+
+    rec = ChannelTurnRecorder("s-dup", append, update)
+    rec.on_frame({"type": "tool", "event": "started", "name": "x",
+                  "preview": "p", "index": 1})
+    rec.on_frame({"type": "final", "text": "ok"})
+    rec.on_frame({"type": "thinking", "text": "late"})
+    assert len(updates[-1]["tool_calls"]) == 1

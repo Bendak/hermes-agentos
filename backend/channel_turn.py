@@ -74,14 +74,16 @@ class ChannelTurnRecorder:
             meta["reasoning_content"] = self.thinking_text
         # A turn can end while a tool is still marked started (gateway
         # cancelled the finish frame).  Keep it visible rather than dropping
-        # the call entirely.
-        if self.active_tools:
-            for name, preview in self.active_tools.values():
-                self.turn_tools.append({
-                    "function": {"name": name or "tool", "arguments": preview or ""},
-                })
-        if self.turn_tools:
-            meta["tool_calls"] = list(self.turn_tools)
+        # the call entirely.  Do not mutate turn_tools here: _meta() also runs
+        # for late reasoning, and appending active tools every time duplicates
+        # their cards.
+        tools = list(self.turn_tools)
+        for name, preview in self.active_tools.values():
+            tools.append({
+                "function": {"name": name or "tool", "arguments": preview or ""},
+            })
+        if tools:
+            meta["tool_calls"] = tools
         if self.attachments:
             meta["attachments"] = list(self.attachments)
         if error:
