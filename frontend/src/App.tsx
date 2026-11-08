@@ -6143,6 +6143,16 @@ function CronPage() {
 
 /* ── Skills Hub ────────────────────────────────────── */
 
+function skillCategoryLabel(category?: string): string {
+  if (!category) return 'Outra'
+  return category.toLowerCase() === 'other' ? 'Outra' : category
+}
+
+function stripFrontmatter(content: string): string {
+  const match = content.match(/^---[ \t]*\r?\n(?:[\s\S]*?\r?\n)?---[ \t]*(?:\r?\n|$)/)
+  return match ? content.slice(match[0].length) : content
+}
+
 function SkillCard({ skill, onClick }: { skill: Skill; onClick: () => void }) {
   const categoryColors: Record<string, string> = {
     anthropic: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
@@ -6175,33 +6185,33 @@ function SkillCard({ skill, onClick }: { skill: Skill; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className="text-left rounded-lg border border-border bg-surface/30 p-4 hover:border-accent/40 hover:bg-surface/50 transition-colors"
+      className="brand-card brand-card-hover text-left p-4 transition-colors"
     >
       <div className="flex items-start justify-between mb-2">
         <h3 className="text-body font-semibold text-text-primary">{skill.name}</h3>
         <span className={`text-xs px-2 py-0.5 rounded-full border ${colorClass}`}>
-          {skill.category || 'Other'}
+          {skillCategoryLabel(skill.category)}
         </span>
       </div>
       <p className="text-body-sm text-text-secondary line-clamp-2 mb-3">
         {skill.description}
       </p>
       <div className="flex items-center gap-3 text-xs text-text-tertiary">
-        <span>{skill.file_count} files</span>
-        {skill.has_references && <span title="Has references">📄</span>}
-        {skill.has_scripts && <span title="Has scripts">⚙️</span>}
-        {skill.has_templates && <span title="Has templates">📋</span>}
+        <span>{skill.file_count} arquivo{skill.file_count === 1 ? '' : 's'}</span>
+        {skill.has_references && <span title="Possui referências">📄</span>}
+        {skill.has_scripts && <span title="Possui scripts">⚙️</span>}
+        {skill.has_templates && <span title="Possui templates">📋</span>}
       </div>
       {skill.profiles && skill.profiles.length > 0 ? (
         <div className="flex items-center gap-1 mt-2 flex-wrap">
-          <span className="text-text-tertiary text-xs">Used by:</span>
+          <span className="text-text-tertiary text-xs">Usado por:</span>
           {skill.profiles.map(p => (
             <span key={p} className="text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent border border-accent/20">{p}</span>
           ))}
         </div>
       ) : (
         <div className="mt-2">
-          <span className="text-xs text-amber-400">Unused</span>
+          <span className="text-xs text-amber-400">Sem uso</span>
         </div>
       )}
     </button>
@@ -6213,8 +6223,47 @@ function SkillsHubPage() {
   const [category, setCategory] = useState('all')
   const [sort, setSort] = useState<'name-asc' | 'name-desc' | 'files'>('name-asc')
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const lastFocusedRef = useRef<HTMLElement | null>(null)
 
-  const { data: skills, isLoading } = useQuery({
+  useEffect(() => {
+    if (!selectedSlug) return
+    lastFocusedRef.current = document.activeElement as HTMLElement | null
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setSelectedSlug(null)
+        return
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const focusables = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ))
+      if (focusables.length === 0) return
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      if (!dialogRef.current.contains(document.activeElement)) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+        return
+      }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      lastFocusedRef.current?.focus()
+    }
+  }, [selectedSlug])
+
+  const { data: skills, isLoading, error } = useQuery({
     queryKey: ['skills'],
     queryFn: async () => {
       const res = await fetch('/api/skills')
@@ -6232,6 +6281,12 @@ function SkillsHubPage() {
     },
     enabled: !!selectedSlug,
   })
+
+  useEffect(() => {
+    if (!selectedSlug || !selectedSkill) return
+    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0)
+    return () => window.clearTimeout(focusTimer)
+  }, [selectedSlug, selectedSkill?.slug])
 
   const filtered = useMemo(() => {
     if (!skills) return []
@@ -6253,49 +6308,60 @@ function SkillsHubPage() {
   }, [skills])
 
   return (
-    <div className="min-h-screen bg-bg-base">
-      <NavBar />
-      <header className="px-6 pt-8 pb-4">
-        <div className="mx-auto max-w-6xl">
-          <h1 className="text-h2 font-bold text-text-primary">Skills Hub</h1>
-          <p className="text-body-sm text-text-secondary mt-1">
-            {skills?.length || 0} installed skills
-          </p>
-        </div>
-      </header>
-      <main className="mx-auto max-w-6xl px-6 pb-12">
-        <div className="flex flex-col sm:flex-row gap-3 mb-6">
+    <PageContainer>
+      <PageHeader
+        eyebrow="Biblioteca de habilidades"
+        title="Skills"
+        subtitle={error ? 'Não foi possível carregar o catálogo de skills.' : `${skills?.length || 0} skill${(skills?.length || 0) === 1 ? '' : 's'} instalada${(skills?.length || 0) === 1 ? '' : 's'} no workspace.`}
+      />
+
+      <main className="mt-6 pb-12">
+        <div className="brand-card mb-6 flex flex-col gap-3 p-3 sm:flex-row">
           <input
             type="text"
-            placeholder="Search skills..."
+            placeholder="Buscar skills…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="search-input flex-1 bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40"
+            className="search-input flex-1 rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40"
           />
           <select
             value={category}
             onChange={(e) => setCategory(e.target.value)}
-            className="bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
+            className="rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
           >
             {categories.map((cat: string) => (
-              <option key={cat} value={cat}>{cat === 'all' ? 'All Categories' : cat}</option>
+              <option key={cat} value={cat}>{cat === 'all' ? 'Todas as categorias' : skillCategoryLabel(cat)}</option>
             ))}
           </select>
           <select
             value={sort}
             onChange={(e) => setSort(e.target.value as 'name-asc' | 'name-desc' | 'files')}
-            className="bg-bg-elevated border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
+            className="rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
           >
-            <option value="name-asc">Name A-Z</option>
-            <option value="name-desc">Name Z-A</option>
-            <option value="files">Most Files</option>
+            <option value="name-asc">Nome A-Z</option>
+            <option value="name-desc">Nome Z-A</option>
+            <option value="files">Mais arquivos</option>
           </select>
         </div>
 
+        {error && (
+          <div className="mb-4 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-body-sm text-error">
+            Não foi possível carregar as skills.
+          </div>
+        )}
+
         {isLoading ? (
-          <div className="text-text-secondary text-center py-12">Loading skills...</div>
-        ) : filtered.length === 0 ? (
-          <div className="text-text-secondary text-center py-12">No skills found.</div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" role="status" aria-label="Carregando skills">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="brand-card p-4">
+                <div className="mb-3 h-4 w-40 animate-pulse rounded bg-surface/60" />
+                <div className="mb-2 h-3 w-full animate-pulse rounded bg-surface/40" />
+                <div className="h-3 w-2/3 animate-pulse rounded bg-surface/40" />
+              </div>
+            ))}
+          </div>
+        ) : filtered.length === 0 && !error ? (
+          <div className="brand-card p-8 text-center text-body-sm text-text-secondary">Nenhuma skill encontrada.</div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map((skill: Skill) => (
@@ -6304,24 +6370,31 @@ function SkillsHubPage() {
           </div>
         )}
 
-        {selectedSkill && (
-          <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setSelectedSlug(null)}>
-            <div className="bg-bg-elevated border border-border rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto p-6" onClick={e => e.stopPropagation()}>
+        {selectedSlug && selectedSkill && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setSelectedSlug(null)}>
+            <div
+              ref={dialogRef}
+              className="brand-card max-h-[80vh] w-full max-w-2xl overflow-y-auto p-6"
+              onClick={e => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-label={selectedSkill.name}
+            >
               <div className="flex items-start justify-between mb-4">
                 <h2 className="text-h2 font-bold text-text-primary">{selectedSkill.name}</h2>
-                <button onClick={() => setSelectedSlug(null)} className="text-text-secondary hover:text-text-primary text-xl">×</button>
+                <button ref={closeButtonRef} onClick={() => setSelectedSlug(null)} className="text-text-secondary hover:text-text-primary text-xl" aria-label="Fechar">×</button>
               </div>
               <p className="text-text-secondary mb-4">{selectedSkill.description}</p>
               <div className="flex gap-4 text-xs text-text-tertiary mb-4">
-                <span>{selectedSkill.file_count} files</span>
-                <span>{selectedSkill.category}</span>
+                <span>{selectedSkill.file_count} arquivo{selectedSkill.file_count === 1 ? '' : 's'}</span>
+                <span>{skillCategoryLabel(selectedSkill.category)}</span>
               </div>
               <div className="border-t border-border pt-4">
-                <MarkdownRenderer content={selectedSkill.full_content} />
+                <MarkdownRenderer content={stripFrontmatter(selectedSkill.full_content)} />
               </div>
               {selectedSkill.files?.length > 0 && (
                 <div className="border-t border-border mt-4 pt-4">
-                  <h3 className="text-body font-semibold text-text-primary mb-2">Files</h3>
+                  <h3 className="text-body font-semibold text-text-primary mb-2">Arquivos</h3>
                   <ul className="text-sm text-text-secondary space-y-1">
                     {selectedSkill.files.map((f: { path: string; size: number }) => (
                       <li key={f.path} className="font-mono text-xs">
@@ -6335,6 +6408,6 @@ function SkillsHubPage() {
           </div>
         )}
       </main>
-    </div>
+    </PageContainer>
   )
 }
