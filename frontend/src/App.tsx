@@ -2413,12 +2413,12 @@ function SessionDetailPage() {
 /* ── Kanban Board ──────────────────────────────────── */
 
 const COLUMN_META = [
-  { status: 'triage',  label: 'Triage',  accent: 'border-l-purple',        header: 'border-purple/50',        badge: 'bg-purple-subtle text-purple border border-purple/20' },
-  { status: 'todo',    label: 'Backlog', accent: 'border-l-text-tertiary', header: 'border-text-tertiary/50', badge: 'bg-surface text-text-tertiary border border-text-tertiary/20' },
-  { status: 'ready',   label: 'Ready',   accent: 'border-l-info',           header: 'border-info/50',           badge: 'bg-info-subtle text-info border border-info/20' },
-  { status: 'running', label: 'Running', accent: 'border-l-warning',        header: 'border-warning/50',        badge: 'bg-warning-subtle text-warning border border-warning/20' },
-  { status: 'done',    label: 'Done',    accent: 'border-l-success',        header: 'border-success/50',        badge: 'bg-success-subtle text-success border border-success/20' },
-  { status: 'blocked', label: 'Blocked', accent: 'border-l-error',          header: 'border-error/50',          badge: 'bg-error-subtle text-error border border-error/20' },
+  { status: 'triage',  label: 'Triagem',    accent: 'border-l-purple',        header: 'border-purple/50',        badge: 'bg-purple-subtle text-purple border border-purple/20' },
+  { status: 'todo',    label: 'Backlog',    accent: 'border-l-text-tertiary', header: 'border-text-tertiary/50', badge: 'bg-surface text-text-tertiary border border-text-tertiary/20' },
+  { status: 'ready',   label: 'Pronto',     accent: 'border-l-info',           header: 'border-info/50',           badge: 'bg-info-subtle text-info border border-info/20' },
+  { status: 'running', label: 'Executando', accent: 'border-l-warning',        header: 'border-warning/50',        badge: 'bg-warning-subtle text-warning border border-warning/20' },
+  { status: 'done',    label: 'Concluído',  accent: 'border-l-success',        header: 'border-success/50',        badge: 'bg-success-subtle text-success border border-success/20' },
+  { status: 'blocked', label: 'Bloqueado',  accent: 'border-l-error',          header: 'border-error/50',          badge: 'bg-error-subtle text-error border border-error/20' },
 ]
 
 const ALL_STATUSES = ['triage', 'todo', 'ready', 'running', 'done', 'blocked', 'archived']
@@ -2708,15 +2708,15 @@ function FilterBar({ filters, onChange, stats }: {
   const selectClass = "rounded-md border border-border bg-bg-base px-2.5 py-1.5 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition cursor-pointer"
 
   return (
-    <div className="flex flex-wrap items-center gap-3 mb-4">
+    <div className="brand-card mb-4 flex flex-wrap items-center gap-3 p-3">
       {/* Search */}
-      <div className="relative flex-1 min-w-[200px]">
+      <div className="relative min-w-[200px] flex-1">
         <input
           type="text"
           value={filters.search}
           onChange={(e) => onChange({ ...filters, search: e.target.value })}
-          placeholder="Search tasks…"
-          className="w-full rounded-md border border-border bg-bg-base pl-9 pr-3 py-1.5 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
+          placeholder="Buscar tarefas…"
+          className="w-full rounded-md border border-border bg-bg-base py-1.5 pl-9 pr-3 text-sm text-text-primary outline-none transition focus:border-accent focus:ring-1 focus:ring-accent"
         />
         <svg className="absolute left-3 top-1/2 -translate-y-1/2 text-text-tertiary" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       </div>
@@ -2726,9 +2726,9 @@ function FilterBar({ filters, onChange, stats }: {
         value={filters.assignee}
         onChange={(e) => onChange({ ...filters, assignee: e.target.value })}
         className={selectClass}
-        title="Filter by assignee"
+        title="Filtrar por responsável"
       >
-        <option value="">All assignees</option>
+        <option value="">Todos os responsáveis</option>
         {ALL_ASSIGNEES.map((a) => (
           <option key={a} value={a}>
             {a}{stats?.by_assignee?.[a] ? ` (${stats.by_assignee[a]})` : ''}
@@ -2741,9 +2741,9 @@ function FilterBar({ filters, onChange, stats }: {
         value={filters.priority}
         onChange={(e) => onChange({ ...filters, priority: e.target.value })}
         className={selectClass}
-        title="Filter by priority"
+        title="Filtrar por prioridade"
       >
-        <option value="">All priorities</option>
+        <option value="">Todas as prioridades</option>
         {ALL_PRIORITIES.map((p) => (
           <option key={p} value={String(p)}>{priorityLabel(p)}</option>
         ))}
@@ -2754,11 +2754,11 @@ function FilterBar({ filters, onChange, stats }: {
         value={filters.status}
         onChange={(e) => onChange({ ...filters, status: e.target.value })}
         className={selectClass}
-        title="Filter by status"
+        title="Filtrar por status"
       >
-        <option value="">All statuses</option>
+        <option value="">Todos os status</option>
         {ALL_STATUSES.filter((s) => s !== 'archived').map((s) => (
-          <option key={s} value={s}>{s}</option>
+          <option key={s} value={s}>{COLUMN_META.find((c) => c.status === s)?.label ?? s}</option>
         ))}
       </select>
 
@@ -2766,16 +2766,16 @@ function FilterBar({ filters, onChange, stats }: {
       {(filters.search || filters.assignee || filters.priority || filters.status) && (
         <button
           onClick={() => onChange({ search: '', assignee: '', priority: '', status: '' })}
-          className="text-caption text-text-tertiary hover:text-text-primary transition px-2"
+          className="px-2 text-caption text-text-tertiary transition hover:text-text-primary"
         >
-          Clear filters
+          Limpar filtros
         </button>
       )}
 
       {/* Total count badge */}
-      {stats && (
+      {stats && typeof stats.total === 'number' && (
         <span className="ml-auto text-caption text-text-tertiary">
-          {stats.total} task{stats.total === 1 ? '' : 's'}
+          {stats.total} tarefa{stats.total === 1 ? '' : 's'}
         </span>
       )}
     </div>
@@ -2870,7 +2870,7 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
       {...listeners}
       tabIndex={0}
       role="button"
-      aria-label={`Task ${task.title || 'Untitled'}. Priority ${priorityLabel(task.priority)}. Assignee ${task.assignee || 'unassigned'}. ${task.run_count} runs. ${task.comment_count} comments.`}
+      aria-label={`Tarefa ${task.title || 'Sem título'}. Prioridade ${priorityLabel(task.priority)}. Responsável ${task.assignee || 'sem responsável'}. ${task.run_count} execuções. ${task.comment_count} comentários.`}
       onClick={handleClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -2878,11 +2878,11 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
           navigate(`/tasks/${encodeURIComponent(task.id)}`)
         }
       }}
-      className={`card-focus mb-3 cursor-pointer rounded-lg border border-border bg-surface/40 p-3 transition hover:bg-surface-hover/70 hover:shadow-md hover-shadow-enhanced border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-text-tertiary'} ${isOverlay ? 'shadow-lg rotate-1' : ''}`}
+      className={`brand-card brand-card-hover card-focus mb-3 cursor-pointer p-3 transition border-l-4 ${COLUMN_META.find((c) => c.status === columnForStatus(task.status))?.accent || 'border-l-text-tertiary'} ${isOverlay ? 'shadow-lg rotate-1' : ''}`}
     >
       <div className="flex items-start justify-between gap-2 mb-2">
         <div className="text-body-sm font-medium text-text-primary line-clamp-2 leading-snug flex-1 prose-kanban-card">
-          <MarkdownRenderer content={task.title || 'Untitled'} />
+          <MarkdownRenderer content={task.title || 'Sem título'} />
         </div>
         {(onEdit || onArchive) && !isOverlay && isAdmin() && (
           <div className="flex items-center gap-0.5 shrink-0">
@@ -2931,7 +2931,7 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
         </span>
         {task.run_count > 0 && (
           <span className="text-caption text-text-tertiary">
-            {task.run_count} run{task.run_count === 1 ? '' : 's'}
+            {task.run_count} execuç{task.run_count === 1 ? 'ão' : 'ões'}
           </span>
         )}
       </div>
@@ -2939,7 +2939,7 @@ function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOv
         <span className="text-caption text-text-tertiary">{task.created_date}</span>
         {task.comment_count > 0 && (
           <span className="text-caption text-text-tertiary">
-            {task.comment_count} comment{task.comment_count === 1 ? '' : 's'}
+            {task.comment_count} comentári{task.comment_count === 1 ? 'o' : 'os'}
           </span>
         )}
       </div>
@@ -2980,7 +2980,7 @@ function KanbanColumn({ label, status, tasks, onEdit, onArchive, bulkSelectMode,
                 checked={selectedIds?.has(task.id) || false}
                 onChange={() => onToggleSelect?.(task.id)}
                 className="mt-3 shrink-0 cursor-pointer accent-accent"
-                aria-label={`Select task ${task.title}`}
+                aria-label={`Selecionar tarefa ${task.title}`}
               />
             )}
             <div className="flex-1">
@@ -2989,7 +2989,7 @@ function KanbanColumn({ label, status, tasks, onEdit, onArchive, bulkSelectMode,
           </div>
         ))}
         {tasks.length === 0 && (
-          <p className="text-caption text-text-tertiary text-center py-6">No tasks</p>
+          <p className="py-6 text-center text-caption text-text-tertiary">Nenhuma tarefa</p>
         )}
       </div>
     </div>
@@ -3165,78 +3165,85 @@ function KanbanBoardPage() {
   }))
 
   return (
-    <div className="min-h-screen bg-bg-base text-text-secondary">
-      <NavBar />
-      <header className="px-6 pt-8 pb-4">
-        <div className="mx-auto max-w-7xl flex items-center justify-between">
-          <div>
-            <h1 className="text-h2 font-bold text-text-primary">Kanban Board</h1>
-            <p className="text-body-sm text-text-secondary mt-1">Task pipeline</p>
-          </div>
-          <div className="flex items-center gap-3">
-{isAdmin() && (
-            <button
-              onClick={() => setCreateModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-accent text-white rounded-lg hover:bg-accent-hover transition-colors text-sm font-medium"
-            >
-              <span>+</span> New Task
-            </button>
+    <PageContainer>
+      <PageHeader
+        eyebrow="Pipeline de tarefas"
+        title="Tarefas"
+        subtitle="Kanban de execuções, prioridades e entregas do workspace."
+        actions={
+          <>
+            {isAdmin() && (
+              <button
+                onClick={() => setCreateModalOpen(true)}
+                className="flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3.5 text-sm font-medium text-text-inverse transition hover:opacity-90"
+              >
+                <span>+</span> Nova tarefa
+              </button>
             )}
             {isAdmin() && (
-            <button
-              onClick={() => setCreateTriageModalOpen(true)}
-              className="flex items-center gap-2 px-4 py-2 bg-purple-subtle text-purple border border-purple/30 rounded-lg hover:bg-purple/20 transition-colors text-sm font-medium"
-              title="Create a new task in triage with the specification template"
-            >
-              <span>+</span> New Triage Task
-            </button>
+              <button
+                onClick={() => setCreateTriageModalOpen(true)}
+                className="flex h-9 items-center gap-1.5 rounded-lg border border-purple/30 bg-purple-subtle px-3.5 text-sm font-medium text-purple transition hover:bg-purple/20"
+                title="Criar tarefa na Triagem com o template de especificação"
+              >
+                <span>+</span> Triagem
+              </button>
             )}
-            {stats && (
-              <div className="hidden sm:flex items-center gap-4 text-caption text-text-tertiary">
-                <span title="Total active tasks">{stats.total} total</span>
-                <span title="Completed in last 7 days" className="text-success">{stats.recent_done_7d} done/7d</span>
+            {stats && typeof stats.total === 'number' && (
+              <div className="hidden items-center gap-3 text-caption text-text-tertiary sm:flex">
+                <span title="Tarefas ativas">{stats.total} total</span>
+                <span title="Concluídas nos últimos 7 dias" className="text-success">{stats.recent_done_7d} em 7d</span>
               </div>
             )}
             {isAdmin() && (
-            <button
-              onClick={() => { setBulkSelectMode(!bulkSelectMode); if (bulkSelectMode) setSelectedIds(new Set()) }}
-              className={`rounded-md border px-3 py-1.5 text-sm transition ${bulkSelectMode ? 'bg-accent text-white border-accent' : 'bg-surface border-border text-text-primary hover:bg-surface-hover/80'}`}
-            >
-              {bulkSelectMode ? '✕ Cancel bulk' : 'Bulk select'}
-            </button>
+              <button
+                onClick={() => { setBulkSelectMode(!bulkSelectMode); if (bulkSelectMode) setSelectedIds(new Set()) }}
+                className={`h-9 rounded-lg border px-3 text-sm transition ${bulkSelectMode ? 'border-accent bg-accent text-text-inverse' : 'border-border bg-surface text-text-primary hover:bg-surface-hover'}`}
+              >
+                {bulkSelectMode ? '✕ Cancelar lote' : 'Selecionar lote'}
+              </button>
             )}
             {isAdmin() && bulkSelectMode && selectedIds.size > 0 && (
               <>
-                <span className="text-caption text-text-secondary">{selectedIds.size} selected</span>
+                <span className="text-caption text-text-secondary">{selectedIds.size} selecionadas</span>
                 <button
                   onClick={() => bulkArchiveMutation.mutate({ taskIds: [...selectedIds], archive: true })}
                   disabled={bulkArchiveMutation.isPending}
-                  className="rounded-md bg-warning/20 border border-warning/30 px-3 py-1.5 text-sm text-warning hover:bg-warning/30 transition"
+                  className="h-9 rounded-lg border border-warning/30 bg-warning/20 px-3 text-sm text-warning transition hover:bg-warning/30"
                 >
-                  Archive {selectedIds.size}
+                  Arquivar {selectedIds.size}
                 </button>
               </>
             )}
             <button
               onClick={() => setShowArchived((v) => !v)}
-              className="rounded-md bg-surface border border-border px-3 py-1.5 text-sm text-text-primary hover:bg-surface-hover/80 transition"
+              className="h-9 rounded-lg border border-border bg-surface px-3 text-sm text-text-primary transition hover:bg-surface-hover"
             >
-              {showArchived ? 'Hide archived' : 'Show archived'}
+              {showArchived ? 'Ocultar arquivadas' : 'Mostrar arquivadas'}
             </button>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
-      <main className="mx-auto max-w-7xl px-6 pb-12">
+      <main className="mt-6 pb-12">
         {/* Filter bar */}
         {data && (
           <FilterBar filters={filters} onChange={setFilters} stats={stats} />
         )}
 
-        {isLoading && <p className="text-text-secondary">Loading tasks…</p>}
+        {isLoading && (
+          <div className="brand-card p-6" role="status" aria-label="Carregando tarefas">
+            <div className="mb-4 h-4 w-44 animate-pulse rounded bg-surface/60" />
+            <div className="flex gap-3 overflow-hidden">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="h-40 min-w-[220px] flex-1 animate-pulse rounded-lg bg-surface/40" />
+              ))}
+            </div>
+          </div>
+        )}
         {error && (
-          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error mb-4">
-            Error: {(error as Error).message}
+          <div className="mb-4 rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-body-sm text-error">
+            Não foi possível carregar as tarefas.
           </div>
         )}
 
@@ -3280,7 +3287,7 @@ function KanbanBoardPage() {
             {showArchived && (
               <div className="mt-8">
                 <div className="flex items-center justify-between mb-3 pb-2 border-b border-text-tertiary/30">
-                  <h3 className="text-body-sm font-semibold text-text-tertiary">Archived</h3>
+                  <h3 className="text-body-sm font-semibold text-text-tertiary">Arquivadas</h3>
                   <div className="flex items-center gap-2">
                     {bulkSelectMode && archivedTasks.length > 0 && selectedIds.size > 0 && (
                       <button
@@ -3288,7 +3295,7 @@ function KanbanBoardPage() {
                         disabled={bulkArchiveMutation.isPending}
                         className="rounded-md bg-success/20 border border-success/30 px-3 py-1.5 text-sm text-success hover:bg-success/30 transition"
                       >
-                        Unarchive {selectedIds.size}
+                        Desarquivar {selectedIds.size}
                       </button>
                     )}
                     <span className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium bg-surface text-text-tertiary border border-text-tertiary/20">
@@ -3310,7 +3317,7 @@ function KanbanBoardPage() {
                             return next
                           })}
                           className="mt-3 shrink-0 cursor-pointer accent-accent"
-                          aria-label={`Select task ${task.title}`}
+                          aria-label={`Selecionar tarefa ${task.title}`}
                         />
                       )}
                       <div className="flex-1">
@@ -3320,7 +3327,7 @@ function KanbanBoardPage() {
                   ))}
                 </div>
                 {archivedTasks.length === 0 && (
-                  <p className="text-caption text-text-tertiary text-center py-6">No archived tasks</p>
+                  <p className="py-6 text-center text-caption text-text-tertiary">Nenhuma tarefa arquivada</p>
                 )}
               </div>
             )}
@@ -3360,7 +3367,7 @@ function KanbanBoardPage() {
           }}
         />
       )}
-    </div>
+    </PageContainer>
   )
 }
 

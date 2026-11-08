@@ -24,7 +24,7 @@ export function PageHeader({
         <h1 className="mt-2 text-h1 font-semibold tracking-tight text-text-primary">{title}</h1>
         {subtitle && <p className="mt-1.5 max-w-2xl text-body text-text-secondary">{subtitle}</p>}
       </div>
-      {actions && <div className="flex shrink-0 items-center gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap items-center gap-2 sm:justify-end">{actions}</div>}
     </div>
   )
 }
