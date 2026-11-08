@@ -3991,9 +3991,9 @@ function ConfigNode({
                   onChange(path || name, newVal)
                 }}
                 className="text-xs text-accent hover:text-accent-hover transition-colors px-1.5 py-0.5 rounded border border-accent/30 hover:border-accent/60"
-                title="Add item"
+                title="Adicionar item"
               >
-                + Add
+                + Adicionar
               </button>
             </div>
           )}
@@ -4050,7 +4050,7 @@ function ConfigNode({
                       onChange(path || name, newVal)
                     }}
                     className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-xs text-error hover:text-error transition-opacity px-1 shrink-0"
-                    title="Remove item"
+                    title="Remover item"
                   >
                     ✕
                   </button>
@@ -4128,7 +4128,7 @@ function ConfigNode({
     <div style={{ marginLeft: depth * 16 }} className="flex items-start gap-2 py-0.5 text-sm">
       <span className="text-text-secondary shrink-0">{name}:</span>
       {isRedacted ? (
-        <span className="text-warning font-mono text-xs" title="Redacted secret">
+        <span className="text-warning font-mono text-xs" title="Segredo oculto">
           🔒 {value}
         </span>
       ) : (
@@ -4144,26 +4144,28 @@ function ConfigPage() {
   const [editMode, setEditMode] = useState(false)
   const [changes, setChanges] = useState<Record<string, any>>({})
   const queryClient = useQueryClient()
+  const admin = isAdmin()
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['config'],
     queryFn: async () => {
       const res = await fetch('/api/config')
-      if (!res.ok) throw new Error('Failed to load config')
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
+    enabled: admin,
     // Don't refetch while user is editing — refetch resets mergedData and breaks controlled inputs
     refetchInterval: editMode ? false : 5000,
   })
 
-  const { data: rawData } = useQuery({
+  const { data: rawData, error: rawError } = useQuery({
     queryKey: ['config-raw'],
     queryFn: async () => {
       const res = await fetch('/api/config/raw')
-      if (!res.ok) throw new Error('Failed to load raw config')
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
-    enabled: viewMode === 'yaml',
+    enabled: admin && viewMode === 'yaml',
   })
 
   const mergedData = useMemo(() => {
@@ -4205,7 +4207,7 @@ function ConfigPage() {
       })
       if (!res.ok) {
         const err = await res.json()
-        throw new Error(err.detail || 'Failed to save')
+        throw new Error(err.detail || 'Falha ao salvar')
       }
       return res.json()
     },
@@ -4234,145 +4236,179 @@ function ConfigPage() {
     saveMutation.mutate(patches)
   }
 
+  if (!admin) {
+    return (
+      <PageContainer>
+        <PageHeader eyebrow="Sistema" title="Configuração" subtitle="Acesso restrito" />
+        <main className="mt-6 pb-12">
+          <div className="brand-card p-6">
+            <h2 className="text-h3 font-semibold text-text-primary">Acesso restrito</h2>
+            <p className="mt-2 text-sm text-text-secondary">
+              A configuração do Hermes é visível apenas para administradores.
+            </p>
+          </div>
+        </main>
+      </PageContainer>
+    )
+  }
+
+  const pending = Object.keys(changes).length
+
   return (
-    <div className="min-h-screen bg-bg-base">
-      <NavBar />
-      <header className="px-6 pt-8 pb-4">
-        <div className="mx-auto max-w-5xl">
-          <h1 className="text-h2 font-bold text-text-primary">Configuration</h1>
-          <p className="text-body-sm text-text-secondary mt-1">
-            {editMode ? 'Edit mode — secret fields are locked' : 'Read-only view of Hermes config.yaml'}
-          </p>
-        </div>
-      </header>
-      <main className="mx-auto max-w-5xl px-6 pb-12">
-        {/* Warning banner */}
-        <div className="mb-6 rounded-lg border border-warning/30 bg-warning-subtle p-4 flex items-center gap-3">
-          <span className="text-warning text-lg">⚠️</span>
+    <PageContainer>
+      <PageHeader
+        eyebrow="Sistema"
+        title="Configuração"
+        subtitle={editMode ? 'Modo edição — campos sensíveis bloqueados' : 'Visão somente leitura do config.yaml do Hermes'}
+        actions={
+          viewMode === 'tree' ? (
+            editMode ? (
+              <span className="rounded-lg bg-warning/15 px-3 py-1.5 text-sm font-medium text-warning">
+                ✎ Editando
+              </span>
+            ) : (
+              <button
+                onClick={() => setEditMode(true)}
+                className="rounded-lg border border-border px-3 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface/50 hover:text-text-primary"
+              >
+                ✎ Editar
+              </button>
+            )
+          ) : undefined
+        }
+      />
+
+      <main className="mt-6 pb-12">
+        <div className="mb-4 flex items-start gap-3 rounded-xl border border-warning/30 bg-warning/10 p-4">
+          <span className="text-lg text-warning" aria-hidden="true">⚠️</span>
           <p className="text-sm text-warning">
             {editMode
-              ? 'Editing config.yaml — secret fields (API keys, tokens, passwords) cannot be modified. A container restart is required for changes to take effect.'
-              : 'Read-only view — changes to config.yaml require a container restart'}
+              ? 'Editando config.yaml — campos sensíveis (chaves de API, tokens, senhas) não podem ser alterados. Reinicie o container para aplicar.'
+              : 'Somente leitura — alterações no config.yaml exigem reinício do container.'}
           </p>
         </div>
 
-        {/* Toolbar */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
-          <div className="flex gap-2">
+        <div className="brand-card mb-4 flex flex-col gap-3 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div role="group" aria-label="Modo de visualização" className="flex gap-2">
             <button
               onClick={() => setViewMode('tree')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition duration-200 ${
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 viewMode === 'tree'
-                  ? 'text-accent bg-accent-subtle'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-surface/60'
+                  ? 'bg-accent/15 text-accent'
+                  : 'text-text-secondary hover:bg-surface/50 hover:text-text-primary'
               }`}
             >
-              Tree
+              Árvore
             </button>
             <button
               onClick={() => setViewMode('yaml')}
-              className={`px-3 py-1.5 text-sm font-medium rounded-md transition duration-200 ${
+              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
                 viewMode === 'yaml'
-                  ? 'text-accent bg-accent-subtle'
-                  : 'text-text-secondary hover:text-text-primary hover:bg-surface/60'
+                  ? 'bg-accent/15 text-accent'
+                  : 'text-text-secondary hover:bg-surface/50 hover:text-text-primary'
               }`}
             >
               YAML
             </button>
-            {viewMode === 'tree' && (
-              <button
-                onClick={() => {
-                  if (editMode) handleCancel()
-                  else setEditMode(true)
-                }}
-                className={`px-3 py-1.5 text-sm font-medium rounded-md transition duration-200 ${
-                  editMode
-                    ? 'text-warning bg-warning-subtle'
-                    : 'text-text-secondary hover:text-text-primary hover:bg-surface/60'
-                }`}
-              >
-                {editMode ? '✎ Editing' : '✎ Edit'}
-              </button>
-            )}
           </div>
           <input
             type="text"
-            placeholder="Search keys..."
+            placeholder="Buscar chaves…"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="search-input bg-bg-elevated border border-border rounded-md px-3 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 w-full sm:w-auto"
+            className="search-input w-full rounded-md border border-border bg-bg-elevated px-3 py-1.5 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 sm:w-72"
           />
         </div>
 
-        {/* Content */}
-        {isLoading && (
-          <div className="flex items-center justify-center py-20">
-            <div className="w-6 h-6 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-          </div>
-        )}
-        {error && (
-          <div className="rounded-lg border border-danger/30 bg-danger-subtle p-4 text-sm text-danger">
-            Error loading config: {String(error)}
-          </div>
-        )}
         {saveMutation.isError && (
-          <div className="mb-4 rounded-lg border border-danger/30 bg-danger-subtle p-4 text-sm text-danger">
-            Save failed: {String(saveMutation.error?.message || 'Unknown error')}
+          <div className="mb-4 rounded-xl border border-error/30 bg-error/10 p-4 text-sm text-error">
+            Falha ao salvar: {String(saveMutation.error?.message || 'erro desconhecido')}
           </div>
         )}
 
-        {viewMode === 'tree' && mergedData && (
-          <div className="rounded-lg border border-border bg-surface/30 p-4">
-            {Object.entries(mergedData).map(([k, v]) => (
-              <ConfigNode
-                key={k}
-                name={k}
-                value={v}
-                depth={0}
-                searchTerm={searchTerm}
-                editMode={editMode}
-                path={k}
-                onChange={handleChange}
-              />
+        {isLoading && (
+          <div className="brand-card space-y-3 p-5" role="status" aria-label="Carregando configuração">
+            {Array.from({ length: 8 }, (_, i) => (
+              <div key={i} className="h-4 animate-pulse rounded bg-surface/60" style={{ width: `${92 - i * 7}%` }} />
             ))}
           </div>
         )}
 
-        {viewMode === 'yaml' && rawData && (
-          <pre className="rounded-lg border border-border bg-surface/30 p-4 overflow-x-auto text-sm font-mono text-text-primary">
-            {rawData.yaml}
-          </pre>
+        {error && (
+          <div className="brand-card border-error/30 bg-error/10 p-4 text-sm text-error">
+            Não foi possível carregar a configuração: {error instanceof Error ? error.message : 'erro desconhecido'}
+          </div>
         )}
-      </main>
 
-      {/* Sticky save bar */}
-      {editMode && (
-        <div className="fixed bottom-0 left-0 right-0 bg-bg-elevated border-t border-border px-6 py-3 flex items-center justify-between z-50 shadow-lg">
-          <span className="text-body-sm text-text-secondary">
-            {Object.keys(changes).length === 0
-              ? 'No changes yet — edit fields above'
-              : `${Object.keys(changes).length} change(s) pending`}
-          </span>
-          <div className="flex gap-3">
-            <button
-              onClick={handleCancel}
-              className="px-4 py-1.5 text-sm font-medium text-text-secondary hover:text-text-primary border border-border rounded-md hover:bg-surface/60 transition-colors"
-            >
-              Cancel
-            </button>
-{isAdmin() && (
-            <button
-              onClick={handleSave}
-              disabled={Object.keys(changes).length === 0 || saveMutation.isPending}
-              className="bg-accent text-text-inverse px-4 py-1.5 rounded-md text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-            >
-              {saveMutation.isPending ? 'Saving...' : `Save Changes (${Object.keys(changes).length})`}
-            </button>
+        {viewMode === 'tree' && mergedData && (
+          <div className="brand-card p-4 lg:p-5">
+            {Object.keys(mergedData).length === 0 ? (
+              <p className="text-sm text-text-secondary">Nenhuma configuração encontrada.</p>
+            ) : (
+              Object.entries(mergedData).map(([k, v]) => (
+                <ConfigNode
+                  key={k}
+                  name={k}
+                  value={v}
+                  depth={0}
+                  searchTerm={searchTerm}
+                  editMode={editMode}
+                  path={k}
+                  onChange={handleChange}
+                />
+              ))
             )}
           </div>
-        </div>
-      )}
-    </div>
+        )}
+
+        {viewMode === 'yaml' && rawData && (
+          <div className="brand-card overflow-hidden">
+            <pre className="max-h-[70vh] overflow-auto p-4 font-mono text-sm text-text-primary">
+              {rawData.yaml}
+            </pre>
+          </div>
+        )}
+
+        {viewMode === 'yaml' && rawError && (
+          <div className="brand-card border-error/30 bg-error/10 p-4 text-sm text-error">
+            Não foi possível carregar o YAML bruto: {rawError instanceof Error ? rawError.message : 'erro desconhecido'}
+          </div>
+        )}
+
+        {viewMode === 'yaml' && !rawData && !rawError && (
+          <div className="brand-card space-y-3 p-5" role="status" aria-label="Carregando YAML">
+            {Array.from({ length: 6 }, (_, i) => (
+              <div key={i} className="h-4 animate-pulse rounded bg-surface/60" style={{ width: `${88 - i * 9}%` }} />
+            ))}
+          </div>
+        )}
+
+        {editMode && (
+          <div className="sticky bottom-0 z-40 mt-6 flex flex-col gap-3 rounded-xl border border-border bg-bg-elevated/95 px-4 py-3 shadow-xl backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-sm text-text-secondary">
+              {pending === 0
+                ? 'Nenhuma alteração ainda — edite os campos acima'
+                : `${pending} ${pending === 1 ? 'alteração pendente' : 'alterações pendentes'}`}
+            </span>
+            <div className="flex gap-3">
+              <button
+                onClick={handleCancel}
+                className="rounded-md border border-border px-4 py-1.5 text-sm font-medium text-text-secondary transition-colors hover:bg-surface/60 hover:text-text-primary"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={pending === 0 || saveMutation.isPending}
+                className="rounded-md bg-accent px-4 py-1.5 text-sm font-medium text-text-inverse transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {saveMutation.isPending ? 'Salvando…' : `Salvar (${pending})`}
+              </button>
+            </div>
+          </div>
+        )}
+      </main>
+    </PageContainer>
   )
 }
 

@@ -53,7 +53,7 @@ const NAV_GROUPS: NavGroup[] = [
     adminOnly: true,
     items: [
       { to: '/analytics', label: 'Analytics', icon: 'chart' },
-      { to: '/config', label: 'Config', icon: 'config' },
+      { to: '/config', label: 'Configuração', icon: 'config' },
       { to: '/settings', label: 'Usuários', icon: 'users' },
     ],
   },
