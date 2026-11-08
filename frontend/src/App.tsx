@@ -5614,9 +5614,9 @@ interface CronJob {
 }
 
 function formatRelativeTime(iso: string | null): string {
-  if (!iso) return '-'
+  if (!iso) return '—'
   const d = new Date(iso)
-  if (isNaN(d.getTime())) return '-'
+  if (isNaN(d.getTime())) return '—'
   const now = Date.now()
   const diff = d.getTime() - now
   const absDiff = Math.abs(diff)
@@ -5624,10 +5624,10 @@ function formatRelativeTime(iso: string | null): string {
   const hours = Math.floor(minutes / 60)
   const days = Math.floor(hours / 24)
 
-  if (absDiff < 60000) return 'just now'
-  if (minutes < 60) return diff > 0 ? `in ${minutes}m` : `${minutes}m ago`
-  if (hours < 24) return diff > 0 ? `in ${hours}h` : `${hours}h ago`
-  return diff > 0 ? `in ${days}d` : `${days}d ago`
+  if (absDiff < 60000) return 'agora'
+  if (minutes < 60) return diff > 0 ? `em ${minutes}m` : `há ${minutes}m`
+  if (hours < 24) return diff > 0 ? `em ${hours}h` : `há ${hours}h`
+  return diff > 0 ? `em ${days}d` : `há ${days}d`
 }
 
 /* ── Cron Job Edit/Create Dialog ──────────────────── */
@@ -5651,6 +5651,48 @@ function CronJobDialog({
   const [deliver, setDeliver] = useState(job?.deliver || 'origin')
   const [availableModels, setAvailableModels] = useState<{ model: string; provider: string }[]>([])
   const [defaultModel, setDefaultModel] = useState<{ model: string; provider: string }>({ model: '', provider: '' })
+  const dialogRef = useRef<HTMLDivElement | null>(null)
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null)
+  const lastFocusedRef = useRef<HTMLElement | null>(null)
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
+  useEffect(() => {
+    lastFocusedRef.current = document.activeElement as HTMLElement | null
+    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0)
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const focusables = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      ))
+      if (focusables.length === 0) return
+      const first = focusables[0]
+      const last = focusables[focusables.length - 1]
+      if (!dialogRef.current.contains(document.activeElement)) {
+        event.preventDefault()
+        ;(event.shiftKey ? last : first).focus()
+        return
+      }
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.clearTimeout(focusTimer)
+      document.removeEventListener('keydown', onKeyDown)
+      lastFocusedRef.current?.focus()
+    }
+  }, [])
 
   useEffect(() => {
     const token = localStorage.getItem('agentos_access_token')
@@ -5700,25 +5742,29 @@ function CronJobDialog({
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={onClose}>
       <div
-        className="bg-bg-elevated border border-border rounded-xl max-w-xl w-full max-h-[85vh] overflow-y-auto"
+        ref={dialogRef}
+        className="brand-card max-h-[85vh] w-full max-w-xl overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={job ? 'Editar tarefa agendada' : 'Nova tarefa agendada'}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+        <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="text-lg font-bold text-text-primary">
-            {job ? 'Edit Cron Job' : 'New Cron Job'}
+            {job ? 'Editar tarefa agendada' : 'Nova tarefa agendada'}
           </h2>
-          <button onClick={onClose} className="text-text-tertiary hover:text-text-primary text-xl leading-none">&times;</button>
+          <button ref={closeButtonRef} onClick={onClose} aria-label="Fechar" className="text-xl leading-none text-text-tertiary hover:text-text-primary">&times;</button>
         </div>
         <form onSubmit={handleSubmit} className="px-6 py-4 space-y-4">
           {/* Name */}
           <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Name</label>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Nome</label>
             <input
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
-              placeholder="e.g. Daily briefing"
+              placeholder="ex.: Resumo diário"
               className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40"
             />
           </div>
@@ -5726,7 +5772,7 @@ function CronJobDialog({
           {/* Schedule */}
           <div>
             <label className="block text-xs font-medium text-text-secondary mb-1">
-              Schedule <span className="text-text-tertiary">(cron expression)</span>
+              Agendamento <span className="text-text-tertiary">(expressão cron)</span>
             </label>
             <input
               type="text"
@@ -5737,9 +5783,9 @@ function CronJobDialog({
               className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm font-mono text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40"
             />
             <p className="text-[11px] text-text-tertiary mt-1">
-              min hour day month weekday &mdash; e.g. <code className="text-accent">0 8 * * 1-5</code> = weekdays at 8am,{' '}
-              <code className="text-accent">0 */6 * * *</code> = every 6h,{' '}
-              <code className="text-accent">30 21 * * 2</code> = Tuesdays at 9:30pm
+              minuto hora dia mês dia-da-semana &mdash; ex.: <code className="text-accent">0 8 * * 1-5</code> = dias úteis às 8h,{' '}
+              <code className="text-accent">0 */6 * * *</code> = a cada 6h,{' '}
+              <code className="text-accent">30 21 * * 2</code> = terças às 21h30
             </p>
           </div>
 
@@ -5750,21 +5796,21 @@ function CronJobDialog({
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               rows={6}
-              placeholder="Describe what this job should do..."
+              placeholder="Descreva o que esta tarefa deve fazer…"
               className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-2 focus:ring-accent/40 resize-y font-mono text-xs leading-relaxed"
             />
           </div>
 
           {/* Model */}
           <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Model <span className="text-text-tertiary">(optional)</span></label>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Modelo <span className="text-text-tertiary">(opcional)</span></label>
             <select
               value={modelSelect}
               onChange={(e) => handleModelSelectChange(e.target.value)}
               className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
             >
               <option value="">
-                Default{defaultModel.model ? ` (${defaultModel.model} — ${defaultModel.provider})` : ''}
+                Padrão{defaultModel.model ? ` (${defaultModel.model} — ${defaultModel.provider})` : ''}
               </option>
               {Object.entries(
                 availableModels.reduce<Record<string, typeof availableModels>>((acc, m) => {
@@ -5781,30 +5827,30 @@ function CronJobDialog({
                   ))}
                 </optgroup>
               ))}
-              <option value="__none__">No model (script only)</option>
+              <option value="__none__">Sem modelo (somente script)</option>
             </select>
             {modelSelect === '__none__' ? (
               <p className="text-[11px] text-text-tertiary mt-1">
-                Job will run script only — no LLM processing. The prompt is still sent but no model is invoked.
+                A tarefa executará apenas o script — sem processamento de LLM. O prompt ainda é enviado, mas nenhum modelo é invocado.
               </p>
             ) : (
               <p className="text-[11px] text-text-tertiary mt-1">
-                Leave on Default to use the system model{defaultModel.model ? ` (${defaultModel.model})` : ''}. Pick a specific model to override.
+                Deixe em Padrão para usar o modelo do sistema{defaultModel.model ? ` (${defaultModel.model})` : ''}. Escolha um modelo específico para sobrescrever.
               </p>
             )}
           </div>
 
           {/* Deliver */}
           <div>
-            <label className="block text-xs font-medium text-text-secondary mb-1">Deliver to</label>
+            <label className="block text-xs font-medium text-text-secondary mb-1">Entregar em</label>
             <select
               value={deliver}
               onChange={(e) => setDeliver(e.target.value)}
               className="w-full bg-bg-base border border-border rounded-md px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-2 focus:ring-accent/40"
             >
-              <option value="origin">Origin chat</option>
+              <option value="origin">Chat de origem</option>
               <option value="whatsapp">WhatsApp</option>
-              <option value="none">No delivery</option>
+              <option value="none">Sem entrega</option>
             </select>
           </div>
 
@@ -5823,7 +5869,7 @@ function CronJobDialog({
                 }`}
               />
             </button>
-            <span className="text-sm text-text-secondary">{enabled ? 'Enabled' : 'Paused'}</span>
+            <span className="text-sm text-text-secondary">{enabled ? 'Ativo' : 'Pausado'}</span>
           </div>
 
           {/* Actions */}
@@ -5833,14 +5879,14 @@ function CronJobDialog({
               onClick={onClose}
               className="px-4 py-2 text-sm rounded-md text-text-secondary hover:text-text-primary hover:bg-surface/60 transition-colors"
             >
-              Cancel
+              Cancelar
             </button>
             <button
               type="submit"
               disabled={isSaving || !name.trim() || !schedule.trim()}
               className="px-4 py-2 text-sm rounded-md bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors font-medium"
             >
-              {isSaving ? 'Saving...' : job ? 'Save Changes' : 'Create Job'}
+              {isSaving ? 'Salvando…' : job ? 'Salvar alterações' : 'Criar tarefa'}
             </button>
           </div>
         </form>
@@ -5856,12 +5902,13 @@ function CronPage() {
   const [showCreate, setShowCreate] = useState(false)
   const queryClient = useQueryClient()
   const toast = useToast()
+  const admin = isAdmin()
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['cron-jobs'],
     queryFn: async () => {
       const res = await fetch('/api/cron')
-      if (!res.ok) throw new Error('Failed to load cron jobs')
+      if (!res.ok) throw new Error('Falha ao carregar tarefas agendadas')
       return res.json() as Promise<{ jobs: CronJob[] }>
     },
     refetchInterval: 10000,
@@ -5870,27 +5917,27 @@ function CronPage() {
   const createMutation = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
       const res = await fetch('/api/cron', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (!res.ok) throw new Error('Failed to create job')
+      if (!res.ok) throw new Error('Falha ao criar tarefa')
       return res.json()
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cron-jobs'] })
       setShowCreate(false)
     },
-    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
+    onError: (e: Error) => toast(e.message || 'Falha na solicitação', 'error'),
   })
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, ...body }: Record<string, unknown>) => {
       const res = await fetch(`/api/cron/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      if (!res.ok) throw new Error('Failed to update job')
+      if (!res.ok) throw new Error('Falha ao atualizar tarefa')
       return res.json()
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['cron-jobs'] })
       setEditJob(null)
     },
-    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
+    onError: (e: Error) => toast(e.message || 'Falha na solicitação', 'error'),
   })
 
   const deleteMutation = useMutation({
@@ -5900,7 +5947,7 @@ function CronPage() {
       return res.json().catch(() => null)  // M28-03: 2xx empty body = sucesso
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
-    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
+    onError: (e: Error) => toast(e.message || 'Falha na solicitação', 'error'),
   })
 
   const pauseMutation = useMutation({
@@ -5910,7 +5957,7 @@ function CronPage() {
       return res.json()
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
-    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
+    onError: (e: Error) => toast(e.message || 'Falha na solicitação', 'error'),
   })
 
   const resumeMutation = useMutation({
@@ -5920,7 +5967,7 @@ function CronPage() {
       return res.json()
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
-    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
+    onError: (e: Error) => toast(e.message || 'Falha na solicitação', 'error'),
   })
 
   const runNowMutation = useMutation({
@@ -5930,195 +5977,248 @@ function CronPage() {
       return res.json() as Promise<{ status: string; message: string }>
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cron-jobs'] }),
-    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
+    onError: (e: Error) => toast(e.message || 'Falha na solicitação', 'error'),
   })
 
   const jobs = data?.jobs || []
   const activeCount = jobs.filter(j => j.enabled && j.state !== 'paused').length
   const pausedCount = jobs.filter(j => !j.enabled || j.state === 'paused').length
 
-  return (
-    <div className="min-h-screen bg-bg-base">
-      <NavBar />
-      <header className="px-6 pt-8 pb-4">
-        <div className="mx-auto max-w-6xl">
-          <div className="flex items-end justify-between">
-            <div>
-              <h1 className="text-h2 font-bold text-text-primary">Cron Jobs</h1>
-              <p className="text-body-sm text-text-secondary mt-1">
-                Manage scheduled tasks and automations
-              </p>
-            </div>
-            <div className="flex items-center gap-4">
-              {!isLoading && !error && (
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="text-text-tertiary">
-                    <span className="text-semantic-success font-medium">{activeCount}</span> active
-                  </span>
-                  {pausedCount > 0 && (
-                    <span className="text-text-tertiary">
-                      <span className="text-semantic-warning font-medium">{pausedCount}</span> paused
-                    </span>
-                  )}
-                </div>
-              )}
-{isAdmin() && (
-              <button
-                onClick={() => setShowCreate(true)}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-md bg-accent text-white hover:bg-accent/80 transition-colors"
-              >
-                <span className="text-base leading-none">+</span> New Job
-              </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </header>
+  const renderJobActions = (job: CronJob, isPaused: boolean) => (
+    <>
+      <button
+        onClick={() => runNowMutation.mutate(job.id)}
+        disabled={runNowMutation.isPending && runNowMutation.variables === job.id}
+        className="rounded bg-accent/10 px-2 py-1 text-[11px] text-accent transition-colors hover:bg-accent/20 disabled:opacity-50"
+        title="Executar agora"
+      >
+        {runNowMutation.isPending && runNowMutation.variables === job.id ? '…' : '▶ Executar'}
+      </button>
+      <button
+        onClick={() => setEditJob(job)}
+        className="rounded bg-surface/60 px-2 py-1 text-[11px] text-text-secondary transition-colors hover:bg-surface hover:text-text-primary"
+        title="Editar tarefa"
+      >
+        ✎ Editar
+      </button>
+      {isPaused ? (
+        <button
+          onClick={() => resumeMutation.mutate(job.id)}
+          disabled={resumeMutation.isPending && resumeMutation.variables === job.id}
+          className="rounded bg-success/10 px-2 py-1 text-[11px] text-success transition-colors hover:bg-success/20 disabled:opacity-50"
+          title="Retomar"
+        >
+          {resumeMutation.isPending && resumeMutation.variables === job.id ? '…' : '▶ Retomar'}
+        </button>
+      ) : (
+        <button
+          onClick={() => pauseMutation.mutate(job.id)}
+          disabled={pauseMutation.isPending && pauseMutation.variables === job.id}
+          className="rounded bg-warning/10 px-2 py-1 text-[11px] text-warning transition-colors hover:bg-warning/20 disabled:opacity-50"
+          title="Pausar"
+        >
+          {pauseMutation.isPending && pauseMutation.variables === job.id ? '…' : '⏸ Pausar'}
+        </button>
+      )}
+      <button
+        onClick={() => {
+          if (window.confirm(`Excluir a tarefa agendada "${job.name || job.id}"? Isso não pode ser desfeito.`)) {
+            deleteMutation.mutate(job.id)
+          }
+        }}
+        disabled={deleteMutation.isPending && deleteMutation.variables === job.id}
+        className="rounded bg-error/10 px-2 py-1 text-[11px] text-error transition-colors hover:bg-error/20 disabled:opacity-50"
+        title="Excluir"
+        aria-label={`Excluir ${job.name || job.id}`}
+      >
+        {deleteMutation.isPending && deleteMutation.variables === job.id ? '…' : '✕'}
+      </button>
+    </>
+  )
 
-      <main className="mx-auto max-w-6xl px-6 pb-12">
+  return (
+    <PageContainer>
+      <PageHeader
+        eyebrow="Operação agendada"
+        title="Cron"
+        subtitle={
+          isLoading
+            ? 'Carregando tarefas agendadas…'
+            : error
+              ? 'Não foi possível carregar as tarefas agendadas.'
+              : `${jobs.length} tarefa${jobs.length === 1 ? '' : 's'} · ${activeCount} ativa${activeCount === 1 ? '' : 's'}${pausedCount > 0 ? ` · ${pausedCount} pausada${pausedCount === 1 ? '' : 's'}` : ''}`
+        }
+        actions={admin ? (
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white transition-colors hover:bg-accent/80"
+          >
+            <span className="text-base leading-none">+</span> Nova tarefa
+          </button>
+        ) : undefined}
+      />
+
+      <main className="mt-6 pb-12">
         {isLoading && (
-          <div className="space-y-3">
+          <div className="space-y-3" role="status" aria-label="Carregando tarefas agendadas">
             {Array.from({ length: 3 }).map((_, i) => (
-              <div key={i} className="rounded-lg border border-border bg-surface/20 p-4 animate-skeleton">
-                <div className="h-4 w-40 rounded bg-surface/60 mb-2" />
-                <div className="h-3 w-64 rounded bg-surface/60 mb-3" />
-                <div className="h-8 w-32 rounded bg-surface/60" />
+              <div key={i} className="brand-card p-4">
+                <div className="mb-2 h-4 w-40 animate-pulse rounded bg-surface/60" />
+                <div className="mb-3 h-3 w-64 animate-pulse rounded bg-surface/60" />
+                <div className="h-8 w-32 animate-pulse rounded bg-surface/60" />
               </div>
             ))}
           </div>
         )}
-        {error && (
-          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error">
-            Error: {(error as Error).message}
-          </div>
-        )}
-        {!isLoading && !error && jobs.length === 0 && (
-          <div className="rounded-lg border border-border bg-surface/30 p-8 text-center">
-            <p className="text-text-tertiary text-sm">No cron jobs configured.</p>
-            <p className="text-text-tertiary text-xs mt-1">Click &quot;New Job&quot; to create your first scheduled task.</p>
-          </div>
-        )}
-        {jobs.length > 0 && (
-          <div className="rounded-lg border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-surface/40 text-left text-xs text-text-tertiary uppercase tracking-wider">
-                  <th className="px-4 py-3 font-medium">Name</th>
-                  <th className="px-4 py-3 font-medium">Schedule</th>
-                  <th className="px-4 py-3 font-medium">Status</th>
-                  <th className="px-4 py-3 font-medium hidden lg:table-cell">Last Run</th>
-                  <th className="px-4 py-3 font-medium hidden lg:table-cell">Next Run</th>
-                  <th className="px-4 py-3 font-medium text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {jobs.map((job) => {
-                  const isPaused = !job.enabled || job.state === 'paused'
-                  const schedule = job.schedule?.display || job.schedule_display || '-'
-                  return (
-                    <tr key={job.id} className="hover:bg-surface/30 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-text-primary truncate max-w-[200px]">{job.name || job.id}</div>
-                        {job.model && (
-                          <div className="text-[11px] text-text-tertiary font-mono mt-0.5">{job.model}</div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-xs text-text-secondary">{schedule}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className={`inline-block h-2 w-2 rounded-full ${isPaused ? 'bg-semantic-warning' : 'bg-semantic-success'}`} />
-                          <span className={`text-xs ${isPaused ? 'text-semantic-warning' : 'text-semantic-success'}`}>
-                            {isPaused ? 'Paused' : 'Active'}
-                          </span>
-                          {job.last_status && (
-                            <span className={`text-[11px] px-1.5 py-0.5 rounded ${
-                              job.last_status === 'ok' ? 'bg-semantic-success/10 text-semantic-success' : 'bg-semantic-error/10 text-semantic-error'
-                            }`}>
-                              {job.last_status === 'ok' ? '✓' : '✗'}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-text-tertiary hidden lg:table-cell">
-                        {formatRelativeTime(job.last_run_at)}
-                      </td>
-                      <td className="px-4 py-3 text-xs text-text-tertiary hidden lg:table-cell">
-                        {formatRelativeTime(job.next_run_at)}
-                      </td>
-                      <td className="px-4 py-3">
-                        {isAdmin() && (
-                        <div className="flex items-center justify-end gap-1">
-                          {/* Run Now */}
-                          <button
-                            onClick={() => isAdmin() && runNowMutation.mutate(job.id)}
-                            disabled={runNowMutation.isPending && runNowMutation.variables === job.id}
-                            className="px-2 py-1 text-[11px] rounded bg-accent/10 text-accent hover:bg-accent/20 disabled:opacity-50 transition-colors"
-                            title="Run now"
-                          >
-                            {runNowMutation.isPending && runNowMutation.variables === job.id ? '...' : '▶ Run'}
-                          </button>
-                          {/* Edit */}
-                          <button
-                            onClick={() => setEditJob(job)}
-                            className="px-2 py-1 text-[11px] rounded bg-surface/60 text-text-secondary hover:text-text-primary hover:bg-surface transition-colors"
-                            title="Edit job"
-                          >
-                            ✎ Edit
-                          </button>
-                          {/* Pause / Resume */}
-                          {isPaused ? (
-                            <button
-                              onClick={() => resumeMutation.mutate(job.id)}
-                              disabled={resumeMutation.isPending && resumeMutation.variables === job.id}
-                              className="px-2 py-1 text-[11px] rounded bg-semantic-success/10 text-semantic-success hover:bg-semantic-success/20 disabled:opacity-50 transition-colors"
-                              title="Resume"
-                            >
-                              {resumeMutation.isPending && resumeMutation.variables === job.id ? '...' : '▶ Resume'}
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => pauseMutation.mutate(job.id)}
-                              disabled={pauseMutation.isPending && pauseMutation.variables === job.id}
-                              className="px-2 py-1 text-[11px] rounded bg-semantic-warning/10 text-semantic-warning hover:bg-semantic-warning/20 disabled:opacity-50 transition-colors"
-                              title="Pause"
-                            >
-                              {pauseMutation.isPending && pauseMutation.variables === job.id ? '...' : '⏸ Pause'}
-                            </button>
-                          )}
-                          {/* Delete */}
-                          <button
-                            onClick={() => {
-                              if (window.confirm(`Delete cron job "${job.name || job.id}"? This cannot be undone.`)) {
-                                deleteMutation.mutate(job.id)
-                              }
-                            }}
-                            disabled={deleteMutation.isPending && deleteMutation.variables === job.id}
-                            className="px-2 py-1 text-[11px] rounded bg-semantic-error/10 text-semantic-error hover:bg-semantic-error/20 disabled:opacity-50 transition-colors"
-                            title="Delete"
-                          >
-                            {deleteMutation.isPending && deleteMutation.variables === job.id ? '...' : '✕'}
-                          </button>
-                        </div>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+
+        {!isLoading && error && (
+          <div className="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-sm text-error">
+            Não foi possível carregar as tarefas agendadas.
           </div>
         )}
 
-        {/* Run-now toast */}
+        {!isLoading && !error && jobs.length === 0 && (
+          <div className="brand-card p-8 text-center">
+            <p className="text-sm text-text-secondary">Nenhuma tarefa agendada.</p>
+            <p className="mt-1 text-xs text-text-tertiary">
+              {admin ? 'Use “+ Nova tarefa” para criar a primeira tarefa agendada.' : 'Nenhuma tarefa disponível no momento.'}
+            </p>
+          </div>
+        )}
+
+        {!isLoading && !error && jobs.length > 0 && (
+          <>
+            <div className="space-y-3 lg:hidden">
+              {jobs.map((job) => {
+                const isPaused = !job.enabled || job.state === 'paused'
+                const schedule = job.schedule?.display || job.schedule_display || '—'
+                return (
+                  <div key={job.id} className="brand-card p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-text-primary">{job.name || job.id}</p>
+                        {job.model && (
+                          <p className="mt-0.5 truncate font-mono text-[11px] text-text-tertiary">{job.model}</p>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <span className={`inline-flex items-center gap-1.5 text-xs ${isPaused ? 'text-warning' : 'text-success'}`}>
+                          <span className={`inline-block h-2 w-2 rounded-full ${isPaused ? 'bg-warning' : 'bg-success'}`} />
+                          {isPaused ? 'Pausado' : 'Ativo'}
+                        </span>
+                        {job.last_status && (
+                          <span
+                            aria-label={job.last_status === 'ok' ? 'Última execução concluída' : 'Última execução falhou'}
+                            className={`rounded px-1.5 py-0.5 text-[11px] ${
+                              job.last_status === 'ok' ? 'bg-success/10 text-success' : 'bg-error/10 text-error'
+                            }`}
+                          >
+                            {job.last_status === 'ok' ? '✓' : '✗'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <dl className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <dt className="text-text-tertiary">Agendamento</dt>
+                        <dd className="break-all font-mono text-text-secondary">{schedule}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-text-tertiary">Última execução</dt>
+                        <dd className="text-text-secondary">{formatRelativeTime(job.last_run_at)}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-text-tertiary">Próxima execução</dt>
+                        <dd className="text-text-secondary">{formatRelativeTime(job.next_run_at)}</dd>
+                      </div>
+                    </dl>
+
+                    {admin && (
+                      <div className="mt-3 flex flex-wrap gap-1 border-t border-border pt-3">
+                        {renderJobActions(job, isPaused)}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="brand-card hidden overflow-hidden lg:block">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm" aria-label="Tarefas agendadas">
+                <thead>
+                  <tr className="bg-surface/40 text-left text-xs uppercase tracking-wider text-text-tertiary">
+                    <th className="px-4 py-3 font-medium">Nome</th>
+                    <th className="px-4 py-3 font-medium">Agendamento</th>
+                    <th className="px-4 py-3 font-medium">Status</th>
+                    <th className="hidden px-4 py-3 font-medium lg:table-cell">Última execução</th>
+                    <th className="hidden px-4 py-3 font-medium lg:table-cell">Próxima execução</th>
+                    <th className="px-4 py-3 text-right font-medium">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {jobs.map((job) => {
+                    const isPaused = !job.enabled || job.state === 'paused'
+                    const schedule = job.schedule?.display || job.schedule_display || '—'
+                    return (
+                      <tr key={job.id} className="transition-colors hover:bg-surface/30">
+                        <td className="px-4 py-3">
+                          <div className="max-w-[200px] truncate font-medium text-text-primary">{job.name || job.id}</div>
+                          {job.model && (
+                            <div className="mt-0.5 font-mono text-[11px] text-text-tertiary">{job.model}</div>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-xs text-text-secondary">{schedule}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <span className={`inline-flex items-center gap-1.5 text-xs ${isPaused ? 'text-warning' : 'text-success'}`}>
+                              <span className={`inline-block h-2 w-2 rounded-full ${isPaused ? 'bg-warning' : 'bg-success'}`} />
+                              {isPaused ? 'Pausado' : 'Ativo'}
+                            </span>
+                            {job.last_status && (
+                              <span
+                                aria-label={job.last_status === 'ok' ? 'Última execução concluída' : 'Última execução falhou'}
+                                className={`rounded px-1.5 py-0.5 text-[11px] ${
+                                  job.last_status === 'ok' ? 'bg-success/10 text-success' : 'bg-error/10 text-error'
+                                }`}
+                              >
+                                {job.last_status === 'ok' ? '✓' : '✗'}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="hidden px-4 py-3 text-xs text-text-tertiary lg:table-cell">
+                          {formatRelativeTime(job.last_run_at)}
+                        </td>
+                        <td className="hidden px-4 py-3 text-xs text-text-tertiary lg:table-cell">
+                          {formatRelativeTime(job.next_run_at)}
+                        </td>
+                        <td className="px-4 py-3">
+                          {admin && (
+                            <div className="flex items-center justify-end gap-1">
+                              {renderJobActions(job, isPaused)}
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          </>
+        )}
+
         {runNowMutation.isSuccess && runNowMutation.data && (
-          <div className="fixed bottom-4 right-4 bg-bg-elevated border border-accent/30 rounded-lg px-4 py-3 shadow-lg z-50 max-w-sm">
-            <p className="text-sm text-text-primary font-medium">Job triggered</p>
-            <p className="text-xs text-text-secondary mt-0.5">{(runNowMutation.data as { message: string }).message}</p>
+          <div className="fixed bottom-4 right-4 z-50 max-w-sm rounded-xl border border-accent/30 bg-bg-elevated px-4 py-3 shadow-lg">
+            <p className="text-sm font-medium text-text-primary">Tarefa disparada</p>
+            <p className="mt-0.5 text-xs text-text-secondary">{(runNowMutation.data as { message: string }).message}</p>
           </div>
         )}
       </main>
 
-      {/* Create dialog */}
       {showCreate && (
         <CronJobDialog
           job={null}
@@ -6128,7 +6228,6 @@ function CronPage() {
         />
       )}
 
-      {/* Edit dialog */}
       {editJob && (
         <CronJobDialog
           job={editJob}
@@ -6137,7 +6236,7 @@ function CronPage() {
           isSaving={updateMutation.isPending}
         />
       )}
-    </div>
+    </PageContainer>
   )
 }
 
