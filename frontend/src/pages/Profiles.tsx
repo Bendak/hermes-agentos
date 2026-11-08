@@ -1,7 +1,7 @@
 import { isAdmin } from "../lib/admin"
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { NavBar } from '../App'
+import { PageContainer, PageHeader } from '../components/PageHeader'
 
 /* ── Types ──────────────────────────────────────────────────────── */
 
@@ -739,12 +739,13 @@ function ProfileCreateDialog({ onSave, onClose, saving }: {
 
 export default function ProfilesPage() {
   const qc = useQueryClient()
+  const admin = isAdmin()
   const [editing, setEditing] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
   const [deletePurge, setDeletePurge] = useState(false)
 
-  const { data: profiles = [] } = useQuery({
+  const { data: profiles = [], isLoading, error } = useQuery({
     queryKey: ['profiles'],
     queryFn: () => apiFetch('/api/profiles') as Promise<ProfileSummary[]>,
   })
@@ -800,93 +801,111 @@ export default function ProfilesPage() {
   })
 
   return (
-    <div className="min-h-screen bg-bg-base text-text-secondary">
-      <NavBar />
-      <header className="px-6 pt-10 pb-6">
-        <div className="mx-auto max-w-7xl">
-          <div className="flex items-end justify-between">
-            <div>
-              <h1 className="text-display font-bold text-text-primary tracking-tight">Agent Profiles</h1>
-              <p className="mt-2 text-body text-text-secondary max-w-lg">
-                Manage agent configurations, models, and toolsets
-              </p>
-            </div>
-{isAdmin() && (
-            <button
-              onClick={() => setCreating(true)}
-              className="bg-accent text-text-inverse px-4 py-1.5 rounded-md text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
-            >
-              + New Profile
-            </button>
-            )}
-          </div>
-        </div>
-      </header>
+    <PageContainer>
+      <PageHeader
+        eyebrow="Configuração de agentes"
+        title="Agent Profiles"
+        subtitle="Modelos, providers e toolsets de cada agente do workspace."
+        actions={admin ? (
+          <button
+            onClick={() => setCreating(true)}
+            className="inline-flex h-9 items-center rounded-lg bg-accent px-3.5 text-sm font-medium text-text-inverse transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            + Novo profile
+          </button>
+        ) : undefined}
+      />
 
-      <main className="px-6 pb-12">
-        <div className="mx-auto max-w-7xl">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+      <main className="mt-6">
+        {isLoading ? (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3" aria-label="Carregando profiles" role="status">
+            {Array.from({ length: 6 }).map((_, index) => (
+              <div key={index} className="brand-card h-[220px] animate-pulse p-5">
+                <div className="h-5 w-28 rounded bg-surface/60" />
+                <div className="mt-2 h-3 w-16 rounded bg-surface/40" />
+                <div className="mt-6 space-y-2">
+                  <div className="h-3 w-full rounded bg-surface/40" />
+                  <div className="h-3 w-4/5 rounded bg-surface/40" />
+                  <div className="h-3 w-2/3 rounded bg-surface/40" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : error ? (
+          <div className="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-body-sm text-error">
+            Não foi possível carregar os profiles: {(error as Error).message}
+          </div>
+        ) : profiles.length === 0 ? (
+          <div className="brand-card px-6 py-12 text-center">
+            <p className="text-h4 font-semibold text-text-primary">Nenhum profile ainda</p>
+            <p className="mt-1.5 text-body-sm text-text-tertiary">
+              {admin ? 'Crie o primeiro profile para configurar modelo, toolsets e fallbacks.' : 'Nenhum profile disponível para este usuário.'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {profiles.map((p) => (
               <div
                 key={p.id}
-                className="bg-bg-elevated border border-border rounded-xl p-5 hover:border-accent/50 transition cursor-pointer"
-                onClick={() => { if (isAdmin()) setEditing(p.id) }}
+                className={`brand-card p-5 ${admin ? 'brand-card-hover cursor-pointer' : ''}`}
+                onClick={() => { if (admin) setEditing(p.id) }}
               >
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-h5 font-semibold text-text-primary">{p.name}</h3>
-                  <span className="text-caption px-2 py-1 rounded bg-accent-subtle text-accent font-mono">{p.id}</span>
+                <div className="mb-3 flex items-center justify-between gap-2">
+                  <h2 className="truncate text-h5 font-semibold text-text-primary">{p.name}</h2>
+                  <span className="shrink-0 rounded-md border border-accent/20 bg-accent-subtle px-2 py-1 font-mono text-[11px] text-accent">{p.id}</span>
                 </div>
                 {p.error ? (
-                  <div className="mb-3 rounded-md border border-error/40 bg-error-subtle/40 px-3 py-2">
-                    <div className="text-caption font-semibold text-error mb-0.5">⚠ Invalid config.yaml</div>
-                    <div className="text-caption text-text-tertiary line-clamp-3 break-all">{p.error}</div>
-                    <div className="text-caption text-text-tertiary mt-1">Use <b>Edit</b> to rebuild the configuration.</div>
+                  <div className="mb-3 rounded-lg border border-error/40 bg-error-subtle/40 px-3 py-2">
+                    <div className="mb-0.5 text-caption font-semibold text-error">⚠ Invalid config.yaml</div>
+                    <div className="line-clamp-3 break-all text-caption text-text-tertiary">{p.error}</div>
+                    <div className="mt-1 text-caption text-text-tertiary">Use <b>Edit</b> to rebuild the configuration.</div>
                   </div>
-                ) : null}
-                {!p.error && (<div className="space-y-1.5 text-body-sm text-text-secondary">
-                  <div className="flex justify-between">
-                    <span className="text-text-tertiary">Model</span>
-                    <span className="text-text-primary font-mono text-xs">{p.model}</span>
+                ) : (
+                  <div className="space-y-1.5 text-body-sm text-text-secondary">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-text-tertiary">Model</span>
+                      <span className="truncate text-right font-mono text-xs text-text-primary" title={p.model}>{p.model}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-text-tertiary">Provider</span>
+                      <span className="text-text-primary">{p.provider}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-text-tertiary">Toolsets</span>
+                      <span className="text-text-primary tabular-nums">{p.toolsets_count}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-text-tertiary">Fallbacks</span>
+                      <span className="text-text-primary tabular-nums">{p.fallback_providers?.length ?? 0}</span>
+                    </div>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-text-tertiary">Provider</span>
-                    <span className="text-text-primary">{p.provider}</span>
+                )}
+                {admin && (
+                  <div className="mt-4 flex gap-2 border-t border-border/70 pt-4">
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setEditing(p.id) }}
+                      className="rounded-md bg-accent/10 px-3 py-1 text-xs text-accent transition-colors hover:bg-accent/20"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); dupMut.mutate(p.id) }}
+                      className="rounded-md border border-border px-3 py-1 text-xs text-text-secondary transition-colors hover:bg-surface/60 hover:text-text-primary"
+                    >
+                      Duplicate
+                    </button>
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.id); setDeletePurge(false) }}
+                      className="ml-auto rounded-md border border-error/30 px-3 py-1 text-xs text-error transition-colors hover:bg-error-subtle/50"
+                    >
+                      Delete
+                    </button>
                   </div>
-                  <div className="flex justify-between">
-                    <span className="text-text-tertiary">Toolsets</span>
-                    <span className="text-text-primary">{p.toolsets_count}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-text-tertiary">Fallbacks</span>
-                    <span className="text-text-primary">{p.fallback_providers?.length ?? 0}</span>
-                  </div>
-                </div>)}
-                {isAdmin() && (
-                <div className="flex gap-2 mt-4 pt-4 border-t border-border">
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setEditing(p.id) }}
-                    className="px-3 py-1 text-xs rounded bg-accent/10 text-accent hover:bg-accent/20 transition-colors"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); dupMut.mutate(p.id) }}
-                    className="px-3 py-1 text-xs rounded border border-border text-text-secondary hover:text-text-primary hover:bg-surface/60 transition-colors"
-                  >
-                    Duplicate
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); setDeleteTarget(p.id); setDeletePurge(false) }}
-                    className="px-3 py-1 text-xs rounded border border-error/30 text-error hover:bg-error-subtle/50 transition-colors ml-auto"
-                  >
-                    Delete
-                  </button>
-                </div>
                 )}
               </div>
             ))}
           </div>
-        </div>
+        )}
       </main>
 
       {/* Edit Dialog */}
@@ -963,6 +982,6 @@ export default function ProfilesPage() {
           </div>
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }
