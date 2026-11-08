@@ -250,19 +250,6 @@ function Topbar({
         {group && group.label !== 'Principal' ? <><span>{group.label}</span><i>/</i><b>{title}</b></> : <b>{title}</b>}
       </div>
 
-      {group && group.label !== 'Principal' && group.items.length > 1 && (
-        <nav className="agent-tabs" aria-label={group.label}>
-          {group.items.map((entry) => {
-            const active = isActivePath(location.pathname, entry.to)
-            return (
-              <Link key={entry.to} to={entry.to} className={`agent-tab ${active ? 'is-active' : ''}`}>
-                {entry.label}
-              </Link>
-            )
-          })}
-        </nav>
-      )}
-
       <div className="agent-top-actions">
         {onOpenSearch && (
           <button type="button" className="agent-search" onClick={onOpenSearch} title="Busca rápida (⌘K)">
