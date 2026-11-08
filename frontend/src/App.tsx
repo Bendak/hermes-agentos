@@ -4426,6 +4426,17 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
+function formatRunTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleTimeString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    })
+  } catch {
+    return iso
+  }
+}
+
 function fileIcon(type: string): string {
   if (type.startsWith('image/')) return '🖼️'
   if (type === 'application/pdf') return '📄'
@@ -4441,6 +4452,20 @@ function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+const NODE_TYPE_LABEL: Record<string, string> = {
+  trigger: 'Gatilho',
+  action: 'Ação',
+  condition: 'Condição',
+}
+
+const RUN_STATUS_LABEL: Record<string, string> = {
+  completed: 'concluída',
+  failed: 'falhou',
+  running: 'em execução',
+  pending: 'pendente',
+  skipped: 'ignorada',
 }
 
 const nodeColors: Record<string, { bg: string; border: string; icon: string }> = {
@@ -4473,7 +4498,7 @@ function WorkflowNode({ data }: NodeProps) {
     <div className={`rounded-lg border-2 ${colors.border} ${colors.bg} min-w-[180px] shadow-lg ${statusClass}`}>
       <div className={`px-3 py-1.5 border-b ${colors.border} flex items-center gap-2`}>
         <span>{colors.icon}</span>
-        <span className="text-xs font-semibold text-text-secondary uppercase">{nd.nodeType}</span>
+        <span className="text-xs font-semibold text-text-secondary uppercase">{NODE_TYPE_LABEL[nd.nodeType] ?? nd.nodeType}</span>
         {nd.runStatus && (
           <span className="ml-auto text-xs">{runStatusIcons[nd.runStatus] || ''}</span>
         )}
@@ -4682,16 +4707,22 @@ function WorkflowEditorPage() {
 
   const [nodes, setNodes, onNodesChange] = useNodesState([] as Node[])
   const [edges, setEdges, onEdgesChange] = useEdgesState([] as any[])
-  const [wfName, setWfName] = useState('Untitled')
+  const [wfName, setWfName] = useState('Workflow sem título')
   const [wfDescription, setWfDescription] = useState('')
   const [selectedNode, setSelectedNode] = useState<Node | null>(null)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [runResults, setRunResults] = useState<Record<string, string>>({})
   const [showPalette, setShowPalette] = useState(false)  // M8-10: drawer esquerda < lg
   const [showProps, setShowProps] = useState(false)      // M8-10: drawer direita < lg
   const loadedRef = useRef<string | null>(null)  // M8-03: which id is loaded, not just 'once'
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set())
   const [runDetails, setRunDetails] = useState<Record<string, any>>({})
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+  }, [])
 
   const fetchRunDetail = async (runId: string) => {
     if (runDetails[runId]) return
@@ -4716,11 +4747,12 @@ function WorkflowEditorPage() {
   }
 
   // Load workflow
-  const { data: workflow, isLoading } = useQuery<Workflow>({
+  const { data: workflow, isLoading, error } = useQuery<Workflow>({
     queryKey: ['workflow', id],
     queryFn: async () => {
       const res = await fetch(`/api/workflows/${id}`)
-      if (!res.ok) throw new Error('Failed to fetch workflow')
+      if (res.status === 404) throw new Error('Workflow não encontrado')
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     enabled: !!id,
@@ -4747,6 +4779,7 @@ function WorkflowEditorPage() {
       setRunResults({})
       setSelectedNode(null)
       setSaveStatus('idle')
+      setSaveError(null)
       setExpandedRuns(new Set())
       setRunDetails({})
     }
@@ -4772,8 +4805,9 @@ function WorkflowEditorPage() {
   // Save mutation
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (loadedRef.current !== (id ?? null)) throw new Error('Stale editor state')  // M8-03
+      if (loadedRef.current !== (id ?? null)) throw new Error('Estado do editor desatualizado')  // M8-03
       setSaveStatus('saving')
+      setSaveError(null)
       const res = await fetch(`/api/workflows/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -4784,17 +4818,20 @@ function WorkflowEditorPage() {
           edges: edges,
         }),
       })
-      if (!res.ok) throw new Error('Failed to save')
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onSuccess: () => {
       setSaveStatus('saved')
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
-      setTimeout(() => setSaveStatus('idle'), 2000)
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = setTimeout(() => setSaveStatus('idle'), 2000)
     },
-    onError: () => {
+    onError: (e: Error) => {
       setSaveStatus('error')
-      setTimeout(() => setSaveStatus('idle'), 3000)
+      setSaveError(e.message || 'erro desconhecido')
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+      saveTimer.current = setTimeout(() => setSaveStatus('idle'), 3000)
     },
   })
 
@@ -4807,7 +4844,7 @@ function WorkflowEditorPage() {
       try {
         await saveMutation.mutateAsync()
       } catch (e) {
-        throw new Error('Save before run failed: ' + (e instanceof Error ? e.message : 'unknown error'))
+        throw new Error('Falha ao salvar antes de executar: ' + (e instanceof Error ? e.message : 'erro desconhecido'))
       }
       const res = await fetch(`/api/workflows/${id}/run`, { method: 'POST' })
       if (!res.ok) throw new Error(await apiErrorMessage(res))  // M28-04
@@ -4825,7 +4862,7 @@ function WorkflowEditorPage() {
         setRunResults(results)
       }
     },
-    onError: (e: Error) => toast(e.message || 'Run failed', 'error'),  // M28-04
+    onError: (e: Error) => toast(e.message || 'Falha ao executar o workflow', 'error'),  // M28-04
   })
 
   // Run history query
@@ -4843,9 +4880,9 @@ function WorkflowEditorPage() {
   const addNode = useCallback((nodeType: 'trigger' | 'action' | 'condition') => {
     const id = `${nodeType}-${Date.now()}`
     const labels: Record<string, string> = {
-      trigger: 'New Trigger',
-      action: 'New Action',
-      condition: 'New Condition',
+      trigger: 'Novo gatilho',
+      action: 'Nova ação',
+      condition: 'Nova condição',
     }
     // Place near center with some randomness so nodes don't stack
     const x = 250 + Math.random() * 200 - 100
@@ -4910,11 +4947,34 @@ function WorkflowEditorPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-full">
-        <div className="flex items-center justify-center h-full min-h-[calc(100dvh-120px)]">
-          <div className="animate-skeleton w-16 h-16 rounded-full" />
+      <PageContainer>
+        <div className="flex min-h-[60vh] items-center justify-center" role="status" aria-label="Carregando workflow">
+          <div className="animate-skeleton h-16 w-16 rounded-full" />
         </div>
-      </div>
+      </PageContainer>
+    )
+  }
+
+  if (error && !workflow) {
+    return (
+      <PageContainer>
+        <PageHeader
+          eyebrow="Automação"
+          title="Workflow indisponível"
+          subtitle="Não foi possível carregar este workflow."
+          actions={
+            <button
+              onClick={() => navigate('/workflows')}
+              className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-secondary transition hover:text-text-primary"
+            >
+              ← Voltar para Workflows
+            </button>
+          }
+        />
+        <div className="brand-card mt-6 border border-error/30 bg-error/10 p-6 text-sm text-error">
+          {error instanceof Error ? error.message : 'Erro desconhecido'}
+        </div>
+      </PageContainer>
     )
   }
 
@@ -4922,81 +4982,102 @@ function WorkflowEditorPage() {
   const selectedColors = nodeInfo ? nodeColors[nodeInfo.nodeType] : null
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Top Toolbar */}
-      <NavBar />
-      <div className="bg-bg-elevated/80 border-b border-border px-4 py-2 flex items-center gap-3">
+    <PageContainer>
+      <PageHeader
+        eyebrow="Automação"
+        title="Editor de workflow"
+        subtitle="Monte o fluxo arrastando nós e conectando etapas."
+        actions={
+          <>
+            {saveStatus === 'saved' && (
+              <span className="flex items-center gap-1 text-caption text-success">
+                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                Salvo
+              </span>
+            )}
+            {saveStatus === 'error' && (
+              <span className="max-w-[220px] truncate text-caption text-error" title={saveError ?? 'Falha ao salvar'}>
+                Falha ao salvar
+              </span>
+            )}
+            <button
+              onClick={() => setShowPalette(v => !v)}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-body-sm text-text-secondary lg:hidden"
+              aria-label="Alternar paleta de nós"
+              title="Paleta de nós"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+            </button>
+            <button
+              onClick={() => setShowProps(v => !v)}
+              className="rounded-lg border border-border bg-surface px-3 py-1.5 text-body-sm text-text-secondary lg:hidden"
+              aria-label="Alternar painel de propriedades"
+              title="Propriedades do nó"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
+            </button>
+            {isAdmin() && (
+              <button
+                onClick={() => saveMutation.mutate()}
+                disabled={saveStatus === 'saving'}
+                className="flex items-center gap-2 rounded-lg bg-accent px-4 py-1.5 text-body-sm font-medium text-text-inverse transition-colors hover:bg-accent-hover disabled:opacity-50"
+              >
+                {saveStatus === 'saving' ? 'Salvando…' : 'Salvar'}
+              </button>
+            )}
+            {isAdmin() && (
+              <button
+                onClick={() => runMutation.mutate()}
+                disabled={runMutation.isPending}
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-body-sm font-medium text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {runMutation.isPending ? '⏳ Executando…' : '▶ Executar agora'}
+              </button>
+            )}
+          </>
+        }
+      />
+
+      {error && workflow && (
+        <div className="mt-4 rounded-xl border border-warning/30 bg-warning/10 p-3 text-sm text-warning">
+          Falha ao atualizar o workflow: {error instanceof Error ? error.message : 'erro desconhecido'}. Exibindo a última versão carregada.
+        </div>
+      )}
+
+      <div className="mt-4 flex flex-col gap-2 brand-card p-3 sm:flex-row sm:items-center">
         <button
           onClick={() => navigate('/workflows')}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-body-sm text-text-secondary hover:text-text-primary hover:bg-surface/60 transition"
+          className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-body-sm text-text-secondary transition hover:bg-surface/60 hover:text-text-primary"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-          Back
+          Workflows
         </button>
-        <div className="h-5 w-px bg-border" />
+        <div className="hidden h-5 w-px bg-border sm:block" />
         <input
           type="text"
           value={wfName}
           onChange={(e) => setWfName(e.target.value)}
-          className="bg-transparent text-h5 font-semibold text-text-primary border-none outline-none focus:bg-surface/40 rounded px-2 py-1 transition min-w-[200px]"
-          placeholder="Workflow name"
+          aria-label="Nome do workflow"
+          className="min-w-0 flex-1 rounded px-3 py-1.5 text-h5 font-semibold text-text-primary outline-none transition focus:bg-surface/40"
+          placeholder="Nome do workflow"
         />
-        <span className="text-caption text-text-tertiary">/</span>
+        <span className="hidden text-caption text-text-tertiary sm:block">/</span>
         <input
           type="text"
           value={wfDescription}
           onChange={(e) => setWfDescription(e.target.value)}
-          className="bg-transparent text-body-sm text-text-secondary border-none outline-none focus:bg-surface/40 rounded px-2 py-1 transition flex-1 min-w-0"
-          placeholder="Description (optional)"
+          aria-label="Descrição do workflow"
+          className="min-w-0 flex-1 rounded px-3 py-1.5 text-body-sm text-text-secondary outline-none transition focus:bg-surface/40"
+          placeholder="Descrição (opcional)"
         />
-        <div className="flex items-center gap-2 ml-auto">
-          {saveStatus === 'saved' && (
-            <span className="text-caption text-success flex items-center gap-1">
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
-              Saved
-            </span>
-          )}
-          {saveStatus === 'error' && (
-            <span className="text-caption text-error">Save failed</span>
-          )}
-          <button
-            onClick={() => setShowPalette(v => !v)}
-            className="lg:hidden px-3 py-1.5 rounded-lg bg-surface text-text-secondary text-body-sm border border-border"
-            aria-label="Toggle node palette"
-          >
-            🧩
-          </button>
-          <button
-            onClick={() => setShowProps(v => !v)}
-            className="lg:hidden px-3 py-1.5 rounded-lg bg-surface text-text-secondary text-body-sm border border-border"
-            aria-label="Toggle properties panel"
-          >
-            ⚙️
-          </button>
-          {isAdmin() && (<button
-            onClick={() => saveMutation.mutate()}
-            disabled={saveStatus === 'saving'}
-            className="flex items-center gap-2 px-4 py-1.5 rounded-lg bg-accent text-text-inverse font-medium text-body-sm hover:bg-accent-hover transition-colors disabled:opacity-50"
-          >
-            {saveStatus === 'saving' ? 'Saving...' : 'Save'}
-          </button>)}
-          {isAdmin() && (
-          <button
-            onClick={() => runMutation.mutate()}
-            disabled={runMutation.isPending}
-            className="bg-emerald-600 text-white px-3 py-1.5 rounded-md text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors"
-          >
-            {runMutation.isPending ? '⏳ Running...' : '▶ Run Now'}
-          </button>
-          )}
-        </div>
       </div>
 
       {/* Main Editor Area */}
-      <div className="flex flex-1 overflow-hidden relative">
+      <div className="brand-card mt-4 overflow-hidden">
+      <div className="relative flex h-[calc(100dvh-360px)] min-h-[460px]">
         {/* Left Sidebar — Node Palette (M8-10: drawer below lg, canvas full-width) */}
         <div className={`w-56 bg-bg-elevated/60 border-r border-border p-4 flex-col gap-3 shrink-0 max-lg:absolute max-lg:z-20 max-lg:h-full max-lg:shadow-xl ${showPalette ? 'flex' : 'hidden lg:flex'}`}>
-          <h3 className="text-caption font-semibold text-text-tertiary uppercase tracking-wider mb-1">Add Nodes</h3>
+          <h3 className="text-caption font-semibold text-text-tertiary uppercase tracking-wider mb-1">Adicionar nós</h3>
           {(['trigger', 'action', 'condition'] as const).map((nodeType) => {
             const colors = nodeColors[nodeType]
             return (
@@ -5007,9 +5088,9 @@ function WorkflowEditorPage() {
               >
                 <span className="text-lg">{colors.icon}</span>
                 <div>
-                  <p className="text-body-sm font-medium text-text-primary capitalize">{nodeType}</p>
+                  <p className="text-body-sm font-medium text-text-primary">{NODE_TYPE_LABEL[nodeType] ?? nodeType}</p>
                   <p className="text-caption text-text-tertiary">
-                    {nodeType === 'trigger' ? 'Start workflow' : nodeType === 'action' ? 'Perform task' : 'Branch logic'}
+                    {nodeType === 'trigger' ? 'Inicia o fluxo' : nodeType === 'action' ? 'Executa uma tarefa' : 'Desvia o fluxo'}
                   </p>
                 </div>
               </button>
@@ -5017,12 +5098,12 @@ function WorkflowEditorPage() {
           })}
 
           <div className="mt-4 p-3 rounded-lg bg-bg-overlay/50 border border-border">
-            <h4 className="text-caption font-semibold text-text-secondary mb-2">Tips</h4>
+            <h4 className="text-caption font-semibold text-text-secondary mb-2">Dicas</h4>
             <ul className="text-caption text-text-tertiary space-y-1">
-              <li>• Drag to connect nodes</li>
-              <li>• Click a node to edit it</li>
-              <li>• Press Delete to remove</li>
-              <li>• Scroll to zoom, drag to pan</li>
+              <li>• Arraste para conectar nós</li>
+              <li>• Clique num nó para editar</li>
+              <li>• Pressione Delete para remover</li>
+              <li>• Role para zoom, arraste para mover</li>
             </ul>
           </div>
         </div>
@@ -5030,6 +5111,7 @@ function WorkflowEditorPage() {
         {/* Canvas */}
         <div className="flex-1">
           <ReactFlow
+            key={loadedRef.current ?? 'loading'}
             nodes={nodes.map(n => ({
               ...n,
               data: { ...n.data, runStatus: runResults[n.id] || undefined },
@@ -5040,6 +5122,9 @@ function WorkflowEditorPage() {
             onConnect={onConnect}
             onNodeClick={onNodeClick}
             onPaneClick={onPaneClick}
+            onInit={(instance) => {
+              requestAnimationFrame(() => requestAnimationFrame(() => instance.fitView({ padding: 0.2 })))
+            }}
             nodeTypes={workflowNodeTypes}
             deleteKeyCode={['Backspace', 'Delete']}
             fitView
@@ -5050,28 +5135,29 @@ function WorkflowEditorPage() {
           </ReactFlow>
         </div>
 
-        {/* Right Panel — Node Properties */}
+        {/* Right Panel — Propriedades do nó */}
         {selectedNode && nodeInfo && (
           <div className={`w-64 bg-bg-elevated/60 border-l border-border p-4 shrink-0 overflow-y-auto max-lg:absolute max-lg:right-0 max-lg:z-20 max-lg:h-full max-lg:shadow-xl ${showProps ? 'block' : 'hidden lg:block'}`}>
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-h6 font-semibold text-text-primary">Node Properties</h3>
+              <h3 className="text-h6 font-semibold text-text-primary">Propriedades do nó</h3>
               <button
                 onClick={() => setSelectedNode(null)}
                 className="p-1 rounded hover:bg-surface/60 text-text-tertiary hover:text-text-primary transition"
+                aria-label="Fechar propriedades"
               >
-                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
               </button>
             </div>
 
             {/* Type badge */}
             <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${selectedColors?.border} ${selectedColors?.bg} mb-4`}>
               <span>{selectedColors?.icon}</span>
-              <span className="text-body-sm font-medium capitalize text-text-primary">{nodeInfo.nodeType}</span>
+              <span className="text-body-sm font-medium text-text-primary">{NODE_TYPE_LABEL[nodeInfo.nodeType] ?? nodeInfo.nodeType}</span>
             </div>
 
             {/* Label field */}
             <label className="block mb-3">
-              <span className="text-caption font-semibold text-text-secondary mb-1.5 block">Label</span>
+              <span className="text-caption font-semibold text-text-secondary mb-1.5 block">Rótulo</span>
               <input
                 type="text"
                 value={nodeInfo.label}
@@ -5080,9 +5166,9 @@ function WorkflowEditorPage() {
               />
             </label>
 
-            {/* Node ID (read-only) */}
+            {/* ID do nó (read-only) */}
             <label className="block mb-4">
-              <span className="text-caption font-semibold text-text-secondary mb-1.5 block">Node ID</span>
+              <span className="text-caption font-semibold text-text-secondary mb-1.5 block">ID do nó</span>
               <div className="px-3 py-2 rounded-lg bg-bg-base border border-border text-mono-sm text-text-tertiary">
                 {selectedNode.id}
               </div>
@@ -5091,16 +5177,16 @@ function WorkflowEditorPage() {
             {/* Node Config Fields */}
             {nodeInfo.nodeType === 'trigger' && (
               <div className="mb-4 space-y-3">
-                <h4 className="text-caption font-semibold text-text-secondary">Trigger Config</h4>
+                <h4 className="text-caption font-semibold text-text-secondary">Configuração do gatilho</h4>
                 <label className="block">
-                  <span className="text-caption text-text-tertiary mb-1 block">Type</span>
+                  <span className="text-caption text-text-tertiary mb-1 block">Tipo</span>
                   <select
                     value={(nodeInfo as any).config?.type || 'manual'}
                     onChange={(e) => updateNodeConfig('type', e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
                   >
                     <option value="manual">Manual</option>
-                    <option value="schedule">Schedule</option>
+                    <option value="schedule">Agendamento</option>
                     <option value="webhook">Webhook</option>
                   </select>
                 </label>
@@ -5109,29 +5195,29 @@ function WorkflowEditorPage() {
 
             {nodeInfo.nodeType === 'action' && (
               <div className="mb-4 space-y-3">
-                <h4 className="text-caption font-semibold text-text-secondary">Action Config</h4>
+                <h4 className="text-caption font-semibold text-text-secondary">Configuração da ação</h4>
                 <label className="block">
-                  <span className="text-caption text-text-tertiary mb-1 block">Action Type</span>
+                  <span className="text-caption text-text-tertiary mb-1 block">Tipo de ação</span>
                   <select
                     value={(nodeInfo as any).config?.action_type || 'log'}
                     onChange={(e) => updateNodeConfig('action_type', e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
                   >
-                    <option value="log">Log</option>
-                    <option value="set_variable">Set Variable</option>
-                    <option value="create_task">Create Task</option>
-                    <option value="http_request">HTTP Request</option>
+                    <option value="log">Registrar</option>
+                    <option value="set_variable">Definir variável</option>
+                    <option value="create_task">Criar tarefa</option>
+                    <option value="http_request">Requisição HTTP</option>
                   </select>
                 </label>
 
                 {((nodeInfo as any).config?.action_type || 'log') === 'log' && (
                   <label className="block">
-                    <span className="text-caption text-text-tertiary mb-1 block">Message</span>
+                    <span className="text-caption text-text-tertiary mb-1 block">Mensagem</span>
                     <input
                       type="text"
                       value={(nodeInfo as any).config?.message || ''}
                       onChange={(e) => updateNodeConfig('message', e.target.value)}
-                      placeholder="Log message"
+                      placeholder="Mensagem do log"
                       className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
                     />
                   </label>
@@ -5140,22 +5226,22 @@ function WorkflowEditorPage() {
                 {(nodeInfo as any).config?.action_type === 'set_variable' && (
                   <>
                     <label className="block">
-                      <span className="text-caption text-text-tertiary mb-1 block">Variable Name</span>
+                      <span className="text-caption text-text-tertiary mb-1 block">Nome da variável</span>
                       <input
                         type="text"
                         value={(nodeInfo as any).config?.variable || ''}
                         onChange={(e) => updateNodeConfig('variable', e.target.value)}
-                        placeholder="variable_name"
+                        placeholder="nome_da_variavel"
                         className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
                       />
                     </label>
                     <label className="block">
-                      <span className="text-caption text-text-tertiary mb-1 block">Value</span>
+                      <span className="text-caption text-text-tertiary mb-1 block">Valor</span>
                       <input
                         type="text"
                         value={(nodeInfo as any).config?.value || ''}
                         onChange={(e) => updateNodeConfig('value', e.target.value)}
-                        placeholder="value"
+                        placeholder="valor"
                         className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
                       />
                     </label>
@@ -5165,17 +5251,17 @@ function WorkflowEditorPage() {
                 {(nodeInfo as any).config?.action_type === 'create_task' && (
                   <>
                     <label className="block">
-                      <span className="text-caption text-text-tertiary mb-1 block">Title</span>
+                      <span className="text-caption text-text-tertiary mb-1 block">Título</span>
                       <input
                         type="text"
                         value={(nodeInfo as any).config?.title || ''}
                         onChange={(e) => updateNodeConfig('title', e.target.value)}
-                        placeholder="Task title"
+                        placeholder="Título da tarefa"
                         className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
                       />
                     </label>
                     <label className="block">
-                      <span className="text-caption text-text-tertiary mb-1 block">Assignee</span>
+                      <span className="text-caption text-text-tertiary mb-1 block">Responsável</span>
                       <select
                         value={(nodeInfo as any).config?.assignee || 'coder'}
                         onChange={(e) => updateNodeConfig('assignee', e.target.value)}
@@ -5203,7 +5289,7 @@ function WorkflowEditorPage() {
                       />
                     </label>
                     <label className="block">
-                      <span className="text-caption text-text-tertiary mb-1 block">Method</span>
+                      <span className="text-caption text-text-tertiary mb-1 block">Método</span>
                       <select
                         value={(nodeInfo as any).config?.method || 'GET'}
                         onChange={(e) => updateNodeConfig('method', e.target.value)}
@@ -5222,38 +5308,38 @@ function WorkflowEditorPage() {
 
             {nodeInfo.nodeType === 'condition' && (
               <div className="mb-4 space-y-3">
-                <h4 className="text-caption font-semibold text-text-secondary">Condition Config</h4>
+                <h4 className="text-caption font-semibold text-text-secondary">Configuração da condição</h4>
                 <label className="block">
-                  <span className="text-caption text-text-tertiary mb-1 block">Field</span>
+                  <span className="text-caption text-text-tertiary mb-1 block">Campo</span>
                   <input
                     type="text"
                     value={(nodeInfo as any).config?.field || ''}
                     onChange={(e) => updateNodeConfig('field', e.target.value)}
-                    placeholder="context_field"
+                    placeholder="campo_do_contexto"
                     className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
                   />
                 </label>
                 <label className="block">
-                  <span className="text-caption text-text-tertiary mb-1 block">Operator</span>
+                  <span className="text-caption text-text-tertiary mb-1 block">Operador</span>
                   <select
                     value={(nodeInfo as any).config?.operator || 'equals'}
                     onChange={(e) => updateNodeConfig('operator', e.target.value)}
                     className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
                   >
-                    <option value="equals">Equals</option>
-                    <option value="not_equals">Not Equals</option>
-                    <option value="contains">Contains</option>
-                    <option value="greater_than">Greater Than</option>
-                    <option value="less_than">Less Than</option>
+                    <option value="equals">Igual a</option>
+                    <option value="not_equals">Diferente de</option>
+                    <option value="contains">Contém</option>
+                    <option value="greater_than">Maior que</option>
+                    <option value="less_than">Menor que</option>
                   </select>
                 </label>
                 <label className="block">
-                  <span className="text-caption text-text-tertiary mb-1 block">Value</span>
+                  <span className="text-caption text-text-tertiary mb-1 block">Valor</span>
                   <input
                     type="text"
                     value={(nodeInfo as any).config?.value || ''}
                     onChange={(e) => updateNodeConfig('value', e.target.value)}
-                    placeholder="comparison value"
+                    placeholder="valor de comparação"
                     className="w-full px-3 py-2 rounded-lg bg-bg-elevated border border-border text-body text-text-primary focus:border-accent outline-none transition"
                   />
                 </label>
@@ -5266,16 +5352,17 @@ function WorkflowEditorPage() {
               className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-error/30 bg-error-subtle text-error text-body-sm font-medium hover:bg-error/20 transition"
             >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-              Delete Node
+              Excluir nó
             </button>
           </div>
         )}
       </div>
+      </div>
 
-      {/* Run History Panel */}
+      {/* Histórico de execuções Panel */}
       {runs && runs.length > 0 && (
-        <div className="border-t border-border p-4 bg-bg-elevated/60">
-          <h3 className="text-sm font-semibold text-text-secondary mb-2">Run History</h3>
+        <div className="brand-card mt-4 p-4">
+          <h3 className="text-sm font-semibold text-text-secondary mb-2">Histórico de execuções</h3>
           <div className="space-y-2">
             {runs.slice(0, 10).map((run: any) => {
               const isExpanded = expandedRuns.has(run.id)
@@ -5285,34 +5372,36 @@ function WorkflowEditorPage() {
               return (
                 <div key={run.id} className="rounded border border-border">
                   {/* Header - clickable */}
-                  <div
-                    className="flex items-center gap-2 text-xs p-2 cursor-pointer hover:bg-surface/40"
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-2 p-2 text-left text-xs cursor-pointer hover:bg-surface/40"
                     onClick={() => toggleRun(run.id)}
+                    aria-expanded={isExpanded}
                   >
-                    <span className="text-text-tertiary">{isExpanded ? '▼' : '▶'}</span>
+                    <span className="text-text-tertiary" aria-hidden="true">{isExpanded ? '▼' : '▶'}</span>
                     <span className={runLevelClass(runLevelIcon(run.status, run.result))}>
                       {runLevelIcon(run.status, run.result)}
                     </span>
                     <span className="text-text-secondary font-mono flex-1">{run.id}</span>
-                    <span className="text-text-tertiary">{formatTime(run.started_at)}</span>
+                    <span className="text-text-tertiary">{formatRunTime(run.started_at)}</span>
                     {duration && <span className="text-text-tertiary">{duration}</span>}
-                  </div>
+                  </button>
 
                   {/* Expanded detail */}
                   {isExpanded && detail && (
                     <div className="p-3 bg-bg-base/40 border-t border-border">
                       {/* Summary stats */}
                       <div className="flex gap-4 text-xs mb-3">
-                        <span className={(detail.result?.executed_nodes || 0) > 0 ? 'text-emerald-400' : 'text-text-tertiary'}>{(detail.result?.executed_nodes || 0) > 0 ? '✅' : '○'} {detail.result?.executed_nodes || 0} executed</span>
-                        <span className="text-text-tertiary">⏭️ {detail.result?.skipped_nodes || 0} skipped</span>
-                        <span className="text-amber-400">🚧 {detail.result?.stub_nodes || 0} stub</span>
+                        <span className={(detail.result?.executed_nodes || 0) > 0 ? 'text-emerald-400' : 'text-text-tertiary'}>{(detail.result?.executed_nodes || 0) > 0 ? '✅' : '○'} {detail.result?.executed_nodes || 0} executados</span>
+                        <span className="text-text-tertiary">⏭️ {detail.result?.skipped_nodes || 0} ignorados</span>
+                        <span className="text-amber-400">🚧 {detail.result?.stub_nodes || 0} simulados</span>
                         <span className="text-text-secondary">📊 {detail.result?.total_nodes || 0} total</span>
                       </div>
 
                       {/* Node results */}
                       {detail.result?.node_results && (
                         <div className="space-y-2">
-                          <p className="text-xs font-medium text-text-secondary">Node Execution:</p>
+                          <p className="text-xs font-medium text-text-secondary">Execução por nó:</p>
                           {detail.result.node_results.map((node: any) => (
                             <div key={node.node_id} className="flex items-start gap-2 pl-2">
                               <span className={node.status === 'completed' ? 'text-emerald-400' : node.status === 'skipped' ? 'text-text-tertiary' : node.status === 'stub' ? 'text-amber-400' : 'text-red-400'}>
@@ -5321,7 +5410,7 @@ function WorkflowEditorPage() {
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs font-medium text-text-primary">{node.label}</span>
-                                  <span className="text-xs text-text-tertiary capitalize px-1 rounded bg-surface">{node.node_type}</span>
+                                  <span className="text-xs text-text-tertiary px-1 rounded bg-surface">{NODE_TYPE_LABEL[node.node_type] ?? node.node_type}</span>
                                 </div>
                                 {node.output && (
                                   <pre className="text-xs text-text-secondary mt-1 font-mono bg-bg-base p-2 rounded overflow-x-auto">
@@ -5337,7 +5426,7 @@ function WorkflowEditorPage() {
                       {/* Context variables */}
                       {detail.result?.context && Object.keys(detail.result.context).length > 0 && (
                         <div className="mt-3 pt-3 border-t border-border">
-                          <p className="text-xs font-medium text-text-secondary mb-1">Context Variables:</p>
+                          <p className="text-xs font-medium text-text-secondary mb-1">Variáveis de contexto:</p>
                           {Object.entries(detail.result.context).map(([k, v]) => (
                             <div key={k} className="flex gap-2 text-xs">
                               <span className="text-accent font-mono">{k}:</span>
@@ -5363,21 +5452,21 @@ function WorkflowEditorPage() {
               {runLevelIcon(runMutation.data.status, runMutation.data.result)}
             </span>
             <span className="text-sm font-medium text-text-primary">
-              Run {runMutation.data.status}
+              Execução: {RUN_STATUS_LABEL[runMutation.data.status] ?? runMutation.data.status}
             </span>
           </div>
           <div className="text-xs text-text-secondary space-y-1">
-            <p>Nodes executed: {runMutation.data.result?.executed_nodes || 0}</p>
-            <p>Nodes skipped: {runMutation.data.result?.skipped_nodes || 0}</p>
-            <p>Nodes stub: {runMutation.data.result?.stub_nodes || 0}</p>
-            <p>Duration: {calculateDuration(runMutation.data.started_at, runMutation.data.finished_at)}</p>
+            <p>Nós executados: {runMutation.data.result?.executed_nodes || 0}</p>
+            <p>Nós ignorados: {runMutation.data.result?.skipped_nodes || 0}</p>
+            <p>Nós simulados: {runMutation.data.result?.stub_nodes || 0}</p>
+            <p>Duração: {calculateDuration(runMutation.data.started_at, runMutation.data.finished_at)}</p>
           </div>
           <button onClick={() => { runMutation.reset(); setRunResults({}) }} className="mt-2 text-xs text-text-tertiary hover:text-text-secondary">
-            Dismiss
+            Fechar
           </button>
         </div>
       )}
-    </div>
+    </PageContainer>
   )
 }
 
