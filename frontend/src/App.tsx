@@ -216,8 +216,9 @@ interface Workflow {
   edges: string  // JSON string from backend
   created_at: string
   updated_at: string
-  node_count?: number  // M8-15: counts travel with the list
+  node_count?: number | null  // M8-15: counts travel with the list; null = graph corrupt
   edge_count?: number
+  graph_corrupt?: boolean
 }
 
 // M17-5: run-level honesty — a completed TRIGGER is not "work done", so a
@@ -4494,11 +4495,12 @@ function WorkflowListPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const toast = useToast()
-  const { data: workflows, isLoading } = useQuery<Workflow[]>({
+  const admin = isAdmin()
+  const { data: workflows, isLoading, error } = useQuery<Workflow[]>({
     queryKey: ['workflows'],
     queryFn: async () => {
       const res = await fetch('/api/workflows')
-      if (!res.ok) throw new Error('Failed to fetch workflows')
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
   })
@@ -4509,22 +4511,22 @@ function WorkflowListPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: 'Untitled Workflow',
+          name: 'Workflow sem título',
           description: '',
           nodes: [
-            { id: 'trigger-1', type: 'workflowNode', position: { x: 250, y: 150 }, data: { label: 'Start', nodeType: 'trigger' } }
+            { id: 'trigger-1', type: 'workflowNode', position: { x: 250, y: 150 }, data: { label: 'Início', nodeType: 'trigger' } }
           ],
           edges: [],
         }),
       })
-      if (!res.ok) throw new Error('Failed to create workflow')
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
       return res.json()
     },
     onSuccess: (wf: Workflow) => {
       queryClient.invalidateQueries({ queryKey: ['workflows'] })
       navigate(`/workflows/${wf.id}`)
     },
-    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
+    onError: (e: Error) => toast(e.message || 'Falha na solicitação', 'error'),
   })
 
   const deleteMutation = useMutation({
@@ -4534,99 +4536,141 @@ function WorkflowListPage() {
       return res.json().catch(() => null)  // M28-03: 2xx empty body = sucesso
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['workflows'] }),
-    onError: (e: Error) => toast(e.message || 'Request failed', 'error'),
+    onError: (e: Error) => toast(e.message || 'Falha na solicitação', 'error'),
   })
 
   const handleDelete = (e: React.MouseEvent, id: string, name: string) => {
     e.stopPropagation()
-    if (window.confirm(`Delete workflow "${name}"?`)) {
+    if (window.confirm(`Excluir o workflow "${name}"? Essa ação não pode ser desfeita.`)) {
       deleteMutation.mutate(id)
     }
   }
 
   const formatDate = (iso: string) => {
     try {
-      return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+      return new Date(iso).toLocaleString('pt-BR', {
+        timeZone: 'America/Sao_Paulo',
+        day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+      })
     } catch {
       return iso
     }
   }
 
-  return (
-    <div className="min-h-screen">
-      <NavBar />
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-h2 font-bold text-text-primary">Workflows</h1>
-            <p className="text-body text-text-secondary mt-1">Design and manage your automation workflows</p>
-          </div>
-{isAdmin() && (
-          <button
-            onClick={() => createMutation.mutate()}
-            disabled={createMutation.isPending}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-accent text-text-inverse font-medium text-body hover:bg-accent-hover transition-colors disabled:opacity-50"
-          >
-            <span>+</span>
-            <span>{createMutation.isPending ? 'Creating...' : 'New Workflow'}</span>
-          </button>
-          )}
-        </div>
+  const nodeCount = (wf: Workflow): number | null => {
+    if (typeof wf.node_count === 'number') return wf.node_count
+    if (wf.node_count === null || wf.graph_corrupt) return null
+    try { return JSON.parse(wf.nodes).length } catch { return null }
+  }
 
-        {isLoading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {[1, 2, 3].map(i => (
-              <div key={i} className="animate-skeleton rounded-xl border border-border bg-surface/40 h-40" />
-            ))}
-          </div>
-        ) : workflows && workflows.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {workflows.map(wf => (
-              <div
-                key={wf.id}
-                tabIndex={0}
-                role="button"
-                onClick={() => navigate(`/workflows/${wf.id}`)}
-                className="card-focus rounded-xl border border-border bg-surface/40 p-5 transition hover:bg-surface-hover/70 hover:shadow-md hover-shadow-enhanced cursor-pointer group"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <h3 className="text-h4 font-semibold text-text-primary truncate flex-1 mr-2">{wf.name}</h3>
-                  {isAdmin() && (
-                  <button
-                    onClick={(e) => handleDelete(e, wf.id, wf.name)}
-                    className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 p-1.5 rounded-md hover:bg-error-subtle text-text-tertiary hover:text-error transition-all"
-                    title="Delete workflow"
-                  >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
-                  </button>
-                  )}
-                </div>
-                <p className="text-body-sm text-text-secondary mb-4 line-clamp-2">
-                  {wf.description || 'No description'}
-                </p>
-                <div className="flex items-center justify-between text-caption text-text-tertiary">
-                  <span>{wf.node_count ?? (() => { try { return JSON.parse(wf.nodes).length } catch { return 0 } })()} nodes</span>
-                  <span>{formatDate(wf.updated_at)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-16">
-            <div className="text-4xl mb-4">⚡</div>
-            <h3 className="text-h4 font-semibold text-text-primary mb-2">No workflows yet</h3>
-            <p className="text-body text-text-secondary mb-6">Create your first workflow to start automating tasks</p>
+  return (
+    <PageContainer>
+      <PageHeader
+        eyebrow="Automação"
+        title="Workflows"
+        subtitle={
+          isLoading
+            ? 'Carregando workflows…'
+            : error
+              ? 'Não foi possível carregar os workflows.'
+              : `${workflows?.length ?? 0} ${(workflows?.length ?? 0) === 1 ? 'workflow' : 'workflows'}`
+        }
+        actions={
+          admin ? (
             <button
               onClick={() => createMutation.mutate()}
               disabled={createMutation.isPending}
-              className="px-4 py-2 rounded-lg bg-accent text-text-inverse font-medium text-body hover:bg-accent-hover transition-colors"
+              className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-text-inverse transition-colors hover:bg-accent-hover disabled:opacity-50"
             >
-              Create Workflow
+              <span>+</span>
+              <span>{createMutation.isPending ? 'Criando…' : 'Novo workflow'}</span>
             </button>
+          ) : undefined
+        }
+      />
+
+      <main className="mt-6 pb-12">
+        {error && !isLoading && (
+          <div className="mb-4 rounded-xl border border-error/30 bg-error/10 p-4 text-sm text-error">
+            Não foi possível carregar os workflows: {error instanceof Error ? error.message : 'erro desconhecido'}
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3" role="status" aria-label="Carregando workflows">
+            {[1, 2, 3].map(i => (
+              <div key={i} className="brand-card h-36 animate-pulse" />
+            ))}
+          </div>
+        )}
+
+        {!isLoading && !error && workflows && workflows.length > 0 && (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {workflows.map(wf => (
+              <article
+                key={wf.id}
+                onClick={(e) => {
+                  if ((e.target as HTMLElement).closest('a,button')) return
+                  navigate(`/workflows/${wf.id}`)
+                }}
+                className="brand-card brand-card-hover group flex cursor-pointer flex-col p-5"
+              >
+                <div className="mb-3 flex items-start justify-between gap-2">
+                  <h3 className="min-w-0 flex-1 truncate text-h4 font-semibold text-text-primary">
+                    <Link to={`/workflows/${wf.id}`} className="hover:text-accent">{wf.name}</Link>
+                  </h3>
+                  {admin && (
+                    <button
+                      onClick={(e) => handleDelete(e, wf.id, wf.name)}
+                      className="rounded-md p-1.5 text-text-tertiary opacity-0 transition-all hover:bg-error/10 hover:text-error focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-error/40 group-hover:opacity-100 [@media(hover:none)]:opacity-100"
+                      title="Excluir workflow"
+                      aria-label={`Excluir workflow ${wf.name}`}
+                    >
+                      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+                    </button>
+                  )}
+                </div>
+                <p className="mb-4 line-clamp-2 text-sm text-text-secondary">
+                  {wf.description || 'Sem descrição'}
+                </p>
+                <div className="mt-auto flex items-center justify-between gap-2 text-xs text-text-tertiary">
+                  <span>
+                    {nodeCount(wf) === null
+                      ? '—'
+                      : `${nodeCount(wf)} ${nodeCount(wf) === 1 ? 'nó' : 'nós'}`}
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <span>{formatDate(wf.updated_at)}</span>
+                    <Link to={`/workflows/${wf.id}`} className="font-medium text-accent hover:text-accent-hover">Abrir →</Link>
+                  </div>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+
+        {!isLoading && !error && workflows && workflows.length === 0 && (
+          <div className="brand-card px-6 py-16 text-center">
+            <div className="mb-4 text-4xl" aria-hidden="true">⚡</div>
+            <h3 className="mb-2 text-h4 font-semibold text-text-primary">Nenhum workflow ainda</h3>
+            <p className="mb-6 text-sm text-text-secondary">
+              {admin
+                ? 'Crie seu primeiro workflow para começar a automatizar tarefas.'
+                : 'Os workflows aparecerão aqui quando forem criados.'}
+            </p>
+            {admin && (
+              <button
+                onClick={() => createMutation.mutate()}
+                disabled={createMutation.isPending}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-text-inverse transition-colors hover:bg-accent-hover disabled:opacity-50"
+              >
+                {createMutation.isPending ? 'Criando…' : 'Criar workflow'}
+              </button>
+            )}
           </div>
         )}
       </main>
-    </div>
+    </PageContainer>
   )
 }
 
