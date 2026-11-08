@@ -981,7 +981,8 @@ function formatDuration(seconds: number | null): string {
   return `${m}m ${rem}s`
 }
 
-function sourceBadge(source: string) {
+function sourceBadge(source?: string) {
+  if (!source) return 'bg-surface text-text-secondary border border-border'
   const map: Record<string, string> = {
     whatsapp:   'bg-success-subtle text-success border border-success/20',
     discord:    'bg-accent-tertiary/10 text-accent-tertiary border border-accent-tertiary/20',
@@ -997,7 +998,8 @@ function sourceBadge(source: string) {
   return map[source.toLowerCase()] || 'bg-surface text-text-secondary border border-border'
 }
 
-function sourceLabel(source: string): string {
+function sourceLabel(source?: string): string {
+  if (!source) return 'Desconhecida'
   const labels: Record<string, string> = {
     whatsapp: 'WhatsApp',
     discord: 'Discord',
@@ -2293,101 +2295,118 @@ function MessagesSection({ sessionId }: { sessionId: string }) {
 function SessionDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
+  const admin = isAdmin()
 
   const { data, isLoading, error } = useQuery<SessionItem>({
     queryKey: ['session', id],
+    enabled: admin,
     queryFn: async () => {
       const res = await fetch(`/api/sessions/${encodeURIComponent(id!)}`)
       if (!res.ok) {
-        if (res.status === 404) throw new Error('Session not found')
-        throw new Error('Failed to load session')
+        if (res.status === 404) throw new Error('Sessão não encontrada')
+        throw new Error('Falha ao carregar a sessão')
       }
-      return res.json()
+      const payload = await res.json()
+      if (!payload || Array.isArray(payload) || !payload.id) throw new Error('Sessão não encontrada')
+      return payload
     },
   })
 
   return (
-    <div className="min-h-screen bg-bg-base text-text-secondary">
-      <NavBar />
-      <main className="mx-auto max-w-4xl px-6 py-8">
-        <button
-          onClick={() => navigate('/sessions')}
-          className="mb-4 text-body-sm text-accent hover:underline"
-        >
-          ← Back to sessions
-        </button>
+    <PageContainer>
+      <PageHeader
+        eyebrow="Detalhe da sessão"
+        title={data?.title || 'Sessão'}
+        subtitle={data ? `${sourceLabel(data.source)} · ${data.model || '—'}` : 'Histórico e mensagens da execução.'}
+        actions={
+          <button
+            onClick={() => navigate('/sessions')}
+            className="inline-flex h-9 items-center rounded-lg border border-border bg-surface px-3.5 text-sm text-text-secondary transition hover:bg-surface-hover hover:text-text-primary"
+          >
+            ← Voltar
+          </button>
+        }
+      />
 
-        {isLoading && <p className="text-text-secondary">Loading session…</p>}
-        {error && (
-          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error">
-            Error: {(error as Error).message}
-          </div>
-        )}
+      {!admin ? (
+        <div className="brand-card mt-6 px-6 py-12 text-center">
+          <p className="text-h4 font-semibold text-text-primary">Sessão restrita</p>
+          <p className="mt-1.5 text-body-sm text-text-tertiary">O detalhe da sessão é visível apenas para administradores.</p>
+        </div>
+      ) : (
+        <div className="mx-auto mt-6 max-w-4xl">
+          {isLoading && (
+            <div className="brand-card p-6" role="status" aria-label="Carregando sessão">
+              <div className="h-4 w-40 animate-pulse rounded bg-surface/60" />
+              <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="h-16 animate-pulse rounded-lg bg-surface/40" />
+                ))}
+              </div>
+            </div>
+          )}
+          {error && (
+            <div className="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-body-sm text-error">
+              Não foi possível carregar a sessão.
+            </div>
+          )}
 
-        {data && (
-          <>
-            <h1 className="text-h2 font-bold text-text-primary mb-1">
-              {data.title || 'Untitled'}
-            </h1>
-            <div className="flex items-center gap-2 mb-6">
-              <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${sourceBadge(data.source)}`}>
-                {sourceLabel(data.source)}
-              </span>
-              {data.profile && data.profile !== 'default' && (
-                <span className="inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-surface-secondary text-text-secondary border border-border">
-                  {data.profile}
+          {data && (
+            <>
+              <div className="mb-4 flex flex-wrap items-center gap-2">
+                <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${sourceBadge(data.source)}`}>
+                  {sourceLabel(data.source)}
                 </span>
-              )}
-              <span className="font-mono text-mono-sm text-text-secondary">{data.model}</span>
-            </div>
+                {data.profile && data.profile !== 'default' && (
+                  <span className="inline-flex items-center rounded-md border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-secondary">
+                    {data.profile}
+                  </span>
+                )}
+                <span className="font-mono text-mono-sm text-text-secondary">{data.model || '—'}</span>
+              </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8">
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">ID</p>
-                <p className="font-mono text-sm text-text-primary break-all">{data.id}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">Chat Type</p>
-                <p className="text-sm text-text-primary">{data.chat_type || '-'}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">Started</p>
-                <p className="text-sm text-text-primary">{data.started_at ? new Date(data.started_at).toLocaleString() : '-'}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">Ended</p>
-                <p className="text-sm text-text-primary">{data.ended_at ? new Date(data.ended_at).toLocaleString() : 'Running'}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">Duration</p>
-                <p className="text-sm text-text-primary">{formatDuration(data.duration_seconds)}</p>
-              </div>
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">Messages / Tool Calls</p>
-                <p className="text-sm text-text-primary">{data.message_count} / {data.tool_call_count}</p>
-              </div>
-              {data.archived && (
-                <div className="rounded-lg border border-warning/30 bg-warning-subtle p-4">
-                  <p className="text-caption text-warning mb-1">Archived</p>
-                  <p className="text-sm text-text-primary">This session is archived.</p>
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="brand-card p-4">
+                  <p className="mb-1 text-caption text-text-tertiary">ID</p>
+                  <p className="break-all font-mono text-sm text-text-primary">{data.id}</p>
                 </div>
-              )}
-              {data.snippet && (
-                <div className="rounded-lg border border-border bg-surface/30 p-4 sm:col-span-2">
-                  <p className="text-caption text-text-tertiary mb-1">Snippet</p>
-                  <p className="text-sm text-text-primary whitespace-pre-wrap">{data.snippet}</p>
+                <div className="brand-card p-4">
+                  <p className="mb-1 text-caption text-text-tertiary">Tipo de chat</p>
+                  <p className="text-sm text-text-primary">{data.chat_type || '—'}</p>
                 </div>
-              )}
-            </div>
+                <div className="brand-card p-4">
+                  <p className="mb-1 text-caption text-text-tertiary">Início</p>
+                  <p className="text-sm text-text-primary">{data.started_at ? formatStartedAt(data.started_at) : '—'}</p>
+                </div>
+                <div className="brand-card p-4">
+                  <p className="mb-1 text-caption text-text-tertiary">Fim</p>
+                  <p className="text-sm text-text-primary">{data.ended_at ? formatStartedAt(data.ended_at) : 'Em execução'}</p>
+                </div>
+                <div className="brand-card p-4">
+                  <p className="mb-1 text-caption text-text-tertiary">Duração</p>
+                  <p className="text-sm text-text-primary">{formatDuration(data.duration_seconds)}</p>
+                </div>
+                <div className="brand-card p-4">
+                  <p className="mb-1 text-caption text-text-tertiary">Mensagens / tool calls</p>
+                  <p className="text-sm text-text-primary">{data.message_count} / {data.tool_call_count}</p>
+                </div>
+                {data.archived && (
+                  <div className="rounded-xl border border-warning/30 bg-warning-subtle p-4 sm:col-span-2">
+                    <p className="mb-1 text-caption text-warning">Arquivada</p>
+                    <p className="text-sm text-text-primary">Esta sessão está no arquivo.</p>
+                  </div>
+                )}
+              </div>
 
-            <div className="rounded-lg border border-border bg-surface/30 p-4">
-              <p className="text-h4 font-semibold text-text-primary mb-3">Messages</p>
-              <MessagesSection key={data.id} sessionId={data.id} />
-            </div>
-          </>
-        )}
-      </main>
-    </div>
+              <div className="brand-card p-4">
+                <h2 className="mb-3 text-h4 font-semibold text-text-primary">Mensagens</h2>
+                <MessagesSection key={data.id} sessionId={data.id} />
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </PageContainer>
   )
 }
 
