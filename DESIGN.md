@@ -1,9 +1,64 @@
 # AgentOS Visual Identity Specification
 
-**Version:** 1.0  
-**Date:** 2026-07-05  
+**Version:** 2.0 — Shell Branding 2026
+**Date:** 2026-11-08
 **Theme:** Dark-primary (light theme defined as optional)  
 **Target:** FastAPI + Vite React + Tailwind CSS
+
+---
+
+## 0. Shell Branding 2026 (current authority)
+
+The approved AppShell concept is the **new visual identity** for AgentOS. It supersedes the flat card treatment in the earlier 1.0 spec.
+
+### 0.1 Shell
+
+- Global navigation lives in the left sidebar; the top bar is page context only and never repeats sidebar destinations.
+- Sidebar expanded 242px, rail 76px, mobile drawer below 768px; collapse persisted in `localStorage['agentos.sidebar.collapsed']`.
+- Frosted glass is chrome: sidebar, top bar, composer, dropdowns and modals. Data cards use the brand-card surface below, not heavy blur.
+
+### 0.2 Brand card
+
+All page-level cards and panels (dashboard stats, activity panels, agent panels, cron panels, future page cards) use:
+
+```css
+.brand-card {
+  position: relative;
+  isolation: isolate;
+  border: 1px solid rgba(255, 255, 255, 0.085);
+  border-radius: 17px;
+  background: linear-gradient(155deg, rgba(24, 35, 54, 0.72), rgba(11, 19, 32, 0.55));
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.055),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+.brand-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(120% 85% at 0% 0%, rgba(45, 226, 197, 0.06), transparent 55%);
+}
+.brand-card > * { position: relative; z-index: 1; }
+.brand-card-hover:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.13);
+  box-shadow:
+    0 24px 56px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.075),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.22);
+}
+```
+
+Light theme overrides live in `frontend/src/index.css` under `html.light .brand-card`; cards become a white-to-slate gradient with a soft slate shadow. Do not use flat `bg-surface/30` cards in the shell.
+
+### 0.3 Page pattern
+
+Every migrated page uses `PageContainer` + `PageHeader` from `frontend/src/components/PageHeader.tsx`: one `<h1>`, optional eyebrow/subtitle, and actions on the right. No page-level `min-h-screen`, no duplicate `NavBar`. Loading and error states must be explicit; never render a factual `0` or “none” while a query is still loading.
 
 ---
 
@@ -296,6 +351,8 @@ All sizes are in `rem` (root font-size = 16px). Use Tailwind's `text-*` utilitie
 ## 4. Component Styling Guide
 
 ### 4.1 Cards
+
+> **Shell Branding 2026:** for pages inside `AppShell`, use `.brand-card` from §0.2. The flat surface card below is legacy and should not be used for new shell pages.
 
 #### Agent Card (Dashboard)
 

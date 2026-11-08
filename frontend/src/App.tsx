@@ -8,6 +8,7 @@ import LoginPage from './auth/LoginPage'
 import ProtectedRoute from './auth/ProtectedRoute'
 import UserManagement from './pages/UserManagement'
 import AppShell, { useAppShell } from './components/AppShell'
+import { PageContainer, PageHeader } from './components/PageHeader'
 import ProfilesPage from './pages/Profiles'
 import AnalyticsPage from './pages/Analytics'
 import MemoryPage from './pages/Memory'
@@ -484,169 +485,376 @@ export function NavBar() {
 
 /* ── Dashboard ───────────────────────────────────── */
 
-function AgentCard({ agent }: { agent: AgentProfile }) {
-  const isRunning = agent.process_alive && agent.gateway_state === 'running'
+function payloadList<T>(payload: unknown, keys: string[]): T[] {
+  if (Array.isArray(payload)) return payload as T[]
+  if (payload && typeof payload === 'object') {
+    for (const key of keys) {
+      const value = (payload as Record<string, unknown>)[key]
+      if (Array.isArray(value)) return value as T[]
+    }
+  }
+  return []
+}
+
+function DashGlyph({ kind }: { kind: 'agents' | 'sessions' | 'tasks' | 'cron' }) {
   return (
-    <div
-      tabIndex={0}
-      role="button"
-      aria-label={`${agent.name} agent card. Status: ${isRunning ? 'Running' : 'Stopped'}. Role: ${agent.role}. Sessions: ${agent.sessions}.`}
-      className="card-focus rounded-xl border border-border bg-surface/40 p-5 transition hover:bg-surface-hover/70 hover:shadow-md hover-shadow-enhanced cursor-pointer"
-    >
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-h4 font-semibold text-text-primary">{agent.name}</h3>
-        <span
-          className={`inline-block h-2 w-2 rounded-full ${isRunning ? 'bg-semantic-success' : 'bg-text-tertiary'}`}
-          title={isRunning ? 'Running' : 'Stopped'}
-          aria-label={isRunning ? 'Running' : 'Stopped'}
-        />
-      </div>
-      <p className="text-body-sm text-text-secondary mb-4">{agent.role}</p>
-      <div className="flex items-center gap-2 mb-3">
-        <span className="inline-flex items-center rounded-md bg-bg-base px-2 py-1 text-mono-sm text-accent border border-border">
-          {agent.model}
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+      {kind === 'agents' && <><path d="M12 3 4.5 7v10L12 21l7.5-4V7L12 3Z" /><path d="M8.5 12h7M12 8.5v7" /></>}
+      {kind === 'sessions' && <><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 9.7 9.7 0 0 1-3.8-.8L3 21l1.8-5.2A8.5 8.5 0 1 1 21 11.5Z" /></>}
+      {kind === 'tasks' && <><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" /></>}
+      {kind === 'cron' && <><circle cx="12" cy="12" r="8" /><path d="M12 7v5l3 2" /></>}
+    </svg>
+  )
+}
+
+function DashboardStat({ label, value, suffix, detail, kind, loading = false, error = false }: {
+  label: string
+  value: number | string
+  suffix?: string
+  detail: string
+  kind: 'agents' | 'sessions' | 'tasks' | 'cron'
+  loading?: boolean
+  error?: boolean
+}) {
+  const muted = loading || error
+  return (
+    <div className="brand-card brand-card-hover p-4">
+      <div className="flex items-start justify-between gap-3">
+        <span className="text-caption font-medium text-text-tertiary">{label}</span>
+        <span className="grid h-8 w-8 place-items-center rounded-lg border border-accent/15 bg-accent/10 text-accent">
+          <DashGlyph kind={kind} />
         </span>
-        <span className="inline-flex items-center rounded-md bg-bg-base px-2 py-1 text-mono-sm text-text-secondary border border-border">
-          {agent.provider}
-        </span>
       </div>
-      <div className="flex items-center justify-between text-caption text-text-tertiary">
-        <span className="font-mono">{agent.kanban_task ? `🔨 ${agent.kanban_task.length > 42 ? agent.kanban_task.slice(0, 42) + '…' : agent.kanban_task}` : agent.process_alive ? `PID: ${agent.pid}` : 'Idle'}</span>
-        <span>Sessions: {agent.sessions}</span>
+      <div className="mt-3 flex items-baseline gap-1.5">
+        <span className={`text-[28px] font-semibold leading-none tracking-tight text-text-primary tabular-nums ${muted ? 'opacity-40' : ''}`}>{muted ? '—' : value}</span>
+        {!muted && suffix && <span className="text-caption font-medium text-text-tertiary">{suffix}</span>}
+      </div>
+      <p className="mt-2 text-caption text-text-tertiary">{loading ? 'carregando…' : error ? 'indisponível' : detail}</p>
+    </div>
+  )
+}
+
+function DashboardPanel({ title, subtitle, action, children, className = '' }: {
+  title: string
+  subtitle?: string
+  action?: React.ReactNode
+  children: React.ReactNode
+  className?: string
+}) {
+  return (
+    <section className={`brand-card min-w-0 p-5 ${className}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-h4 font-semibold text-text-primary">{title}</h2>
+          {subtitle && <p className="mt-0.5 text-caption text-text-tertiary">{subtitle}</p>}
+        </div>
+        {action}
+      </div>
+      <div className="mt-4">{children}</div>
+    </section>
+  )
+}
+
+function DashboardEmpty({ children }: { children: React.ReactNode }) {
+  return <div className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-body-sm text-text-tertiary">{children}</div>
+}
+
+function DashboardLoadingRows({ rows = 3 }: { rows?: number }) {
+  return (
+    <div className="space-y-3" aria-label="Carregando" role="status">
+      {Array.from({ length: rows }).map((_, index) => (
+        <div key={index} className="flex items-center gap-3 rounded-xl border border-border/40 bg-bg-base/30 px-3 py-2.5">
+          <span className="h-8 w-8 shrink-0 animate-pulse rounded-lg bg-surface/60" />
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="h-3 w-1/2 animate-pulse rounded bg-surface/60" />
+            <div className="h-2.5 w-2/3 animate-pulse rounded bg-surface/40" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function ResourceMeter({ label, value }: { label: string; value: number }) {
+  const color = value < 60 ? 'bg-semantic-success' : value < 80 ? 'bg-semantic-warning' : 'bg-semantic-error'
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between text-caption">
+        <span className="text-text-secondary">{label}</span>
+        <span className="font-mono text-text-primary tabular-nums">{value}%</span>
+      </div>
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-base">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
       </div>
     </div>
   )
 }
 
-function HardwareWidget() {
-  const { data } = useQuery<{ cpu: { percent: number }; ram: { percent: number }; disk: { percent: number } }>({
+function SystemHealthPanel() {
+  const { data, isLoading, error } = useQuery<{ cpu: { percent: number }; ram: { percent: number }; disk: { percent: number } }>({
     queryKey: ['hardware-widget'],
     queryFn: async () => {
       const token = localStorage.getItem('agentos_access_token')
       const res = await fetch('/api/analytics/hardware', {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
-      if (!res.ok) throw new Error('Failed')
+      if (!res.ok) throw new Error('Falha ao carregar recursos')
       return res.json()
     },
     refetchInterval: 10_000,
   })
 
-  if (!data) return null
-
-  const bars = [
-    { label: 'CPU', pct: data.cpu.percent },
-    { label: 'RAM', pct: data.ram.percent },
-    { label: 'Disk', pct: data.disk.percent },
-  ]
-
+  if (isLoading) {
+    return <div className="space-y-4">{['CPU', 'RAM', 'Disco'].map((label) => <div key={label} className="h-8 animate-pulse rounded-lg bg-surface/60" />)}</div>
+  }
+  if (error || !data) {
+    return <DashboardEmpty>Não foi possível ler os recursos do host.</DashboardEmpty>
+  }
   return (
-    <div className="mt-6 rounded-xl border border-border bg-surface/40 p-4">
-      <div className="flex items-center justify-between mb-3">
-        <h3 className="text-sm font-semibold text-text-primary">System Resources</h3>
-        <Link to="/analytics" className="text-xs text-accent hover:text-accent-hover transition">Details →</Link>
+    <div className="space-y-4">
+      <ResourceMeter label="CPU" value={data.cpu.percent} />
+      <ResourceMeter label="RAM" value={data.ram.percent} />
+      <ResourceMeter label="Disco" value={data.disk.percent} />
+    </div>
+  )
+}
+
+function DashboardActivityRow({ title, meta, status, tone, kind }: {
+  title: string
+  meta: string
+  status: string
+  tone: 'success' | 'warning' | 'info'
+  kind: 'sessions' | 'tasks'
+}) {
+  const toneClass = tone === 'warning'
+    ? 'border-warning/20 bg-warning/10 text-warning'
+    : tone === 'info'
+      ? 'border-info/20 bg-info/10 text-info'
+      : 'border-success/20 bg-success/10 text-success'
+  return (
+    <div className="flex items-start gap-3 border-b border-border/60 py-3 first:pt-0 last:border-0 last:pb-0">
+      <span className="mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border bg-bg-base text-text-secondary">
+        <DashGlyph kind={kind} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-body-sm font-medium text-text-primary">{title}</p>
+        <p className="mt-0.5 truncate text-caption text-text-tertiary">{meta}</p>
       </div>
-      <div className="grid grid-cols-3 gap-4">
-        {bars.map((b) => {
-          const color = b.pct < 60 ? 'bg-semantic-success' : b.pct < 80 ? 'bg-yellow-500' : 'bg-semantic-error'
-          return (
-            <div key={b.label}>
-              <div className="flex justify-between text-xs mb-1">
-                <span className="text-text-secondary">{b.label}</span>
-                <span className="text-text-primary font-mono">{b.pct}%</span>
-              </div>
-              <div className="w-full h-2 rounded-full bg-bg-base overflow-hidden">
-                <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${b.pct}%` }} />
-              </div>
-            </div>
-          )
-        })}
-      </div>
+      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${toneClass}`}>{status}</span>
     </div>
   )
 }
 
 function DashboardPage() {
-  const { data, isLoading, error } = useQuery<AgentProfile[]>({
+  const admin = isAdmin()
+
+  const agentsQuery = useQuery<AgentProfile[]>({
     queryKey: ['agents'],
     queryFn: async () => {
       const res = await fetch('/api/agents')
-      if (!res.ok) throw new Error('Failed to load agents')
-      return res.json()
+      if (!res.ok) throw new Error('Falha ao carregar agentes')
+      return payloadList<AgentProfile>(await res.json(), ['agents'])
     },
+    refetchInterval: 15_000,
   })
 
-  const activeCount = data?.filter((a) => a.process_alive || a.kanban_task).length ?? 0
-  const totalSessions = data?.reduce((sum, a) => sum + a.sessions, 0) ?? 0
+  const sessionsQuery = useQuery<{ items: SessionItem[]; total: number }>({
+    queryKey: ['dashboard-sessions'],
+    enabled: admin,
+    queryFn: async () => {
+      const res = await fetch('/api/sessions?limit=500')
+      if (!res.ok) throw new Error('Falha ao carregar sessões')
+      const payload = await res.json()
+      const items = payloadList<SessionItem>(payload, ['sessions'])
+      return { items, total: Array.isArray(payload) ? items.length : (payload?.total ?? items.length) }
+    },
+    refetchInterval: 15_000,
+  })
+
+  const tasksQuery = useQuery<TaskItem[]>({
+    queryKey: ['dashboard-tasks'],
+    queryFn: async () => {
+      const res = await fetch('/api/tasks?limit=500')
+      if (!res.ok) throw new Error('Falha ao carregar tarefas')
+      return payloadList<TaskItem>(await res.json(), ['tasks'])
+    },
+    refetchInterval: 15_000,
+  })
+
+  const cronQuery = useQuery<CronJob[]>({
+    queryKey: ['dashboard-cron'],
+    queryFn: async () => {
+      const res = await fetch('/api/cron')
+      if (!res.ok) throw new Error('Falha ao carregar crons')
+      return payloadList<CronJob>(await res.json(), ['jobs'])
+    },
+    refetchInterval: 15_000,
+  })
+
+  const agents = agentsQuery.data ?? []
+  const sessions = sessionsQuery.data?.items ?? []
+  const tasks = tasksQuery.data ?? []
+  const cronJobs = cronQuery.data ?? []
+
+  const activeAgents = agents.filter((agent) => agent.process_alive || agent.kanban_task).length
+  const openTasks = tasks.filter((task) => !['done', 'archived'].includes(task.status)).length
+  const isCronActive = (job: CronJob) => job.enabled && job.state !== 'paused'
+  const activeCrons = cronJobs.filter(isCronActive).length
+  const nextCrons = cronJobs
+    .filter((job) => isCronActive(job) && job.next_run_at)
+    .sort((a, b) => String(a.next_run_at).localeCompare(String(b.next_run_at)))
+    .slice(0, 4)
+  const hasError = agentsQuery.error || tasksQuery.error || cronQuery.error || (admin && sessionsQuery.error)
+
+  const activity = useMemo(() => {
+    const sessionRows = sessions.slice(0, 5).map((session) => ({
+      id: `session-${session.id}`,
+      title: session.title || `Sessão ${sourceLabel(session.source)}`,
+      meta: `${sourceLabel(session.source)} · ${formatStartedAt(session.started_at)}`,
+      status: session.ended_at ? 'Concluída' : 'Em andamento',
+      tone: session.ended_at ? 'success' as const : 'info' as const,
+      kind: 'sessions' as const,
+      at: session.started_at || '',
+    }))
+    const taskRows = tasks
+      .filter((task) => !['done', 'archived'].includes(task.status))
+      .slice(0, 5)
+      .map((task) => ({
+      id: `task-${task.id}`,
+      title: task.title || `Tarefa ${task.id}`,
+      meta: `${task.assignee || 'sem responsável'} · ${task.status}`,
+      status: task.status === 'review' ? 'Em review' : task.status === 'blocked' ? 'Bloqueada' : 'Em aberto',
+      tone: task.status === 'blocked' ? 'warning' as const : task.status === 'review' ? 'warning' as const : 'info' as const,
+      kind: 'tasks' as const,
+      at: task.created_at || '',
+    }))
+    return [...sessionRows, ...taskRows].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 5)
+  }, [sessions, tasks])
+
+  const sessionsLoading = admin && sessionsQuery.isLoading
+  const sessionsTotal = admin ? sessionsQuery.data?.total : undefined
 
   return (
-    <div className="min-h-screen bg-bg-base text-text-secondary">
-      <NavBar />
-      <header className="px-6 pt-10 pb-6">
-        <div className="mx-auto max-w-7xl">
-          <div className="flex items-end justify-between">
-            <div>
-              <h1 className="text-display font-bold text-text-primary tracking-tight">AgentOS</h1>
-              <p className="mt-2 text-body text-text-secondary max-w-lg">
-                Control plane for Hermes Agent
-              </p>
-            </div>
-            <div className="flex items-center gap-6">
-              <div className="text-right">
-                <p className="text-caption text-text-tertiary uppercase tracking-widest mb-0.5">Active Agents</p>
-                <p className="text-h2 font-bold text-accent tabular-nums">{activeCount}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-caption text-text-tertiary uppercase tracking-widest mb-0.5">Sessions</p>
-                <p className="text-h2 font-bold text-text-primary tabular-nums">{totalSessions}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </header>
+    <PageContainer>
+      <PageHeader
+        eyebrow="Workspace / Visão geral"
+        title="Dashboard"
+        subtitle="Control plane do Hermes Agent: operação, inteligência e saúde do workspace."
+        actions={
+          <Link to="/chat" className="inline-flex h-9 items-center gap-2 rounded-lg bg-accent px-3.5 text-sm font-medium text-white transition hover:bg-accent-hover">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+              <path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.5 9.7 9.7 0 0 1-3.8-.8L3 21l1.8-5.2A8.5 8.5 0 1 1 21 11.5Z" />
+            </svg>
+            Abrir chat
+          </Link>
+        }
+      />
 
-      <main className="mx-auto max-w-7xl px-6 pb-12">
-        {isLoading && (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <div
-                key={i}
-                className="rounded-xl border border-border bg-surface/20 p-5 animate-skeleton"
-                aria-hidden="true"
-              >
-                <div className="flex items-center justify-between mb-3">
-                  <div className="h-5 w-24 rounded bg-surface/60" />
-                  <div className="h-2 w-2 rounded-full bg-surface/60" />
+      {hasError && (
+        <div className="mt-4 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-body-sm text-warning">
+          Alguns dados do dashboard não carregaram. Os números abaixo podem estar incompletos.
+        </div>
+      )}
+
+      <section className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <DashboardStat label="Agentes ativos" value={activeAgents} detail={agents.length ? `${agents.length} no workspace` : 'Nenhum agente conectado'} kind="agents" loading={agentsQuery.isLoading} error={agentsQuery.isError} />
+        <DashboardStat label="Sessões" value={admin ? (sessionsTotal ?? '—') : '—'} detail={admin ? 'histórico total' : 'restrito a administradores'} kind="sessions" loading={sessionsLoading} error={admin && sessionsQuery.isError} />
+        <DashboardStat label="Tarefas abertas" value={openTasks} detail={openTasks ? 'no fluxo do kanban' : 'nada pendente'} kind="tasks" loading={tasksQuery.isLoading} error={tasksQuery.isError} />
+        <DashboardStat label="Crons ativos" value={activeCrons} detail={activeCrons ? 'automações habilitadas' : 'nenhuma ativa'} kind="cron" loading={cronQuery.isLoading} error={cronQuery.isError} />
+      </section>
+
+      <section className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.55fr)_minmax(290px,.75fr)]">
+        <DashboardPanel
+          title="Atividade recente"
+          subtitle="Sessões e tarefas do workspace"
+          action={<span className="rounded-full border border-success/20 bg-success/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-success">Ao vivo</span>}
+        >
+          {activity.length ? (
+            <div>{activity.map((row) => <DashboardActivityRow key={row.id} title={row.title} meta={row.meta} status={row.status} tone={row.tone} kind={row.kind} />)}</div>
+          ) : sessionsLoading || tasksQuery.isLoading ? (
+            <DashboardLoadingRows />
+          ) : sessionsQuery.isError || tasksQuery.isError ? (
+            <DashboardEmpty>Não foi possível carregar a atividade recente.</DashboardEmpty>
+          ) : (
+            <DashboardEmpty>Nenhuma atividade recente. Abra o chat para começar.</DashboardEmpty>
+          )}
+        </DashboardPanel>
+
+        <DashboardPanel
+          title="Saúde do sistema"
+          subtitle="Recursos do host"
+          action={<Link to="/analytics" className="text-caption text-accent transition hover:text-accent-hover">Detalhes →</Link>}
+        >
+          {isAdmin() ? <SystemHealthPanel /> : <DashboardEmpty>Recursos disponíveis apenas para administradores.</DashboardEmpty>}
+        </DashboardPanel>
+      </section>
+
+      <section className="mt-4 grid gap-4 lg:grid-cols-2">
+        <DashboardPanel
+          title="Agentes"
+          subtitle="Processos e tarefas do gateway"
+          action={<Link to="/analytics" className="text-caption text-accent transition hover:text-accent-hover">Ver analytics →</Link>}
+        >
+          {agents.length ? (
+            <div className="space-y-3">
+              {agents.slice(0, 4).map((agent) => {
+                const running = agent.process_alive && agent.gateway_state === 'running'
+                return (
+                  <div key={agent.id} className="flex items-center gap-3 rounded-xl border border-border/60 bg-bg-base/40 px-3 py-2.5">
+                    <span
+                      role="img"
+                      aria-label={running ? 'Em execução' : 'Parado'}
+                      title={running ? 'Em execução' : 'Parado'}
+                      className={`h-2 w-2 shrink-0 rounded-full ${running ? 'bg-semantic-success' : 'bg-text-tertiary'}`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-body-sm font-medium text-text-primary">{agent.name}</p>
+                      <p className="truncate text-caption text-text-tertiary">{agent.role} · {agent.model}</p>
+                    </div>
+                    <span className="shrink-0 text-caption text-text-tertiary tabular-nums">{agent.sessions} sess.</span>
+                  </div>
+                )
+              })}
+            </div>
+          ) : agentsQuery.isLoading ? (
+            <DashboardLoadingRows />
+          ) : agentsQuery.isError ? (
+            <DashboardEmpty>Não foi possível carregar os agentes.</DashboardEmpty>
+          ) : (
+            <DashboardEmpty>Nenhum agente ativo no gateway.</DashboardEmpty>
+          )}
+        </DashboardPanel>
+
+        <DashboardPanel
+          title="Próximos crons"
+          subtitle="Agenda do dispatcher"
+          action={<Link to="/cron" className="text-caption text-accent transition hover:text-accent-hover">Ver todos →</Link>}
+        >
+          {nextCrons.length ? (
+            <div className="space-y-3">
+              {nextCrons.map((job) => (
+                <div key={job.id} className="flex items-center gap-3 rounded-xl border border-border/60 bg-bg-base/40 px-3 py-2.5">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border bg-surface/60 text-text-secondary">
+                    <DashGlyph kind="cron" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-body-sm font-medium text-text-primary">{job.name}</p>
+                    <p className="truncate text-caption text-text-tertiary">{job.schedule_display || job.schedule?.display || 'agendado'}</p>
+                  </div>
+                  <span className="shrink-0 text-caption text-text-tertiary">{formatRelativeTime(job.next_run_at)}</span>
                 </div>
-                <div className="h-4 w-40 rounded bg-surface/60 mb-4" />
-                <div className="flex items-center gap-2 mb-3">
-                  <div className="h-5 w-20 rounded bg-surface/60" />
-                  <div className="h-5 w-20 rounded bg-surface/60" />
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="h-3 w-16 rounded bg-surface/60" />
-                  <div className="h-3 w-20 rounded bg-surface/60" />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-        {error && (
-          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error">
-            Error: {(error as Error).message}
-          </div>
-        )}
-        {data && (
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
-            {data.map((agent) => (
-              <AgentCard key={agent.id} agent={agent} />
-            ))}
-          </div>
-        )}
-        {/* Hardware widget — operação, admin-only (evita 403 em loop p/ viewer) */}
-        {isAdmin() && <HardwareWidget />}
-      </main>
-    </div>
+              ))}
+            </div>
+          ) : cronQuery.isLoading ? (
+            <DashboardLoadingRows rows={4} />
+          ) : cronQuery.isError ? (
+            <DashboardEmpty>Não foi possível carregar os crons.</DashboardEmpty>
+          ) : (
+            <DashboardEmpty>Nenhum cron agendado.</DashboardEmpty>
+          )}
+        </DashboardPanel>
+      </section>
+    </PageContainer>
   )
 }
 
