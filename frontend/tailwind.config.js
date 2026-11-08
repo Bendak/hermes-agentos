@@ -1,4 +1,9 @@
 /** @type {import('tailwindcss').Config} */
+const withAlpha = (variable) => ({ opacityValue }) =>
+  opacityValue === undefined
+    ? `var(${variable})`
+    : `color-mix(in srgb, var(${variable}) calc(${opacityValue} * 100%), transparent)`
+
 export default {
   darkMode: 'class',
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
@@ -6,45 +11,45 @@ export default {
     extend: {
       colors: {
         // Backgrounds
-        'bg-base': 'var(--bg-base)',
-        'bg-elevated': 'var(--bg-elevated)',
-        'bg-overlay': 'var(--bg-overlay)',
+        'bg-base': withAlpha('--bg-base'),
+        'bg-elevated': withAlpha('--bg-elevated'),
+        'bg-overlay': withAlpha('--bg-overlay'),
 
         // Surfaces
-        surface: 'var(--surface)',
-        'surface-hover': 'var(--surface-hover)',
-        'surface-active': 'var(--surface-active)',
+        surface: withAlpha('--surface'),
+        'surface-hover': withAlpha('--surface-hover'),
+        'surface-active': withAlpha('--surface-active'),
 
         // Borders
-        border: 'var(--border)',
-        'border-strong': 'var(--border-strong)',
+        border: withAlpha('--border'),
+        'border-strong': withAlpha('--border-strong'),
 
         // Text
-        'text-primary': 'var(--text-primary)',
-        'text-secondary': 'var(--text-secondary)',
-        'text-tertiary': 'var(--text-tertiary)',
-        'text-inverse': 'var(--text-inverse)',
+        'text-primary': withAlpha('--text-primary'),
+        'text-secondary': withAlpha('--text-secondary'),
+        'text-tertiary': withAlpha('--text-tertiary'),
+        'text-inverse': withAlpha('--text-inverse'),
 
         // Accents
-        accent: 'var(--accent-primary)',
-        'accent-hover': 'var(--accent-primary-hover)',
-        'accent-subtle': 'var(--accent-primary-subtle)',
-        'accent-secondary': 'var(--accent-secondary)',
-        'accent-secondary-hover': 'var(--accent-secondary-hover)',
-        'accent-secondary-subtle': 'var(--accent-secondary-subtle)',
-        'accent-tertiary': 'var(--accent-tertiary)',
+        accent: withAlpha('--accent-primary'),
+        'accent-hover': withAlpha('--accent-primary-hover'),
+        'accent-subtle': withAlpha('--accent-primary-subtle'),
+        'accent-secondary': withAlpha('--accent-secondary'),
+        'accent-secondary-hover': withAlpha('--accent-secondary-hover'),
+        'accent-secondary-subtle': withAlpha('--accent-secondary-subtle'),
+        'accent-tertiary': withAlpha('--accent-tertiary'),
 
         // Semantic
-        success: 'var(--semantic-success)',
-        'success-subtle': 'var(--semantic-success-subtle)',
-        warning: 'var(--semantic-warning)',
-        'warning-subtle': 'var(--semantic-warning-subtle)',
-        error: 'var(--semantic-error)',
-        'error-subtle': 'var(--semantic-error-subtle)',
-        info: 'var(--semantic-info)',
-        'info-subtle': 'var(--semantic-info-subtle)',
-        purple: 'var(--semantic-purple)',
-        'purple-subtle': 'var(--semantic-purple-subtle)',
+        success: withAlpha('--semantic-success'),
+        'success-subtle': withAlpha('--semantic-success-subtle'),
+        warning: withAlpha('--semantic-warning'),
+        'warning-subtle': withAlpha('--semantic-warning-subtle'),
+        error: withAlpha('--semantic-error'),
+        'error-subtle': withAlpha('--semantic-error-subtle'),
+        info: withAlpha('--semantic-info'),
+        'info-subtle': withAlpha('--semantic-info-subtle'),
+        purple: withAlpha('--semantic-purple'),
+        'purple-subtle': withAlpha('--semantic-purple-subtle'),
       },
       fontFamily: {
         sans: [

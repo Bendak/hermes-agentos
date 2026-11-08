@@ -973,7 +973,7 @@ function formatStartedAt(iso: string | null): string {
 }
 
 function formatDuration(seconds: number | null): string {
-  if (seconds === null || seconds === undefined) return 'Running'
+  if (seconds === null || seconds === undefined) return 'Em execução'
   const s = Math.max(0, Math.round(seconds))
   const m = Math.floor(s / 60)
   const rem = s % 60
@@ -1018,6 +1018,7 @@ function sourceLabel(source: string): string {
 function SessionsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigate = useNavigate()
+  const admin = isAdmin()
 
   const [rawSearch, setRawSearch] = useState(searchParams.get('search') || '')
   const search = useDebounce(rawSearch, 300)
@@ -1039,13 +1040,14 @@ function SessionsPage() {
 
   const { data, isLoading, error } = useQuery<SessionListResponse>({
     queryKey: ['sessions', limit, offset, search, source, model],
+    enabled: admin,
     queryFn: async () => {
       const params = new URLSearchParams({ limit: String(limit), offset: String(offset) })
       if (search) params.set('search', search)
       if (source) params.set('source', source)
       if (model) params.set('model', model)
       const res = await fetch(`/api/sessions?${params}`)
-      if (!res.ok) throw new Error('Failed to load sessions')
+      if (!res.ok) throw new Error('Falha ao carregar sessões')
       const payload = await res.json()
       // Compat: some backend builds returned a bare array; the shell should
       // render either shape instead of crashing on `sessions.length`.
@@ -1063,12 +1065,14 @@ function SessionsPage() {
   // Fetch unique models for dropdown
   const { data: modelList } = useQuery<string[]>({
     queryKey: ['session-models'],
+    enabled: admin,
     queryFn: async () => {
       const res = await fetch('/api/sessions?limit=500')
       if (!res.ok) return []
-      const payload: SessionListResponse = await res.json()
+      const payload = await res.json()
+      const list = Array.isArray(payload) ? payload : (payload.sessions ?? [])
       const set = new Set<string>()
-      ;(payload.sessions ?? []).forEach((s) => { if (s.model) set.add(s.model) })
+      ;(list as SessionItem[]).forEach((s) => { if (s.model) set.add(s.model) })
       return Array.from(set).sort()
     },
   })
@@ -1081,25 +1085,29 @@ function SessionsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-bg-base text-text-secondary">
-      <NavBar />
-      <header className="px-6 pt-8 pb-4 border-b border-border">
-        <div className="mx-auto max-w-7xl flex items-end justify-between">
-          <div>
-            <div className="flex items-center gap-3 mb-1">
-              <h1 className="text-h2 font-bold text-text-primary">Sessions</h1>
-              {data && (
-                <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-surface text-text-secondary border border-border">
-                  {data.total}
-                </span>
-              )}
-            </div>
-            <p className="text-body text-text-secondary">Conversation history</p>
-          </div>
-          <div className="flex items-center gap-2">
+    <PageContainer>
+      <PageHeader
+        eyebrow="Histórico de conversas"
+        title="Sessões"
+        subtitle="Mensagens, modelos, ferramentas e duração de cada execução."
+        actions={
+          <span className="rounded-full border border-border bg-surface/50 px-2.5 py-1 text-caption tabular-nums text-text-secondary">
+            {data ? `${data.total} sessões` : '—'}
+          </span>
+        }
+      />
+
+      {!admin ? (
+        <div className="brand-card mt-6 px-6 py-12 text-center">
+          <p className="text-h4 font-semibold text-text-primary">Sessões restritas</p>
+          <p className="mt-1.5 text-body-sm text-text-tertiary">O histórico completo é visível apenas para administradores.</p>
+        </div>
+      ) : (
+        <>
+          <div className="brand-card mt-5 flex flex-col gap-2 p-3 sm:flex-row sm:items-center">
             <input
               type="text"
-              placeholder="Search by title..."
+              placeholder="Buscar por título..."
               value={rawSearch}
               onChange={(e) => {
                 setRawSearch(e.target.value)
@@ -1107,7 +1115,7 @@ function SessionsPage() {
                 params.delete('offset')
                 setSearchParams(params)
               }}
-              className="search-input rounded-md bg-bg-elevated border border-border px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent w-full sm:w-72"
+              className="search-input min-w-0 flex-1 rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
             />
             <select
               value={source}
@@ -1118,9 +1126,9 @@ function SessionsPage() {
                 params.delete('offset')
                 setSearchParams(params)
               }}
-              className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+              className="rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
             >
-              <option value="">All sources</option>
+              <option value="">Todas as fontes</option>
               <option value="whatsapp">WhatsApp</option>
               <option value="discord">Discord</option>
               <option value="telegram">Telegram</option>
@@ -1142,134 +1150,130 @@ function SessionsPage() {
                 params.delete('offset')
                 setSearchParams(params)
               }}
-              className="rounded-md bg-surface border border-border px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+              className="rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
             >
-              <option value="">All models</option>
+              <option value="">Todos os modelos</option>
               {modelList?.map((m) => (
                 <option key={m} value={m}>{m}</option>
               ))}
             </select>
           </div>
-        </div>
-      </header>
 
-      <main className="mx-auto max-w-7xl px-6 py-8">
-        {isLoading && (
-          <div className="rounded-xl border border-border bg-surface/20 p-8 animate-skeleton">
-            <div className="space-y-4">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="flex items-center gap-4">
-                  <div className="h-4 w-48 rounded bg-surface/60" />
-                  <div className="h-4 w-20 rounded bg-surface/60" />
-                  <div className="h-4 w-32 rounded bg-surface/60" />
-                  <div className="h-4 w-12 rounded bg-surface/60" />
-                  <div className="h-4 w-20 rounded bg-surface/60" />
-                  <div className="h-4 w-20 rounded bg-surface/60" />
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-        {error && (
-          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error">
-            Error: {(error as Error).message}
-          </div>
-        )}
-        {data && sessions.length === 0 && (
-          <div className="rounded-xl border border-border bg-surface/20 p-12 text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface">
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
-              </svg>
-            </div>
-            <p className="text-body text-text-primary mb-1">No sessions found</p>
-            <p className="text-caption text-text-tertiary">Try adjusting your search or filters.</p>
-          </div>
-        )}
-        {data && sessions.length > 0 && (
-          <>
-            <div role="region" aria-label="Sessions table" tabIndex={0} className="overflow-x-auto rounded-xl border border-border focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
-              <table className="w-full text-sm" role="table" aria-label="Sessions list">
-                <thead className="bg-bg-elevated text-text-secondary text-left">
-                  <tr>
-                    <th className="px-4 py-3 font-medium text-text-tertiary">Title</th>
-                    <th className="px-4 py-3 font-medium text-text-tertiary">Source</th>
-                    <th className="px-4 py-3 font-medium text-text-tertiary">Model</th>
-                    <th className="px-4 py-3 font-medium text-text-tertiary text-right">Messages</th>
-                    <th className="px-4 py-3 font-medium text-text-tertiary">Started</th>
-                    <th className="px-4 py-3 font-medium text-text-tertiary">Duration</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {sessions.map((s) => (
-                    <tr
-                      key={s.id}
-                      tabIndex={0}
-                      role="link"
-                      aria-label={`Session ${s.title || 'Untitled'} from ${sourceLabel(s.source)}. ${s.message_count} messages. ${formatDuration(s.duration_seconds)}.`}
-                      onClick={() => navigate(`/sessions/${encodeURIComponent(s.id)}`)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          navigate(`/sessions/${encodeURIComponent(s.id)}`)
-                        }
-                      }}
-                      className="tr-focus cursor-pointer hover:bg-surface/40 transition"
-                    >
-                      <td className="px-4 py-3 text-text-primary truncate max-w-xs font-medium">
-                        {s.title || 'Untitled'}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ${sourceBadge(s.source)}`}>
-                          {sourceLabel(s.source)}
-                        </span>
-                        {s.profile && s.profile !== 'default' && (
-                          <span className="ml-1 inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium bg-surface-secondary text-text-secondary border border-border">
-                            {s.profile}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 font-mono text-mono-sm text-text-secondary">{s.model}</td>
-                      <td className="px-4 py-3 text-right tabular-nums text-text-secondary">{s.message_count}</td>
-                      <td className="px-4 py-3 tabular-nums text-text-secondary">{formatStartedAt(s.started_at)}</td>
-                      <td className="px-4 py-3 tabular-nums">
-                        <span className={`inline-flex items-center gap-1.5 ${s.duration_seconds === null ? 'text-semantic-warning' : 'text-text-secondary'}`}>
-                          {s.duration_seconds === null && <span className="inline-block w-1.5 h-1.5 rounded-full bg-semantic-warning animate-pulse" />}
-                          {formatDuration(s.duration_seconds)}
-                        </span>
-                      </td>
-                    </tr>
+          <main className="mt-4">
+            {isLoading && (
+              <div className="brand-card p-6" aria-label="Carregando sessões" role="status">
+                <div className="space-y-4">
+                  {Array.from({ length: 5 }).map((_, i) => (
+                    <div key={i} className="flex items-center gap-4">
+                      <div className="h-4 w-48 animate-pulse rounded bg-surface/60" />
+                      <div className="h-4 w-20 animate-pulse rounded bg-surface/60" />
+                      <div className="h-4 w-32 animate-pulse rounded bg-surface/60" />
+                      <div className="h-4 w-12 animate-pulse rounded bg-surface/60" />
+                      <div className="h-4 w-20 animate-pulse rounded bg-surface/60" />
+                      <div className="h-4 w-20 animate-pulse rounded bg-surface/60" />
+                    </div>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </div>
+              </div>
+            )}
+            {error && (
+              <div className="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-body-sm text-error">
+                Não foi possível carregar as sessões.
+              </div>
+            )}
+            {data && sessions.length === 0 && (
+              <div className="brand-card px-6 py-12 text-center">
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface/60">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+                  </svg>
+                </div>
+                <p className="mb-1 text-body text-text-primary">Nenhuma sessão encontrada</p>
+                <p className="text-caption text-text-tertiary">Ajuste a busca ou os filtros.</p>
+              </div>
+            )}
+            {data && sessions.length > 0 && (
+              <>
+                <div role="region" aria-label="Tabela de sessões" tabIndex={0} className="brand-card overflow-x-auto focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
+                  <table className="w-full text-sm" aria-label="Lista de sessões">
+                    <thead className="bg-surface/35 text-left text-text-secondary">
+                      <tr>
+                        <th className="px-4 py-3 font-medium text-text-tertiary">Título</th>
+                        <th className="px-4 py-3 font-medium text-text-tertiary">Fonte</th>
+                        <th className="px-4 py-3 font-medium text-text-tertiary">Modelo</th>
+                        <th className="px-4 py-3 text-right font-medium text-text-tertiary">Msgs</th>
+                        <th className="px-4 py-3 font-medium text-text-tertiary">Início</th>
+                        <th className="px-4 py-3 font-medium text-text-tertiary">Duração</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/70">
+                      {sessions.map((s) => (
+                        <tr
+                          key={s.id}
+                          onClick={() => navigate(`/sessions/${encodeURIComponent(s.id)}`)}
+                          className="cursor-pointer transition hover:bg-surface/40"
+                        >
+                          <td className="max-w-xs truncate px-4 py-3 font-medium text-text-primary">
+                            <Link
+                              to={`/sessions/${encodeURIComponent(s.id)}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="hover:text-accent hover:underline"
+                            >
+                              {s.title || 'Sem título'}
+                            </Link>
+                          </td>
+                          <td className="px-4 py-3">
+                            <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${sourceBadge(s.source)}`}>
+                              {sourceLabel(s.source)}
+                            </span>
+                            {s.profile && s.profile !== 'default' && (
+                              <span className="ml-1 inline-flex items-center rounded-md border border-border bg-surface px-2 py-0.5 text-xs font-medium text-text-secondary">
+                                {s.profile}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-mono-sm text-text-secondary">{s.model}</td>
+                          <td className="px-4 py-3 text-right tabular-nums text-text-secondary">{s.message_count}</td>
+                          <td className="px-4 py-3 tabular-nums text-text-secondary">{formatStartedAt(s.started_at)}</td>
+                          <td className="px-4 py-3 tabular-nums">
+                            <span className={`inline-flex items-center gap-1.5 ${s.duration_seconds === null ? 'text-warning' : 'text-text-secondary'}`}>
+                              {s.duration_seconds === null && <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-warning" />}
+                              {formatDuration(s.duration_seconds)}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
 
-            {/* Pagination */}
-            <nav aria-label="Sessions pagination" className="flex items-center justify-between mt-4 text-sm">
-              <button
-                onClick={() => handlePage(offset - limit)}
-                disabled={offset === 0}
-                aria-label="Previous page"
-                className="px-3 py-1.5 rounded-md bg-surface border border-border text-text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-hover/80 transition"
-              >
-                Previous
-              </button>
-              <span className="text-text-secondary" aria-live="polite">
-                Page {currentPage} of {totalPages || 1}
-              </span>
-              <button
-                onClick={() => handlePage(offset + limit)}
-                disabled={!data || offset + limit >= data.total}
-                aria-label="Next page"
-                className="px-3 py-1.5 rounded-md bg-surface border border-border text-text-primary disabled:opacity-40 disabled:cursor-not-allowed hover:bg-surface-hover/80 transition"
-              >
-                Next
-              </button>
-            </nav>
-          </>
-        )}
-      </main>
-    </div>
+                <nav aria-label="Paginação de sessões" className="mt-4 flex items-center justify-between text-sm">
+                  <button
+                    onClick={() => handlePage(offset - limit)}
+                    disabled={offset === 0}
+                    aria-label="Página anterior"
+                    className="rounded-md border border-border bg-surface px-3 py-1.5 text-text-primary transition hover:bg-surface-hover/80 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Anterior
+                  </button>
+                  <span className="text-text-secondary" aria-live="polite">
+                    Página {currentPage} de {totalPages || 1}
+                  </span>
+                  <button
+                    onClick={() => handlePage(offset + limit)}
+                    disabled={!data || offset + limit >= data.total}
+                    aria-label="Próxima página"
+                    className="rounded-md border border-border bg-surface px-3 py-1.5 text-text-primary transition hover:bg-surface-hover/80 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Próxima
+                  </button>
+                </nav>
+              </>
+            )}
+          </main>
+        </>
+      )}
+    </PageContainer>
   )
 }
 
