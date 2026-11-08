@@ -27,3 +27,6 @@ dist/
 .codeium/
 .cursor/
 agentos.egg-info/
+
+# Runtime chat uploads (user content, not source)
+/uploads/

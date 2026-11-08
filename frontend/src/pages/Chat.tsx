@@ -1058,9 +1058,8 @@ export default function ChatPage() {
 
   return (
     <div
-      className="flex h-screen flex-col bg-bg-base"
+      className="flex h-full min-h-0 flex-col bg-bg-base"
       style={{
-        height: '100dvh',
         paddingLeft: 'env(safe-area-inset-left)',
         paddingRight: 'env(safe-area-inset-right)',
       }}

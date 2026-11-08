@@ -7,6 +7,7 @@ import { AuthProvider, useAuth } from './auth/AuthContext'
 import LoginPage from './auth/LoginPage'
 import ProtectedRoute from './auth/ProtectedRoute'
 import UserManagement from './pages/UserManagement'
+import AppShell, { useAppShell } from './components/AppShell'
 import ProfilesPage from './pages/Profiles'
 import AnalyticsPage from './pages/Analytics'
 import MemoryPage from './pages/Memory'
@@ -243,6 +244,7 @@ interface WorkflowNodeData {
 /* ── NavBar ────────────────────────────────────────── */
 
 export function NavBar() {
+  const inShell = useAppShell()
   const onOpenSearch = useOpenSearch()
   const { user, logout } = useAuth()
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -276,9 +278,12 @@ export function NavBar() {
   }, [openMenu])
 
   useEffect(() => {
+    if (inShell) return
     document.documentElement.classList.toggle('light', theme === 'light')
     localStorage.setItem('agentos-theme', theme)
-  }, [theme])
+  }, [theme, inShell])
+
+  if (inShell) return null
 
   const navLink = (to: string, label: string, closeMobile?: () => void, role?: string) => {
     const active = location.pathname === to || (to !== '/' && location.pathname.startsWith(to))
@@ -378,7 +383,7 @@ export function NavBar() {
               {admin && navGroup('Sistema', [
                 ['/analytics', 'Analytics'],
                 ['/config', 'Config'],
-                ['/settings', 'Settings'],
+                ['/settings', 'Usuários'],
                 ['/memory', 'Memória'],
               ])}
             </div>
@@ -445,7 +450,7 @@ export function NavBar() {
                 {g === 'Sistema' && [
                   ...(admin ? [navLink('/analytics', 'Analytics')] : []),
                   navLink('/config', 'Config'),
-                  navLink('/settings', 'Settings'),
+                  navLink('/settings', 'Usuários'),
                   ...(admin ? [navLink('/memory', 'Memória')] : []),
                 ]}
               </div>
@@ -833,12 +838,19 @@ function SessionsPage() {
       if (model) params.set('model', model)
       const res = await fetch(`/api/sessions?${params}`)
       if (!res.ok) throw new Error('Failed to load sessions')
-      return res.json()
+      const payload = await res.json()
+      // Compat: some backend builds returned a bare array; the shell should
+      // render either shape instead of crashing on `sessions.length`.
+      if (Array.isArray(payload)) {
+        return { sessions: payload, total: payload.length, limit, offset }
+      }
+      return payload
     },
   })
 
-  const totalPages = data ? Math.ceil(data.total / data.limit) : 0
-  const currentPage = data ? Math.floor(data.offset / data.limit) + 1 : 1
+  const totalPages = data ? Math.ceil((data.total ?? 0) / (data.limit || limit)) : 0
+  const currentPage = data ? Math.floor((data.offset ?? 0) / (data.limit || limit)) + 1 : 1
+  const sessions = data?.sessions ?? []
 
   // Fetch unique models for dropdown
   const { data: modelList } = useQuery<string[]>({
@@ -848,7 +860,7 @@ function SessionsPage() {
       if (!res.ok) return []
       const payload: SessionListResponse = await res.json()
       const set = new Set<string>()
-      payload.sessions.forEach((s) => { if (s.model) set.add(s.model) })
+      ;(payload.sessions ?? []).forEach((s) => { if (s.model) set.add(s.model) })
       return Array.from(set).sort()
     },
   })
@@ -955,7 +967,7 @@ function SessionsPage() {
             Error: {(error as Error).message}
           </div>
         )}
-        {data && data.sessions.length === 0 && (
+        {data && sessions.length === 0 && (
           <div className="rounded-xl border border-border bg-surface/20 p-12 text-center">
             <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-surface">
               <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6 text-text-tertiary" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
@@ -966,7 +978,7 @@ function SessionsPage() {
             <p className="text-caption text-text-tertiary">Try adjusting your search or filters.</p>
           </div>
         )}
-        {data && data.sessions.length > 0 && (
+        {data && sessions.length > 0 && (
           <>
             <div role="region" aria-label="Sessions table" tabIndex={0} className="overflow-x-auto rounded-xl border border-border focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2">
               <table className="w-full text-sm" role="table" aria-label="Sessions list">
@@ -981,7 +993,7 @@ function SessionsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {data.sessions.map((s) => (
+                  {sessions.map((s) => (
                     <tr
                       key={s.id}
                       tabIndex={0}
@@ -4531,9 +4543,8 @@ function WorkflowEditorPage() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen">
-        <NavBar />
-        <div className="flex items-center justify-center h-[calc(100vh-56px)]">
+      <div className="min-h-full">
+        <div className="flex items-center justify-center h-full min-h-[calc(100dvh-120px)]">
           <div className="animate-skeleton w-16 h-16 rounded-full" />
         </div>
       </div>
@@ -5255,24 +5266,32 @@ function AppInner() {
       <SearchContext.Provider value={{ openSearch: () => setSearchOpen(true) }}>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<ProtectedRoute><DashboardPage /></ProtectedRoute>} />
-          <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>} />
-          {/* M11-02: /health pertence ao backend (monitoring) — a SPA vive em /system-health */}
-          <Route path="/system-health" element={<ProtectedRoute><HealthPage /></ProtectedRoute>} />
-          <Route path="/sessions" element={<ProtectedRoute><SessionsPage /></ProtectedRoute>} />
-          <Route path="/sessions/:id" element={<ProtectedRoute><SessionDetailPage /></ProtectedRoute>} />
-          <Route path="/tasks" element={<ProtectedRoute><KanbanBoardPage /></ProtectedRoute>} />
-          <Route path="/tasks/:id" element={<ProtectedRoute><TaskDetailPage /></ProtectedRoute>} />
-          <Route path="/config" element={<ProtectedRoute><ConfigPage /></ProtectedRoute>} />
-          <Route path="/skills" element={<ProtectedRoute><SkillsHubPage /></ProtectedRoute>} />
-          <Route path="/workflows" element={<ProtectedRoute><WorkflowListPage /></ProtectedRoute>} />
-          <Route path="/workflows/:id" element={<ProtectedRoute><WorkflowEditorPage /></ProtectedRoute>} />
-          <Route path="/cron" element={<ProtectedRoute><CronPage /></ProtectedRoute>} />
-          <Route path="/profiles" element={<ProtectedRoute><ProfilesPage /></ProtectedRoute>} />
-          <Route path="/analytics" element={<ProtectedRoute>{isAdmin() ? <AnalyticsPage /> : <Navigate to="/" replace />}</ProtectedRoute>} />
-          <Route path="/memory" element={<ProtectedRoute><MemoryPage /></ProtectedRoute>} />
-          <Route path="/settings" element={<ProtectedRoute><UserManagement /></ProtectedRoute>} />
-          <Route path="*" element={<ProtectedRoute><NotFoundPage /></ProtectedRoute>} />
+          <Route
+            element={
+              <ProtectedRoute>
+                <AppShell onOpenSearch={() => setSearchOpen(true)} />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/chat" element={<ChatPage />} />
+            {/* M11-02: /health pertence ao backend (monitoring) — a SPA vive em /system-health */}
+            <Route path="/system-health" element={<HealthPage />} />
+            <Route path="/sessions" element={<SessionsPage />} />
+            <Route path="/sessions/:id" element={<SessionDetailPage />} />
+            <Route path="/tasks" element={<KanbanBoardPage />} />
+            <Route path="/tasks/:id" element={<TaskDetailPage />} />
+            <Route path="/config" element={<ConfigPage />} />
+            <Route path="/skills" element={<SkillsHubPage />} />
+            <Route path="/workflows" element={<WorkflowListPage />} />
+            <Route path="/workflows/:id" element={<WorkflowEditorPage />} />
+            <Route path="/cron" element={<CronPage />} />
+            <Route path="/profiles" element={<ProfilesPage />} />
+            <Route path="/analytics" element={isAdmin() ? <AnalyticsPage /> : <Navigate to="/" replace />} />
+            <Route path="/memory" element={<MemoryPage />} />
+            <Route path="/settings" element={<UserManagement />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Route>
         </Routes>
         <SearchModal open={searchOpen} onClose={() => setSearchOpen(false)} />
         <HelpModal open={helpOpen} onClose={() => setHelpOpen(false)} />
