@@ -103,8 +103,6 @@ a, button, input, select, textarea, [role="button"] {
 /* Ensure body handles scrolling correctly with sticky nav */
 html, body {
   min-height: 100vh;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
 }
 
 /* Table row hover transition per design system spec */

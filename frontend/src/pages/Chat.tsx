@@ -1057,13 +1057,20 @@ export default function ChatPage() {
   )
 
   return (
-    <div className="min-h-screen bg-bg-base">
+    <div
+      className="flex h-screen flex-col bg-bg-base"
+      style={{
+        height: '100dvh',
+        paddingLeft: 'env(safe-area-inset-left)',
+        paddingRight: 'env(safe-area-inset-right)',
+      }}
+    >
       <NavBar />
-      <div className="flex h-[calc(100vh-64px)]">
-        <div className="hidden md:flex">{sidebar}</div>
+      <div className="relative flex min-h-0 flex-1">
+        <div className="hidden lg:flex">{sidebar}</div>
 
         {sidebarOpen && (
-          <div className="fixed inset-x-0 bottom-0 top-16 z-40 flex md:hidden">
+          <div className="absolute inset-0 z-40 flex lg:hidden">
             <div className="h-full">{sidebar}</div>
             <button
               className="flex-1 bg-black/40"
@@ -1073,10 +1080,10 @@ export default function ChatPage() {
           </div>
         )}
 
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <header className="flex items-center gap-3 border-b border-border px-4 py-2.5">
             <button
-              className="rounded-lg border border-border px-2 py-1 text-sm md:hidden"
+              className="rounded-lg border border-border px-2 py-1 text-sm lg:hidden"
               onClick={() => setSidebarOpen(true)}
               aria-label="Open chats"
             >
@@ -1085,7 +1092,6 @@ export default function ChatPage() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-text-primary">{active?.title || 'Chat'}</p>
               <div className="flex items-center gap-2 text-[11px] text-text-tertiary">
-                <span className="truncate">{user?.username || 'user'}</span>
                 {user?.role === 'admin' ? (
                   <select
                     value={active?.profile || selectedProfile}
@@ -1212,7 +1218,12 @@ export default function ChatPage() {
             </div>
           </div>
 
-          <div className="border-t border-border p-3">
+          <div
+            className="border-t border-border p-3"
+            style={{
+              paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom))',
+            }}
+          >
             {(pendingAttachments.length > 0 || uploadingCount > 0) && (
               <div className="mx-auto mb-2 flex max-w-3xl flex-wrap items-center gap-1.5">
                 {pendingAttachments.map((a) => (

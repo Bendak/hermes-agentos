@@ -359,7 +359,10 @@ export function NavBar() {
 
   return (
     <>
-      <nav className="bg-bg-elevated/80 backdrop-blur-md border-b border-border px-4 sm:px-6 py-3 sticky top-0 z-50">
+      <nav
+        className="bg-bg-elevated/80 backdrop-blur-md border-b border-border px-4 sm:px-6 py-3 sticky top-0 z-50"
+        style={{ paddingTop: 'calc(0.75rem + env(safe-area-inset-top))' }}
+      >
         <div className="mx-auto max-w-7xl flex items-center justify-between gap-4">
           <div className="flex items-center gap-4">
             <Link to="/" className="flex items-center gap-2 text-text-primary font-bold text-lg tracking-tight group shrink-0">
@@ -427,7 +430,10 @@ export function NavBar() {
       </nav>
       {/* Mobile menu dropdown */}
       {mobileMenuOpen && (
-        <div className="xl:hidden border-b border-border bg-bg-elevated/95 backdrop-blur-md px-4 py-3 sticky top-[53px] z-40">
+        <div
+          className="xl:hidden border-b border-border bg-bg-elevated/95 backdrop-blur-md px-4 py-3 sticky z-40"
+          style={{ top: 'calc(65px + env(safe-area-inset-top))' }}
+        >
           <div className="flex flex-col gap-1">
             {navLink('/', 'Dashboard')}
             {navLink('/chat', 'Chat')}
