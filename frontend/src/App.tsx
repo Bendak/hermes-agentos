@@ -1296,7 +1296,7 @@ function TaskSessionLog({ taskId }: { taskId: string }) {
         onClick={() => setIsOpen(true)}
         className="text-xs text-accent hover:text-accent/80 transition flex items-center gap-1"
       >
-        <span>📋</span> Show session log
+        <span>📋</span> Mostrar log da sessão
       </button>
     )
   }
@@ -1307,22 +1307,22 @@ function TaskSessionLog({ taskId }: { taskId: string }) {
   return (
     <div className="mt-3">
       <div className="flex items-center justify-between mb-2">
-        <h4 className="text-sm font-medium text-text-secondary">Session Log</h4>
+        <h4 className="text-sm font-medium text-text-secondary">Log da sessão</h4>
         <button
           onClick={() => setIsOpen(false)}
           className="text-xs text-text-tertiary hover:text-text-secondary transition"
         >
-          Hide log
+          Ocultar log
         </button>
       </div>
       {isLoading ? (
-        <p className="text-xs text-text-tertiary italic">Loading log…</p>
+        <p className="text-xs text-text-tertiary italic">Carregando log…</p>
       ) : !logContent ? (
-        <p className="text-xs text-text-tertiary italic">No log available for this task.</p>
+        <p className="text-xs text-text-tertiary italic">Nenhum log disponível para esta tarefa.</p>
       ) : (
         <>
           {truncated && (
-            <p className="text-xs text-warning mb-2">⚠ Log truncated (showing last ~100KB)</p>
+            <p className="text-xs text-warning mb-2">⚠ Log truncado (mostrando os últimos ~100KB)</p>
           )}
           <LogRenderer content={logContent} />
         </>
@@ -1677,13 +1677,13 @@ function ArtifactFileRow({ file, taskId, previewFile, setPreviewFile }: {
           }}
           className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-xs text-accent hover:text-accent-hover transition"
         >
-          ⬇ Download
+          ⬇ Baixar
         </button>
         <button
           onClick={() => setPreviewFile(previewFile === file.relpath ? null : file.relpath)}
           className="opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100 text-xs text-accent hover:text-accent-hover transition"
         >
-          {previewFile === file.relpath ? '✕ Close' : '👁 Preview'}
+          {previewFile === file.relpath ? '✕ Fechar' : '👁 Visualizar'}
         </button>
       </div>
       {previewFile === file.relpath && (
@@ -1707,7 +1707,7 @@ function ArtifactFolderNode({ name, node, taskId, previewFile, setPreviewFile }:
         <span className="text-xs text-text-tertiary w-3">{open ? '▾' : '▸'}</span>
         <span className="text-lg">{open ? '📂' : '📁'}</span>
         <span className="text-sm text-text-primary flex-1 truncate">{name}</span>
-        <span className="text-xs text-text-tertiary">{countArtFiles(node)} file{countArtFiles(node) === 1 ? '' : 's'}</span>
+        <span className="text-xs text-text-tertiary">{countArtFiles(node)} arquivo{countArtFiles(node) === 1 ? '' : 's'}</span>
       </button>
       {open && (
         <div className="ml-4 pl-2 border-l border-border">
@@ -1805,13 +1805,13 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
             onClick={() => setMode('preview')}
             className={`px-2 py-0.5 text-xs rounded transition ${mode === 'preview' ? 'bg-accent/20 text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
           >
-            Preview
+            Visualizar
           </button>
           <button
             onClick={() => setMode('raw')}
             className={`px-2 py-0.5 text-xs rounded transition ${mode === 'raw' ? 'bg-accent/20 text-accent' : 'text-text-tertiary hover:text-text-secondary'}`}
           >
-            Raw
+            Bruto
           </button>
           <span className="ml-auto text-xs text-text-tertiary">{filename}</span>
         </div>
@@ -1820,10 +1820,10 @@ function ArtifactPreview({ filename, taskId }: { filename: string; taskId: strin
       {/* Preview content */}
       <div className="p-0">
         {(isLoading || (isBinary && blobLoading)) && (
-          <p className="text-xs text-text-tertiary p-3">Loading preview…</p>
+          <p className="text-xs text-text-tertiary p-3">Carregando visualização…</p>
         )}
         {isBinary && !blobUrl && !blobLoading && (
-          <p className="text-xs text-error p-3">Failed to load preview.</p>
+          <p className="text-xs text-error p-3">Falha ao carregar a visualização.</p>
         )}
 
         {/* Raw mode */}
@@ -2499,7 +2499,7 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
       onSaved()
       onClose()
     },
-    onError: (err: Error) => { setError(err.message); setSaving(false); toast(err.message || 'Request failed', 'error') },
+    onError: (err: Error) => { setError(err.message); setSaving(false); toast(err.message || 'Falha na requisição', 'error') },
   })
 
   // ESC to close
@@ -2519,20 +2519,20 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
         onClick={e => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={isCreate ? 'Create task' : 'Edit task'}
+        aria-label={isCreate ? 'Criar tarefa' : 'Editar tarefa'}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-bg-elevated z-10">
-          <h2 className="text-h3 font-bold text-text-primary">{isCreate ? 'New Task' : 'Edit Task'}</h2>
+          <h2 className="text-h3 font-bold text-text-primary">{isCreate ? 'Nova tarefa' : 'Editar tarefa'}</h2>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setExpanded(!expanded)}
               className="p-1 text-text-tertiary hover:text-text-secondary transition-colors"
-              title={expanded ? 'Restore' : 'Maximize'}
+              title={expanded ? 'Restaurar' : 'Maximizar'}
             >
               {expanded ? '❐' : '⬜'}
             </button>
-            <button onClick={onClose} className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface/60 transition" aria-label="Close">
+            <button onClick={onClose} className="p-1.5 rounded-md text-text-tertiary hover:text-text-primary hover:bg-surface/60 transition" aria-label="Fechar">
               ✕
             </button>
           </div>
@@ -2542,38 +2542,38 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
         <div className="px-6 py-5 space-y-4">
           {/* Title */}
           <div>
-            <label className="block text-caption text-text-secondary mb-1.5 font-medium">Title</label>
+            <label className="block text-caption text-text-secondary mb-1.5 font-medium">Título</label>
             <input
               type="text"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
-              placeholder="Task title…"
+              placeholder="Título da tarefa…"
             />
           </div>
 
           {/* Body */}
           <div>
-            <label className="block text-caption text-text-secondary mb-1.5 font-medium">Body (Markdown)</label>
+            <label className="block text-caption text-text-secondary mb-1.5 font-medium">Descrição (Markdown)</label>
             <textarea
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={8}
               className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary font-mono focus:border-accent focus:ring-1 focus:ring-accent outline-none transition resize-y"
-              placeholder="## Objective&#10;Describe the task…"
+              placeholder="## Objetivo&#10;Descreva a tarefa…"
             />
           </div>
 
           {/* Grid: assignee, status, priority */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
-              <label className="block text-caption text-text-secondary mb-1.5 font-medium">Assignee</label>
+              <label className="block text-caption text-text-secondary mb-1.5 font-medium">Responsável</label>
               <select
                 value={assignee}
                 onChange={(e) => setAssignee(e.target.value)}
                 className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
               >
-                <option value="">Unassigned</option>
+                <option value="">Sem responsável</option>
                 {ALL_ASSIGNEES.map((a) => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
@@ -2584,13 +2584,13 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
                 onChange={(e) => setStatus(e.target.value)}
                 className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
               >
-                {ALL_STATUSES.filter((s) => s !== 'archived').map((s) => (
-                  <option key={s} value={s}>{s}</option>
+                {ALL_STATUSES.filter((s) => s !== 'archived' || status === 'archived').map((s) => (
+                  <option key={s} value={s}>{statusLabel(s)}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="block text-caption text-text-secondary mb-1.5 font-medium">Priority</label>
+              <label className="block text-caption text-text-secondary mb-1.5 font-medium">Prioridade</label>
               <select
                 value={priority}
                 onChange={(e) => setPriority(Number(e.target.value))}
@@ -2606,7 +2606,7 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
           {/* Workspace kind selector */}
           <div>
             <label className="block text-caption text-text-secondary mb-1.5 font-medium">
-              Workspace Kind
+              Tipo de workspace
             </label>
             <div className="flex items-center gap-3">
               <select
@@ -2623,22 +2623,22 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
                   type="button"
                   onClick={() => { setStatus('triage'); setBody(TRIAGE_TEMPLATE) }}
                   className="shrink-0 rounded-md border border-purple/30 bg-purple-subtle px-3 py-2 text-sm text-purple hover:bg-purple/20 transition"
-                  title="Set status to triage and load the specification template"
+                  title="Definir status Triagem e carregar o template de especificação"
                 >
-                  Triage template
+                  Template de triagem
                 </button>
               )}
             </div>
             <p className="text-caption text-text-tertiary mt-1">
-              <span className="text-text-secondary">scratch</span> = temporary (deleted on completion) ·{' '}
-              <span className="text-text-secondary">workspace</span> = persistent task directory ·{' '}
-              <span className="text-text-secondary">dir</span> = persistent shared directory
+              <span className="text-text-secondary">scratch</span> = temporário (apagado ao concluir) ·{' '}
+              <span className="text-text-secondary">workspace</span> = diretório persistente da tarefa ·{' '}
+              <span className="text-text-secondary">dir</span> = diretório compartilhado persistente
             </p>
             {/* Workspace path field - only show for workspace or dir */}
             {(workspaceKind === 'workspace' || workspaceKind === 'dir') && (
               <div className="mt-3">
                 <label className="block text-sm font-medium text-text-secondary mb-1">
-                  Workspace Path {workspaceKind === 'dir' ? '(shared directory)' : '(auto-generated if empty)'}
+                  Caminho do workspace {workspaceKind === 'dir' ? '(diretório compartilhado)' : '(gerado automaticamente se vazio)'}
                 </label>
                 <input
                   type="text"
@@ -2649,8 +2649,8 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
                 />
                 <p className="text-caption text-text-tertiary mt-1">
                   {workspaceKind === 'dir'
-                    ? 'Shared directory path — persists across tasks'
-                    : 'Leave empty to auto-generate from task ID'}
+                    ? 'Caminho do diretório compartilhado — persiste entre tarefas'
+                    : 'Deixe vazio para gerar automaticamente a partir do ID da tarefa'}
                 </p>
               </div>
             )}
@@ -2676,14 +2676,14 @@ function TaskEditorModal({ task, onClose, onSaved, initialStatus, initialBody }:
             onClick={onClose}
             className="rounded-md border border-border px-4 py-2 text-sm text-text-secondary hover:bg-surface/60 transition"
           >
-            Cancel
+            Cancelar
           </button>
           <button
             onClick={() => saveMutation.mutate()}
             disabled={saving || !title.trim()}
             className="rounded-md bg-accent px-4 py-2 text-sm text-white font-medium hover:bg-accent-hover transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            {saving ? 'Saving…' : (isCreate ? 'Create Task' : 'Save changes')}
+            {saving ? 'Salvando…' : (isCreate ? 'Criar tarefa' : 'Salvar alterações')}
           </button>
         </div>
       </div>
@@ -2811,6 +2811,43 @@ function priorityLabel(priority: number | null): string {
     3: 'P3',
   }
   return map[priority ?? 3] || 'P?'
+}
+
+function statusLabel(status?: string): string {
+  if (!status) return '—'
+  const map: Record<string, string> = {
+    archived: 'Arquivada',
+    triage: 'Triagem',
+    todo: 'Backlog',
+    ready: 'Pronto',
+    running: 'Executando',
+    done: 'Concluído',
+    blocked: 'Bloqueado',
+    completed: 'Concluído',
+    crashed: 'Falhou',
+    gave_up: 'Desistiu',
+    rate_limited: 'Rate limit',
+    reclaimed: 'Recuperado',
+    spawn_failed: 'Falha ao iniciar',
+    timed_out: 'Tempo esgotado',
+  }
+  return map[status] ?? COLUMN_META.find((c) => c.status === status)?.label ?? status
+}
+
+function outcomeLabel(outcome?: string | null): string {
+  if (!outcome) return '—'
+  const map: Record<string, string> = {
+    blocked: 'Bloqueado',
+    completed: 'Concluído',
+    crashed: 'Falhou',
+    gave_up: 'Desistiu',
+    rate_limited: 'Rate limit',
+    reclaimed: 'Recuperado',
+    spawn_failed: 'Falha ao iniciar',
+    timed_out: 'Tempo esgotado',
+    done: 'Concluído',
+  }
+  return map[outcome] ?? outcome
 }
 
 function TaskCard({ task, isOverlay, onEdit, onArchive }: { task: TaskItem; isOverlay?: boolean; onEdit?: (task: TaskItem) => void; onArchive?: (task: TaskItem) => void }) {
@@ -3449,70 +3486,82 @@ function TaskDetailPage() {
   })
 
   function formatIso(iso: string | null): string {
-    if (!iso) return '-'
+    if (!iso) return '—'
     const d = new Date(iso)
-    return isNaN(d.getTime()) ? '-' : d.toLocaleString()
+    return isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' })
   }
 
   return (
-    <div className="min-h-screen bg-bg-base text-text-secondary">
-      <NavBar />
-      <main className="mx-auto max-w-4xl px-6 py-8">
-        <div className="flex items-center justify-between mb-4">
-          <button
-            onClick={() => navigate('/tasks')}
-            className="text-body-sm text-accent hover:underline"
-          >
-            ← Back to tasks
-          </button>
-          {data && isAdmin() && (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => {
-                  const newStatus = data.status === 'archived' ? 'todo' : 'archived'
-                  fetch(`/api/tasks/${encodeURIComponent(id!)}`, {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: newStatus }),
-                  }).then(() => queryClient.invalidateQueries({ queryKey: ['task', id] }))
-                }}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium transition flex items-center gap-1.5 ${data.status === 'archived' ? 'bg-success/20 border border-success/30 text-success hover:bg-success/30' : 'bg-surface border border-border text-text-secondary hover:bg-surface-hover/80'}`}
-                title={data.status === 'archived' ? 'Unarchive task' : 'Archive task'}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-                {data.status === 'archived' ? 'Unarchive' : 'Archive'}
-              </button>
-              <button
-                onClick={() => setShowEditModal(true)}
-                className="rounded-md bg-accent px-3 py-1.5 text-sm text-white font-medium hover:bg-accent-hover transition flex items-center gap-1.5"
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                Edit
-              </button>
-            </div>
-          )}
-        </div>
+    <PageContainer>
+      <PageHeader
+        eyebrow="Detalhe da tarefa"
+        title={data?.title || 'Tarefa'}
+        subtitle={data ? `${statusLabel(data.status)} · ${data.assignee || 'sem responsável'} · ${priorityLabel(data.priority)}` : 'Visão geral, runs e artefatos da tarefa.'}
+        actions={
+          <>
+            <button
+              onClick={() => navigate('/tasks')}
+              className="inline-flex h-9 items-center rounded-lg border border-border bg-surface px-3.5 text-sm text-text-secondary transition hover:bg-surface-hover hover:text-text-primary"
+            >
+              ← Voltar
+            </button>
+            {data && isAdmin() && (
+              <>
+                <button
+                  onClick={() => {
+                    const newStatus = data.status === 'archived' ? 'todo' : 'archived'
+                    fetch(`/api/tasks/${encodeURIComponent(id!)}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ status: newStatus }),
+                    }).then(() => queryClient.invalidateQueries({ queryKey: ['task', id] }))
+                  }}
+                  className={`inline-flex h-9 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition ${data.status === 'archived' ? 'border-success/30 bg-success/20 text-success hover:bg-success/30' : 'border-border bg-surface text-text-secondary hover:bg-surface-hover'}`}
+                  title={data.status === 'archived' ? 'Desarquivar tarefa' : 'Arquivar tarefa'}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+                  {data.status === 'archived' ? 'Desarquivar' : 'Arquivar'}
+                </button>
+                <button
+                  onClick={() => setShowEditModal(true)}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-accent px-3.5 text-sm font-medium text-text-inverse transition hover:opacity-90"
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  Editar
+                </button>
+              </>
+            )}
+          </>
+        }
+      />
 
-        {isLoading && <p className="text-text-secondary">Loading task…</p>}
+      <main className="mx-auto mt-6 max-w-4xl">
+        {isLoading && (
+          <div className="brand-card p-6" role="status" aria-label="Carregando tarefa">
+            <div className="h-4 w-52 animate-pulse rounded bg-surface/60" />
+            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-16 animate-pulse rounded-lg bg-surface/40" />
+              ))}
+            </div>
+          </div>
+        )}
         {error && (
-          <div className="rounded-lg border border-error/30 bg-error-subtle px-4 py-3 text-sm text-error">
-            Error: {(error as Error).message}
+          <div className="rounded-xl border border-error/30 bg-error/10 px-4 py-3 text-body-sm text-error">
+            Não foi possível carregar a tarefa.
           </div>
         )}
 
         {data && (
           <>
-            <div className="text-h2 font-bold text-text-primary mb-2 prose-kanban-card">
-              <MarkdownRenderer content={data.title || 'Untitled'} />
-            </div>
-            <div className="flex flex-wrap items-center gap-2 mb-6">
+            <div className="mb-6 flex flex-wrap items-center gap-2">
               {data.assignee && (
                 <span className={`inline-flex items-center rounded px-2 py-0.5 text-xs font-medium ${assigneeBadgeClass(data.assignee)}`}>
                   {data.assignee}
                 </span>
               )}
               <span className="inline-flex items-center rounded px-2 py-0.5 text-caption font-medium bg-surface text-text-secondary border border-border">
-                {data.status}
+                {statusLabel(data.status)}
               </span>
               <span className="inline-flex items-center gap-1 text-caption text-text-secondary">
                 <span className={`inline-block h-1.5 w-1.5 rounded-full ${priorityDotClass(data.priority)}`} />
@@ -3522,58 +3571,58 @@ function TaskDetailPage() {
 
             {/* Metadata grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
+              <div className="brand-card p-4">
                 <p className="text-caption text-text-tertiary mb-1">ID</p>
                 <p className="font-mono text-sm text-text-primary break-all">{data.id}</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">Created by</p>
-                <p className="text-sm text-text-primary">{data.created_by || '-'}</p>
+              <div className="brand-card p-4">
+                <p className="text-caption text-text-tertiary mb-1">Criada por</p>
+                <p className="text-sm text-text-primary">{data.created_by || '—'}</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">Created at</p>
+              <div className="brand-card p-4">
+                <p className="text-caption text-text-tertiary mb-1">Criada em</p>
                 <p className="text-sm text-text-primary">{formatIso(data.created_at)}</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">Started at</p>
+              <div className="brand-card p-4">
+                <p className="text-caption text-text-tertiary mb-1">Iniciada em</p>
                 <p className="text-sm text-text-primary">{formatIso(data.started_at)}</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">Completed at</p>
+              <div className="brand-card p-4">
+                <p className="text-caption text-text-tertiary mb-1">Concluída em</p>
                 <p className="text-sm text-text-primary">{formatIso(data.completed_at)}</p>
               </div>
-              <div className="rounded-lg border border-border bg-surface/30 p-4">
-                <p className="text-caption text-text-tertiary mb-1">Workspace</p>
-                <p className="text-sm text-text-primary font-mono">{data.workspace_kind || '-'} {data.workspace_path ? `(${data.workspace_path})` : ''}</p>
+              <div className="brand-card p-4">
+                <p className="text-caption text-text-tertiary mb-1">Espaço de trabalho</p>
+                <p className="text-sm text-text-primary font-mono break-all">{data.workspace_kind || '—'} {data.workspace_path ? `(${data.workspace_path})` : ''}</p>
               </div>
               {data.session_id && (
-                <div className="rounded-lg border border-border bg-surface/30 p-4">
-                  <p className="text-caption text-text-tertiary mb-1">Session</p>
+                <div className="brand-card p-4">
+                  <p className="text-caption text-text-tertiary mb-1">Sessão</p>
                   <p className="text-sm text-text-primary font-mono break-all">{data.session_id}</p>
                 </div>
               )}
               {data.project_id && (
-                <div className="rounded-lg border border-border bg-surface/30 p-4">
-                  <p className="text-caption text-text-tertiary mb-1">Project</p>
+                <div className="brand-card p-4">
+                  <p className="text-caption text-text-tertiary mb-1">Projeto</p>
                   <p className="text-sm text-text-primary">{data.project_id}</p>
                 </div>
               )}
             </div>
 
             {/* Tab bar */}
-            <div className="flex gap-1 border-b border-border mb-6" data-testid="task-detail-tabs">
+            <div className="flex gap-1 overflow-x-auto border-b border-border mb-6" data-testid="task-detail-tabs">
               {[
-                { key: 'overview' as const, label: 'Overview' },
-                { key: 'runs' as const, label: `Runs (${data.runs.length})` },
-                { key: 'comments' as const, label: `Comments (${data.comments.length})` },
-                { key: 'children' as const, label: `Children (${data.children.length})` },
-                { key: 'artifacts' as const, label: 'Artifacts' },
+                { key: 'overview' as const, label: 'Visão geral' },
+                { key: 'runs' as const, label: `Execuções (${data.runs.length})` },
+                { key: 'comments' as const, label: `Comentários (${data.comments.length})` },
+                { key: 'children' as const, label: `Filhas (${data.children.length})` },
+                { key: 'artifacts' as const, label: 'Artefatos' },
               ].map((tab) => (
                 <button
                   key={tab.key}
                   data-testid={`tab-${tab.key}`}
                   onClick={() => setActiveTab(tab.key)}
-                  className={`px-4 py-2 text-sm font-medium transition duration-200 ${
+                  className={`shrink-0 px-4 py-2 text-sm font-medium transition duration-200 ${
                     activeTab === tab.key
                       ? 'bg-surface text-text-primary border-b-2 border-accent'
                       : 'text-text-secondary hover:text-text-primary hover:bg-surface/50'
@@ -3588,19 +3637,19 @@ function TaskDetailPage() {
             {activeTab === 'overview' && (
               <div data-testid="tab-panel-overview">
                 {data.body && (
-                  <div className="rounded-lg border border-border bg-surface/30 p-4 mb-6">
-                    <p className="text-caption text-text-tertiary mb-2">Body</p>
+                  <div className="brand-card p-4 mb-6">
+                    <p className="text-caption text-text-tertiary mb-2">Descrição</p>
                     <div className="text-sm text-text-primary">
                       <MarkdownRenderer content={data.body} />
                     </div>
                   </div>
                 )}
                 {(data.parent_id || data.children.length > 0) && (
-                  <div className="rounded-lg border border-border bg-surface/30 p-4 mb-6">
-                    <p className="text-caption text-text-tertiary mb-2">Links</p>
+                  <div className="brand-card p-4 mb-6">
+                    <p className="text-caption text-text-tertiary mb-2">Vínculos</p>
                     {data.parent_id && (
                       <div className="mb-1 text-sm">
-                        <span className="text-text-tertiary">Parent:</span>{' '}
+                        <span className="text-text-tertiary">Pai:</span>{' '}
                         <button
                           onClick={() => navigate(`/tasks/${encodeURIComponent(data.parent_id!)}`)}
                           className="text-accent hover:underline font-mono"
@@ -3611,7 +3660,7 @@ function TaskDetailPage() {
                     )}
                     {data.children.length > 0 && (
                       <div className="text-sm">
-                        <span className="text-text-tertiary">Children:</span>
+                        <span className="text-text-tertiary">Filhas:</span>
                         <div className="mt-1 flex flex-wrap gap-2">
                           {data.children.map((childId) => (
                             <button
@@ -3628,26 +3677,26 @@ function TaskDetailPage() {
                   </div>
                 )}
                 {!data.body && !data.parent_id && data.children.length === 0 && (
-                  <p className="text-body-sm text-text-tertiary">No additional details.</p>
+                  <p className="text-body-sm text-text-tertiary">Sem detalhes adicionais.</p>
                 )}
               </div>
             )}
 
             {/* Runs tab */}
             {activeTab === 'runs' && (
-              <div data-testid="tab-panel-runs" className="rounded-lg border border-border bg-surface/30 p-4">
-                {data.runs.length === 0 && <p className="text-body-sm text-text-tertiary">No runs recorded.</p>}
+              <div data-testid="tab-panel-runs" className="brand-card p-4">
+                {data.runs.length === 0 && <p className="text-body-sm text-text-tertiary">Nenhuma execução registrada.</p>}
                 {data.runs.length > 0 && (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
                       <thead className="bg-bg-elevated text-text-secondary text-left">
                         <tr>
-                          <th className="px-3 py-2 font-medium">Step</th>
+                          <th className="px-3 py-2 font-medium">Etapa</th>
                           <th className="px-3 py-2 font-medium">Status</th>
-                          <th className="px-3 py-2 font-medium">Profile</th>
-                          <th className="px-3 py-2 font-medium">Started</th>
-                          <th className="px-3 py-2 font-medium">Ended</th>
-                          <th className="px-3 py-2 font-medium">Outcome</th>
+                          <th className="px-3 py-2 font-medium">Perfil</th>
+                          <th className="px-3 py-2 font-medium">Início</th>
+                          <th className="px-3 py-2 font-medium">Fim</th>
+                          <th className="px-3 py-2 font-medium">Resultado</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
@@ -3665,21 +3714,21 @@ function TaskDetailPage() {
                               </td>
                               <td className="px-3 py-2 text-text-secondary">
                                 <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium ${run.status === 'done' ? 'bg-success-subtle text-success border border-success/20' : run.status === 'running' ? 'bg-warning-subtle text-warning border border-warning/20' : 'bg-surface text-text-secondary border border-border'}`}>
-                                  {run.status}
+                                  {statusLabel(run.status)}
                                 </span>
                               </td>
-                              <td className="px-3 py-2 text-text-secondary">{run.profile || '-'}</td>
+                              <td className="px-3 py-2 text-text-secondary">{run.profile || '—'}</td>
                               <td className="px-3 py-2 tabular-nums">{formatIso(run.started_at)}</td>
                               <td className="px-3 py-2 tabular-nums">{formatIso(run.ended_at)}</td>
-                              <td className="px-3 py-2 max-w-xs truncate text-text-secondary">{run.outcome || '-'}</td>
+                              <td className="px-3 py-2 max-w-xs truncate text-text-secondary">{outcomeLabel(run.outcome)}</td>
                             </tr>
                             {expandedRuns.has(run.id) && (
                               <tr>
-                                <td colSpan={6} className="px-4 py-4 bg-bg-base/40">
-                                  {/* Summary */}
+                                <td colSpan={6} className="px-4 py-4 bg-surface/40">
+                                  {/* Resumo */}
                                   {run.summary && (
                                     <div className="mb-3">
-                                      <h4 className="text-sm font-medium text-text-secondary mb-2">Summary</h4>
+                                      <h4 className="text-sm font-medium text-text-secondary mb-2">Resumo</h4>
                                       <MarkdownRenderer content={run.summary} />
                                     </div>
                                   )}
@@ -3689,7 +3738,7 @@ function TaskDetailPage() {
                                       const meta = JSON.parse(run.metadata)
                                       return (
                                         <div className="mb-3">
-                                          <h4 className="text-sm font-medium text-text-secondary mb-2">Details</h4>
+                                          <h4 className="text-sm font-medium text-text-secondary mb-2">Detalhes</h4>
                                           <RunMetadata meta={meta} />
                                         </div>
                                       )
@@ -3698,7 +3747,7 @@ function TaskDetailPage() {
                                   {/* Error */}
                                   {run.error && (
                                     <div className="rounded border border-error/30 bg-error-subtle p-3">
-                                      <p className="text-sm font-medium text-error mb-1">Error</p>
+                                      <p className="text-sm font-medium text-error mb-1">Erro</p>
                                       <pre className="text-xs text-error font-mono whitespace-pre-wrap">{run.error}</pre>
                                     </div>
                                   )}
@@ -3706,7 +3755,7 @@ function TaskDetailPage() {
                                   <TaskSessionLog taskId={data.id} />
                                   {/* Empty state */}
                                   {!run.summary && !run.metadata && !run.error && (
-                                    <p className="text-sm text-text-tertiary italic">No additional details for this run.</p>
+                                    <p className="text-sm text-text-tertiary italic">Sem detalhes adicionais desta execução.</p>
                                   )}
                                 </td>
                               </tr>
@@ -3722,7 +3771,7 @@ function TaskDetailPage() {
 
             {/* Comments tab */}
             {activeTab === 'comments' && (
-              <div data-testid="tab-panel-comments" className="rounded-lg border border-border bg-surface/30 p-4">
+              <div data-testid="tab-panel-comments" className="brand-card p-4">
 {/* Comment form */}
                 {isAdmin() && (
                 <div className="mb-4 pb-4 border-b border-border">
@@ -3731,7 +3780,7 @@ function TaskDetailPage() {
                       type="text"
                       value={commentAuthor}
                       onChange={(e) => setCommentAuthor(e.target.value)}
-                      placeholder="Author"
+                      placeholder="Autor"
                       className="w-32 rounded-md border border-border bg-bg-base px-2.5 py-1.5 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition"
                     />
                     <button
@@ -3739,14 +3788,14 @@ function TaskDetailPage() {
                       disabled={!commentText.trim() || addCommentMutation.isPending}
                       className="ml-auto rounded-md bg-accent px-3 py-1.5 text-sm text-white font-medium hover:bg-accent-hover transition disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {addCommentMutation.isPending ? 'Posting…' : 'Add comment'}
+                      {addCommentMutation.isPending ? 'Publicando…' : 'Adicionar comentário'}
                     </button>
                   </div>
                   <textarea
                     value={commentText}
                     onChange={(e) => setCommentText(e.target.value)}
                     rows={3}
-                    placeholder="Write a comment… (Markdown supported)"
+                    placeholder="Escreva um comentário… (Markdown suportado)"
                     className="w-full rounded-md border border-border bg-bg-base px-3 py-2 text-sm text-text-primary focus:border-accent focus:ring-1 focus:ring-accent outline-none transition resize-y"
                   />
                   {addCommentMutation.isError && (
@@ -3755,11 +3804,11 @@ function TaskDetailPage() {
                 </div>)}
 
                 {/* Comment list */}
-                {data.comments.length === 0 && <p className="text-body-sm text-text-tertiary">No comments yet.</p>}
+                {data.comments.length === 0 && <p className="text-body-sm text-text-tertiary">Nenhum comentário ainda.</p>}
                 {data.comments.length > 0 && (
                   <div className="space-y-3">
                     {data.comments.map((comment) => (
-                      <div key={comment.id} className="rounded border border-border bg-bg-base/40 p-3">
+                      <div key={comment.id} className="rounded border border-border bg-surface/40 p-3">
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-caption font-medium text-text-primary">{comment.author}</span>
                           <span className="text-caption text-text-tertiary">{formatIso(comment.created_at)}</span>
@@ -3776,8 +3825,8 @@ function TaskDetailPage() {
 
             {/* Children tab */}
             {activeTab === 'children' && (
-              <div data-testid="tab-panel-children" className="rounded-lg border border-border bg-surface/30 p-4">
-                {data.children.length === 0 && <p className="text-body-sm text-text-tertiary">No child tasks.</p>}
+              <div data-testid="tab-panel-children" className="brand-card p-4">
+                {data.children.length === 0 && <p className="text-body-sm text-text-tertiary">Nenhuma tarefa filha.</p>}
                 {data.children.length > 0 && (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {data.children.map((childId) => {
@@ -3786,17 +3835,17 @@ function TaskDetailPage() {
                         <button
                           key={childId}
                           onClick={() => navigate(`/tasks/${encodeURIComponent(childId)}`)}
-                          className="text-left rounded-lg border border-border bg-bg-base/40 p-4 hover:bg-surface/50 transition cursor-pointer"
+                          className="text-left rounded-lg border border-border bg-surface/40 p-4 hover:bg-surface/50 transition cursor-pointer"
                         >
                           <div className="flex items-center gap-2 mb-1">
                             <p className="font-mono text-xs text-accent">{childId}</p>
                             {childTask && (
                               <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ${childTask.status === 'done' ? 'bg-success-subtle text-success border border-success/20' : childTask.status === 'running' ? 'bg-warning-subtle text-warning border border-warning/20' : childTask.status === 'blocked' ? 'bg-error-subtle text-error border border-error/20' : 'bg-surface text-text-secondary border border-border'}`}>
-                                {childTask.status}
+                                {statusLabel(childTask.status)}
                               </span>
                             )}
                           </div>
-                          <p className="text-sm text-text-primary line-clamp-2">{childTask?.title || 'Untitled task'}</p>
+                          <p className="text-sm text-text-primary line-clamp-2">{childTask?.title || 'Tarefa sem título'}</p>
                           {childTask?.assignee && (
                             <p className="text-caption text-text-tertiary mt-1">@{childTask.assignee}</p>
                           )}
@@ -3810,12 +3859,12 @@ function TaskDetailPage() {
 
             {/* Artifacts tab */}
             {activeTab === 'artifacts' && (
-              <div data-testid="tab-panel-artifacts" className="rounded-lg border border-border bg-surface/30 p-4">
+              <div data-testid="tab-panel-artifacts" className="brand-card p-4">
                 {!artifacts?.workspace_path && (
-                  <p className="text-body-sm text-text-tertiary">No workspace configured for this task.</p>
+                  <p className="text-body-sm text-text-tertiary">Nenhum workspace configurado para esta tarefa.</p>
                 )}
                 {artifacts?.workspace_path && artifacts.files.length === 0 && (
-                  <p className="text-body-sm text-text-tertiary">No files in workspace.</p>
+                  <p className="text-body-sm text-text-tertiary">Nenhum arquivo no workspace.</p>
                 )}
                 {artifacts?.files.length > 0 && (
                   <div className="space-y-1">
@@ -3846,7 +3895,7 @@ function TaskDetailPage() {
           }}
         />
       )}
-    </div>
+    </PageContainer>
   )
 }
 
