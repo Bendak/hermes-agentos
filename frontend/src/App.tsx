@@ -863,91 +863,154 @@ function DashboardPage() {
 
 function NotFoundPage() {
   return (
-    <>
-      <NavBar />
-      <div className="flex flex-col items-center justify-center py-24 text-center">
-      <div className="text-6xl font-bold text-text-tertiary mb-4">404</div>
-      <p className="text-body text-text-secondary mb-6">This page doesn't exist.</p>
-      <Link to="/" className="px-4 py-2 rounded-lg bg-accent text-white hover:bg-accent-hover transition-colors text-sm font-medium">
-        Back to Dashboard
-      </Link>
+    <PageContainer>
+      <div className="mx-auto max-w-lg brand-card px-6 py-16 text-center">
+        <p className="text-6xl font-bold text-text-tertiary" aria-hidden="true">404</p>
+        <h1 className="mt-4 text-h2 font-semibold text-text-primary">Página não encontrada</h1>
+        <p className="mt-2 text-body text-text-secondary">
+          O endereço acessado não existe ou foi movido.
+        </p>
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+          <Link
+            to="/"
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-text-inverse transition-colors hover:bg-accent-hover"
+          >
+            Ir para o Dashboard
+          </Link>
+          <Link
+            to="/chat"
+            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-secondary transition hover:text-text-primary"
+          >
+            Abrir o chat
+          </Link>
+        </div>
       </div>
-    </>
+    </PageContainer>
   )
 }
 
 function HealthPage() {
   const [healthData, setHealthData] = useState<{ status: string; version: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [checkedAt, setCheckedAt] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetch('/health')
-      .then((r) => r.json())
-      .then(setHealthData)
-      .catch((e) => setError(e.message))
+  const loadHealth = useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const res = await fetch('/health')
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
+      const data = await res.json().catch(() => null)
+      if (!data || typeof data !== 'object' || typeof data.status !== 'string' || typeof data.version !== 'string') {
+        throw new Error('Resposta inválida do servidor')
+      }
+      setHealthData(data)
+      setCheckedAt(new Date().toLocaleTimeString('pt-BR', {
+        timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit',
+      }))
+    } catch (e) {
+      const raw = e instanceof Error ? e.message : ''
+      const friendly = e instanceof TypeError
+        ? 'Falha de rede ao contatar o servidor'
+        : /^Request failed \(\d+\)$/.test(raw)
+          ? raw.replace('Request failed', 'Falha na requisição')
+          : raw === 'Resposta inválida do servidor'
+            ? raw
+            : 'Erro inesperado ao verificar o sistema'
+      setHealthData(null)
+      setError(friendly)
+    } finally {
+      setIsLoading(false)
+    }
   }, [])
 
-  const statusColor = healthData?.status === 'ok' ? 'text-semantic-success' : 'text-semantic-error'
-  const statusBg = healthData?.status === 'ok' ? 'bg-semantic-success/10' : 'bg-semantic-error/10'
-  const statusBorder = healthData?.status === 'ok' ? 'border-semantic-success/30' : 'border-semantic-error/30'
-  const statusDot = healthData?.status === 'ok' ? 'bg-semantic-success' : 'bg-semantic-error'
+  useEffect(() => {
+    void loadHealth()
+  }, [loadHealth])
+
+  const healthy = healthData?.status === 'ok'
+  const statusColor = healthy ? 'text-success' : 'text-error'
+  const statusBg = healthy ? 'bg-success/10' : 'bg-error/10'
+  const statusBorder = healthy ? 'border-success/30' : 'border-error/30'
+  const statusDot = healthy ? 'bg-success' : 'bg-error'
+  const statusLabel = healthData ? (healthy ? 'Operacional' : 'Indisponível') : 'Verificando…'
 
   return (
-    <div className="min-h-screen flex flex-col bg-bg-base text-text-secondary">
-      <NavBar />
-      <div className="flex-1 flex flex-col items-center justify-center px-6">
-        <div className="w-full max-w-md">
-          <div className={`rounded-xl border ${statusBorder} ${statusBg} p-6 mb-6 text-center`}>
-            <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-bg-elevated border border-border mb-4">
-              <span className={`inline-block w-3 h-3 rounded-full ${statusDot} shadow-md`} />
+    <PageContainer>
+      <PageHeader
+        eyebrow="Sistema"
+        title="Saúde do sistema"
+        subtitle="Status do backend e versão em execução."
+        actions={
+          <button
+            onClick={() => void loadHealth()}
+            disabled={isLoading}
+            className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-secondary transition hover:text-text-primary disabled:opacity-50"
+          >
+            {isLoading ? 'Verificando…' : 'Verificar novamente'}
+          </button>
+        }
+      />
+
+      <div className="mt-6 max-w-xl space-y-4">
+        <p className="sr-only" role="status" aria-live="polite">
+          {isLoading ? 'Verificando sistema…' : !error && healthData ? `Sistema ${statusLabel}` : ''}
+        </p>
+
+        {isLoading && !healthData && (
+          <div className="brand-card h-48 animate-pulse" role="status" aria-label="Carregando status do sistema" />
+        )}
+
+        {error && !isLoading && (
+          <div role="alert" className="rounded-xl border border-error/30 bg-error/10 p-4 text-sm text-error">
+            Não foi possível verificar o sistema: {error}
+          </div>
+        )}
+
+        {healthData && (
+          <div className={`brand-card border p-6 text-center ${statusBorder} ${statusBg}`}>
+            <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-full border border-border bg-bg-elevated">
+              <span className={`inline-block h-3 w-3 rounded-full ${statusDot}`} aria-hidden="true" />
             </div>
-            <h1 className="text-h2 font-bold text-text-primary mb-1">System Status</h1>
-            <p className="text-body text-text-secondary">
-              {healthData ? (
-                <span className="inline-flex items-center gap-2">
-                  <span className={`inline-block w-2 h-2 rounded-full ${statusDot}`} />
-                  <span className={`font-medium ${statusColor}`}>{healthData.status.toUpperCase()}</span>
-                </span>
-              ) : (
-                'Checking…'
-              )}
+            <h2 className="text-h3 font-semibold text-text-primary">Status do sistema</h2>
+            <p className={`mt-1 inline-flex items-center gap-2 text-body font-medium ${statusColor}`}>
+              <span className={`inline-block h-2 w-2 rounded-full ${statusDot}`} aria-hidden="true" />
+              {statusLabel}
             </p>
           </div>
+        )}
 
-          {error && <p className="text-semantic-error text-sm text-center mb-4">Error: {error}</p>}
-
-          {healthData && (
-            <div className="rounded-xl border border-border bg-surface/30 p-6 space-y-4">
-              <div className="flex items-center justify-between">
-                <span className="text-caption text-text-tertiary uppercase tracking-wider">Status</span>
-                <span className={`inline-flex items-center gap-1.5 text-sm font-medium ${statusColor}`}>
-                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${statusDot}`} />
-                  {healthData.status}
-                </span>
+        {healthData && (
+          <div className="brand-card p-5">
+            <dl className="space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-text-tertiary">Status</dt>
+                <dd className={`font-medium ${statusColor}`}>{statusLabel}</dd>
               </div>
               <div className="h-px bg-border" />
-              <div className="flex items-center justify-between">
-                <span className="text-caption text-text-tertiary uppercase tracking-wider">Version</span>
-                <span className="font-mono text-sm text-text-primary">{healthData.version}</span>
+              <div className="flex items-center justify-between gap-4">
+                <dt className="text-text-tertiary">Versão</dt>
+                <dd className="font-mono text-text-primary">{healthData.version}</dd>
               </div>
-            </div>
-          )}
-
-          {!healthData && !error && (
-            <p className="text-text-secondary text-center">Loading…</p>
-          )}
-
-          <div className="mt-8 text-center">
-            <Link
-              to="/"
-              className="inline-flex items-center gap-1 text-sm text-accent hover:text-accent-hover transition"
-            >
-              ← Back to dashboard
-            </Link>
+              {checkedAt && (
+                <>
+                  <div className="h-px bg-border" />
+                  <div className="flex items-center justify-between gap-4">
+                    <dt className="text-text-tertiary">Última verificação</dt>
+                    <dd className="text-text-secondary">{checkedAt}</dd>
+                  </div>
+                </>
+              )}
+            </dl>
           </div>
-        </div>
+        )}
+
+        <Link to="/" className="inline-flex items-center gap-1 text-sm text-accent transition hover:text-accent-hover">
+          ← Voltar para o Dashboard
+        </Link>
       </div>
-    </div>
+    </PageContainer>
   )
 }
 
