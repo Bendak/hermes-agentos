@@ -87,6 +87,12 @@ interface ToolEntry extends RenderTool {
   preview?: string
 }
 
+const UPLOAD_EXTS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg',
+  'pdf', 'txt', 'md', 'csv', 'json', 'doc', 'docx', 'odt', 'rtf',
+  'mp3', 'wav', 'ogg', 'm4a', 'webm', 'mp4', 'mov',
+])
+
 interface RenderItem {
   role: 'user' | 'agent'
   content: string
@@ -381,6 +387,7 @@ export default function ChatPage() {
   const [loadingSessions, setLoadingSessions] = useState(true)
   const [loadingMessages, setLoadingMessages] = useState(false)
   const [sending, setSending] = useState(false)
+  const [uploadingCount, setUploadingCount] = useState(0)
   const [streamText, setStreamText] = useState('')
   const [input, setInput] = useState('')
   const [search, setSearch] = useState('')
@@ -405,12 +412,19 @@ export default function ChatPage() {
   const abortRef = useRef<AbortController | null>(null)
   const turnIdRef = useRef<string | null>(null)
   const activeIdRef = useRef<string | null>(null)
+  const pendingAttachmentsRef = useRef<PendingAttachment[]>([])
+  const uploadingRef = useRef(0)
+  const reservedSlotsRef = useRef(0)
 
   const active = useMemo(() => sessions.find((s) => s.id === activeId) || null, [sessions, activeId])
 
   const scrollDown = useCallback(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [])
+
+  useEffect(() => {
+    pendingAttachmentsRef.current = pendingAttachments
+  }, [pendingAttachments])
 
   useEffect(() => {
     scrollDown()
@@ -600,6 +614,12 @@ export default function ChatPage() {
     const trimmed = text.trim()
     const attached = pendingAttachments
     if ((!trimmed && attached.length === 0) || sending) return
+    if (uploadingRef.current > 0) {
+      setError((prev) => (prev && prev.includes('Aguarde o upload')
+        ? prev
+        : (prev ? `${prev} Aguarde o upload do anexo terminar antes de enviar.` : 'Aguarde o upload do anexo terminar antes de enviar.')))
+      return
+    }
     setInput('')
     setPendingAttachments([])
     setError(null)
@@ -788,24 +808,124 @@ export default function ChatPage() {
     }
   }
 
-  async function uploadFiles(files: FileList | null) {
+  async function uploadFiles(
+    files: FileList | File[] | null,
+    opts: { preserveError?: boolean } = {},
+  ) {
     if (!files || files.length === 0) return
-    setError(null)
-    const added: PendingAttachment[] = []
-    for (const file of Array.from(files).slice(0, 10)) {
-      const fd = new FormData()
-      fd.append('file', file, file.name)
-      const res = await fetch('/api/chat/uploads', {
-        method: 'POST', headers: authHeaders(), body: fd,
-      })
-      if (!res.ok) {
-        setError(await apiErrorMessage(res))
+    const room = Math.max(0, 10 - pendingAttachmentsRef.current.length - reservedSlotsRef.current)
+    const limitError = 'Limite de 10 anexos por mensagem.'
+    const reportLimit = () => setError((prev) => (opts.preserveError && prev ? `${prev} ${limitError}` : limitError))
+    if (room === 0) {
+      reportLimit()
+      if (fileInputRef.current) fileInputRef.current.value = ''
+      return
+    }
+    const selected = Array.from(files).slice(0, room)
+    if (Array.from(files).length > room) reportLimit()
+    else if (!opts.preserveError) setError(null)
+    reservedSlotsRef.current += selected.length
+    uploadingRef.current += 1
+    setUploadingCount((n) => n + 1)
+    try {
+      const added: PendingAttachment[] = []
+      for (const file of selected) {
+        try {
+          const fd = new FormData()
+          fd.append('file', file, file.name)
+          const res = await fetch('/api/chat/uploads', {
+            method: 'POST', headers: authHeaders(), body: fd,
+          })
+          if (!res.ok) {
+            setError(await apiErrorMessage(res))
+            continue
+          }
+          added.push(await res.json() as PendingAttachment)
+        } catch (err) {
+          setError((err as Error).message)
+        }
+      }
+      if (added.length) {
+        setPendingAttachments((prev) => {
+          const next = [...prev, ...added].slice(0, 10)
+          pendingAttachmentsRef.current = next
+          return next
+        })
+      }
+    } finally {
+      reservedSlotsRef.current = Math.max(0, reservedSlotsRef.current - selected.length)
+      uploadingRef.current -= 1
+      setUploadingCount((n) => Math.max(0, n - 1))
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  /** Clipboard images arrive as File objects without a useful upload name. */
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const files: File[] = []
+    let skippedType = false
+    const el = e.currentTarget
+    const selectionStart = el.selectionStart
+    const selectionEnd = el.selectionEnd
+    for (const item of Array.from(e.clipboardData?.items || [])) {
+      if (item.kind !== 'file') continue
+      const file = item.getAsFile()
+      if (!file) continue
+      const nameExt = (file.name.match(/\.([a-z0-9]{1,8})$/i)?.[1] || '').toLowerCase()
+      if (nameExt && UPLOAD_EXTS.has(nameExt)) {
+        files.push(file)
         continue
       }
-      added.push(await res.json() as PendingAttachment)
+      const extByMime: Record<string, string> = {
+        'image/png': 'png',
+        'image/jpeg': 'jpg',
+        'image/webp': 'webp',
+        'image/gif': 'gif',
+        'image/bmp': 'bmp',
+        'image/svg+xml': 'svg',
+        'application/pdf': 'pdf',
+        'text/plain': 'txt',
+        'text/markdown': 'md',
+        'text/csv': 'csv',
+        'application/json': 'json',
+        'application/msword': 'doc',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+        'application/rtf': 'rtf',
+        'application/vnd.oasis.opendocument.text': 'odt',
+        'audio/mpeg': 'mp3',
+        'audio/wav': 'wav',
+        'audio/ogg': 'ogg',
+        'audio/mp4': 'm4a',
+        'video/webm': 'webm',
+        'video/mp4': 'mp4',
+        'video/quicktime': 'mov',
+      }
+      const ext = extByMime[file.type]
+      if (!ext) {
+        skippedType = true
+        setError(`Tipo de anexo não suportado: ${file.type || 'desconhecido'}`)
+        continue
+      }
+      files.push(new File(
+        [file],
+        `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}-${files.length + 1}.${ext}`,
+        { type: file.type, lastModified: Date.now() },
+      ))
     }
-    if (added.length) setPendingAttachments((prev) => [...prev, ...added].slice(0, 10))
-    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (files.length === 0) return
+    e.preventDefault()
+    const text = e.clipboardData?.getData('text/plain') || ''
+    if (text) {
+      const base = el.value
+      const next = base.slice(0, selectionStart) + text + base.slice(selectionEnd)
+      setInput(next)
+      const caret = selectionStart + text.length
+      requestAnimationFrame(() => {
+        el.focus()
+        el.setSelectionRange(caret, caret)
+      })
+    }
+    void uploadFiles(files, { preserveError: skippedType })
   }
 
   async function answerApproval(card: ApprovalCard, option: ApprovalOption) {
@@ -1093,8 +1213,8 @@ export default function ChatPage() {
           </div>
 
           <div className="border-t border-border p-3">
-            {pendingAttachments.length > 0 && (
-              <div className="mx-auto mb-2 flex max-w-3xl flex-wrap gap-1.5">
+            {(pendingAttachments.length > 0 || uploadingCount > 0) && (
+              <div className="mx-auto mb-2 flex max-w-3xl flex-wrap items-center gap-1.5">
                 {pendingAttachments.map((a) => (
                   <span key={a.path} className="inline-flex items-center gap-1 rounded-full border border-border bg-bg-elevated px-2 py-1 text-[11px] text-text-secondary">
                     {a.name}
@@ -1102,6 +1222,11 @@ export default function ChatPage() {
                       className="text-text-tertiary hover:text-red-400" aria-label={'Remove ' + a.name}>×</button>
                   </span>
                 ))}
+                {uploadingCount > 0 && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-1 text-[11px] text-text-tertiary">
+                    Enviando anexo…
+                  </span>
+                )}
               </div>
             )}
             <div className="mx-auto flex max-w-3xl items-end gap-2">
@@ -1114,6 +1239,7 @@ export default function ChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
                 rows={1}
                 placeholder={active ? 'Message… (Enter sends, Shift+Enter breaks line)' : 'Start a new chat to write'}
                 disabled={!active && sessions.length > 0}
@@ -1159,7 +1285,7 @@ export default function ChatPage() {
               ) : (
                 <button
                   onClick={() => void sendMessage(input)}
-                  disabled={!input.trim() && pendingAttachments.length === 0}
+                  disabled={uploadingCount > 0 || (!input.trim() && pendingAttachments.length === 0)}
                   className="h-[42px] shrink-0 rounded-xl bg-accent px-4 text-sm font-medium text-white disabled:opacity-40"
                 >
                   Send
