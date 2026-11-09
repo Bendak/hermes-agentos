@@ -27,7 +27,7 @@ from backend import chat_sessions, chat_transcript
 from backend.channel_turn import ChannelTurnRecorder
 from backend.auth import require_auth
 from backend.config import settings
-from backend.channel_client import channel_mode, get_client
+from backend.channel_client import channel_env, channel_mode, get_client
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -626,7 +626,7 @@ def _sse(event: str, payload: dict) -> str:
 
 
 def _channel_media_root() -> str:
-    return os.environ.get("AGENTOS_CHANNEL_MEDIA_ROOT") or os.path.join(
+    return channel_env("AGENTOS_CHANNEL_MEDIA_ROOT") or os.path.join(
         settings.AGENTOS_DATA_DIR, "agentos", "uploads")
 
 

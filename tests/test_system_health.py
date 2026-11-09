@@ -66,6 +66,34 @@ def test_health_status_checks_canonical_auth_database(client, admin_headers, mon
     assert checked["database"] == auth.DB_PATH
 
 
+def test_channel_mode_reads_hermes_env_fallback(tmp_path, monkeypatch):
+    from backend import channel_client
+
+    monkeypatch.delenv("AGENTOS_CHANNEL", raising=False)
+    monkeypatch.setattr(channel_client.settings, "AGENTOS_DATA_DIR", str(tmp_path))
+
+    (tmp_path / ".env").write_text("AGENTOS_CHANNEL=plugin\n", encoding="utf-8")
+    assert health.channel_mode() is True
+
+    (tmp_path / ".env").write_text("AGENTOS_CHANNEL=http\n", encoding="utf-8")
+    assert health.channel_mode() is False
+
+    (tmp_path / ".env").write_text("", encoding="utf-8")
+    assert health.channel_mode() is False
+
+
+def test_chat_media_root_matches_health_resolution(tmp_path, monkeypatch):
+    from backend import channel_client, chat
+
+    monkeypatch.delenv("AGENTOS_CHANNEL_MEDIA_ROOT", raising=False)
+    monkeypatch.setattr(channel_client.settings, "AGENTOS_DATA_DIR", str(tmp_path))
+    media_root = tmp_path / "media"
+    (tmp_path / ".env").write_text(f"AGENTOS_CHANNEL_MEDIA_ROOT={media_root}\n", encoding="utf-8")
+
+    assert chat._channel_media_root() == str(media_root)
+    assert health._uploads_root() == str(media_root)
+
+
 def test_health_status_degrades_on_down_dependency(client, admin_headers, monkeypatch):
     monkeypatch.setenv("AGENTOS_CHANNEL", "plugin")
     monkeypatch.setattr(health, "_probe", _fake_probe("down", "sem conexão"))

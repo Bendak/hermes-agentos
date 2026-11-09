@@ -18,6 +18,7 @@ import httpx
 from fastapi import APIRouter, Depends
 
 from backend.auth import DB_PATH as AUTH_DB_PATH, require_auth
+from backend.channel_client import channel_env, channel_mode
 from backend.config import settings
 
 router = APIRouter()
@@ -29,7 +30,7 @@ _DOWN = "down"
 
 
 def _channel_health_url() -> str:
-    raw = os.environ.get("AGENTOS_CHANNEL_URL", "ws://127.0.0.1:9130/ws")
+    raw = channel_env("AGENTOS_CHANNEL_URL", "ws://127.0.0.1:9130/ws")
     parsed = urlparse(raw)
     scheme = "https" if parsed.scheme in {"wss", "https"} else "http"
     netloc = parsed.netloc or "127.0.0.1:9130"
@@ -37,7 +38,7 @@ def _channel_health_url() -> str:
 
 
 def _uploads_root() -> str:
-    explicit = os.environ.get("AGENTOS_CHANNEL_MEDIA_ROOT")
+    explicit = channel_env("AGENTOS_CHANNEL_MEDIA_ROOT")
     if explicit:
         return explicit
     return os.path.join(settings.AGENTOS_DATA_DIR, "agentos", "uploads")
@@ -161,7 +162,7 @@ async def health_status(_user: dict = Depends(require_auth)) -> dict[str, Any]:
             )
         )
 
-        if os.environ.get("AGENTOS_CHANNEL", "http").lower() == "plugin":
+        if channel_mode():
             services.append(
                 await _probe(
                     client,

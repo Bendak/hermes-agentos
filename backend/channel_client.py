@@ -43,6 +43,11 @@ def _env(name: str, default: str = "") -> str:
     return default
 
 
+def channel_env(name: str, default: str = "") -> str:
+    """Resolve a channel setting from the process env or the Hermes .env."""
+    return _env(name, default)
+
+
 class ChannelClient:
     def __init__(self, url: Optional[str] = None, token: Optional[str] = None):
         self.url = url or _env("AGENTOS_CHANNEL_URL", "ws://127.0.0.1:9130/ws")
