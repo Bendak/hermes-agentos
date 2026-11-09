@@ -13,6 +13,7 @@ type NavItem = {
   to: string
   label: string
   icon: IconName
+  adminOnly?: boolean
 }
 
 type NavGroup = {
@@ -50,11 +51,11 @@ const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: 'Sistema',
-    adminOnly: true,
     items: [
-      { to: '/analytics', label: 'Analytics', icon: 'chart' },
-      { to: '/config', label: 'Configuração', icon: 'config' },
-      { to: '/settings', label: 'Usuários', icon: 'users' },
+      { to: '/system-health', label: 'Saúde', icon: 'health' },
+      { to: '/analytics', label: 'Analytics', icon: 'chart', adminOnly: true },
+      { to: '/config', label: 'Configuração', icon: 'config', adminOnly: true },
+      { to: '/settings', label: 'Usuários', icon: 'users', adminOnly: true },
     ],
   },
 ]
@@ -72,6 +73,7 @@ type IconName =
   | 'chart'
   | 'config'
   | 'users'
+  | 'health'
 
 const ICONS: Record<IconName, React.ReactNode> = {
   home: <><path d="M3 10.5 12 3l9 7.5" /><path d="M5.5 9.5V21h13V9.5" /><path d="M9.5 21v-6h5v6" /></>,
@@ -86,6 +88,7 @@ const ICONS: Record<IconName, React.ReactNode> = {
   chart: <path d="M4 19V9M10 19V5M16 19v-7M22 19H2" />,
   config: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4v-.2a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></>,
   users: <><circle cx="9" cy="8" r="3" /><path d="M3.5 20c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" /><path d="M16 5.5a3 3 0 0 1 0 5.8M18 14.5c2 .6 3.3 2.4 3.7 5" /></>,
+  health: <><path d="M3 12h4l2-5 4 10 2-5h6" /></>,
 }
 
 function Icon({ name }: { name: IconName }) {
@@ -109,7 +112,8 @@ function isActivePath(pathname: string, to: string) {
 
 function currentGroup(pathname: string, admin = false) {
   return NAV_GROUPS.find(
-    (group) => (!group.adminOnly || admin) && group.items.some((item) => isActivePath(pathname, item.to)),
+    (group) => (!group.adminOnly || admin)
+      && group.items.some((item) => (!item.adminOnly || admin) && isActivePath(pathname, item.to)),
   )
 }
 
@@ -129,7 +133,10 @@ function Sidebar({
   const { user, logout } = useAuth()
   const location = useLocation()
   const admin = user?.role === 'admin'
-  const groups = NAV_GROUPS.filter((group) => !group.adminOnly || admin)
+  const groups = NAV_GROUPS
+    .filter((group) => !group.adminOnly || admin)
+    .map((group) => ({ ...group, items: group.items.filter((item) => !item.adminOnly || admin) }))
+    .filter((group) => group.items.length > 0)
 
   return (
     <aside className={`agent-sidebar ${collapsed ? 'is-collapsed' : ''}`}>

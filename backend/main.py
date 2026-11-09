@@ -12,6 +12,7 @@ from backend.config import settings
 from backend.config_viewer import get_config, update_config
 from backend.skills_hub import list_skills, get_skill_detail
 from backend.profiles import router as profiles_router
+from backend.health import router as health_router
 from backend.auth import (
     require_auth,
     require_admin,
@@ -36,6 +37,7 @@ app = FastAPI(title="AgentOS", version="0.1.0")
 
 # Register profile editor router
 app.include_router(profiles_router)
+app.include_router(health_router)
 
 # Register chat/voice router (Hermes API proxy + Groq STT)
 from backend.chat import router as chat_router  # noqa: E402

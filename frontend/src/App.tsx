@@ -221,6 +221,101 @@ interface Workflow {
   graph_corrupt?: boolean
 }
 
+type HealthState = 'ok' | 'down' | 'unknown'
+
+interface HealthService {
+  id: string
+  label: string
+  status: HealthState
+  detail: string
+  latency_ms?: number
+}
+
+interface HealthSnapshot {
+  status: 'ok' | 'degraded'
+  checked_at: string
+  services: HealthService[]
+  partial?: boolean
+}
+
+const HEALTH_STATE_LABEL: Record<HealthState, string> = {
+  ok: 'Operacional',
+  down: 'Fora do ar',
+  unknown: 'Não verificado',
+}
+
+const HEALTH_FALLBACK_LIMIT = 20
+const HEALTH_FALLBACK_EXPIRED = 'Diagnóstico completo indisponível. Reinicie o AgentOS para ativar a verificação de dependências.'
+
+function healthErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message === HEALTH_FALLBACK_EXPIRED) return error.message
+  return 'Não foi possível verificar as dependências do sistema.'
+}
+
+function healthStateClass(status: HealthState): string {
+  if (status === 'ok') return 'text-success'
+  if (status === 'down') return 'text-error'
+  return 'text-warning'
+}
+
+function healthDotClass(status: HealthState): string {
+  if (status === 'ok') return 'bg-success'
+  if (status === 'down') return 'bg-error'
+  return 'bg-warning'
+}
+
+function useHealthSnapshot() {
+  const partialAttempts = useRef(0)
+  return useQuery<HealthSnapshot>({
+    queryKey: ['system-health'],
+    queryFn: async () => {
+      const res = await fetch('/api/health/status')
+      if (res.status === 404) {
+        // Deploy window: the SPA can be newer than the running AgentOS
+        // process. Fall back to the public probe for a bounded number of
+        // polls, then surface the stale backend instead of masking it.
+        partialAttempts.current += 1
+        if (partialAttempts.current > HEALTH_FALLBACK_LIMIT) {
+          throw new Error(HEALTH_FALLBACK_EXPIRED)
+        }
+        const legacy = await fetch('/health')
+        if (legacy.ok) {
+          const payload = await legacy.json()
+          const up = payload.status === 'ok'
+          return {
+            status: up ? 'ok' : 'degraded',
+            checked_at: new Date().toISOString(),
+            partial: true,
+            services: [{
+              id: 'agentos',
+              label: 'AgentOS API',
+              status: up ? 'ok' : 'down',
+              detail: `versão ${payload.version || '—'}`,
+              latency_ms: 0,
+            }],
+          }
+        }
+      }
+      if (!res.ok) throw new Error(await apiErrorMessage(res))
+      partialAttempts.current = 0
+      return res.json()
+    },
+    refetchInterval: 15_000,
+    retry: 1,
+  })
+}
+
+function formatHealthTime(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    })
+  } catch {
+    return iso
+  }
+}
+
 // M17-5: run-level honesty — a completed TRIGGER is not "work done", so a
 // trigger+stubs run reads 🚧 and a trigger+all-skipped run reads ⏭️, never ✅.
 const runLevelIcon = (status: string, res: any): string => {
@@ -577,7 +672,7 @@ function DashboardLoadingRows({ rows = 3 }: { rows?: number }) {
 }
 
 function ResourceMeter({ label, value }: { label: string; value: number }) {
-  const color = value < 60 ? 'bg-semantic-success' : value < 80 ? 'bg-semantic-warning' : 'bg-semantic-error'
+  const color = value < 60 ? 'bg-success' : value < 80 ? 'bg-warning' : 'bg-error'
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between text-caption">
@@ -587,6 +682,77 @@ function ResourceMeter({ label, value }: { label: string; value: number }) {
       <div className="h-1.5 w-full overflow-hidden rounded-full bg-bg-base">
         <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
       </div>
+    </div>
+  )
+}
+
+function DashboardDependencyHealth() {
+  const { data, isLoading, error } = useHealthSnapshot()
+
+  if (isLoading) {
+    return (
+      <div className="space-y-3" role="status" aria-label="Verificando dependências">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <div key={index} className="h-9 animate-pulse rounded-lg bg-surface/60" />
+        ))}
+      </div>
+    )
+  }
+
+  if (error || !data) {
+    return (
+      <div role="alert" className="rounded-xl border border-error/30 bg-error/10 p-3 text-sm text-error">
+        {healthErrorMessage(error)}
+        <Link to="/system-health" className="ml-1 underline underline-offset-2">Ver detalhes</Link>
+      </div>
+    )
+  }
+
+  const services = data.services
+  const okCount = services.filter((service) => service.status === 'ok').length
+  const down = services.filter((service) => service.status === 'down')
+  const unknown = services.filter((service) => service.status === 'unknown')
+  const healthy = data.status === 'ok'
+  const incomplete = unknown.length > 0
+  const positive = healthy && !incomplete
+  const partial = data.partial === true
+
+  return (
+    <div>
+      <div className={`rounded-xl border p-3 ${positive ? 'border-success/30 bg-success/10' : 'border-warning/30 bg-warning/10'}`}>
+        <div className="flex items-center gap-2">
+          <span className={`h-2.5 w-2.5 rounded-full ${positive ? 'bg-success' : 'bg-warning'}`} aria-hidden="true" />
+          <p className={`text-sm font-medium ${positive ? 'text-success' : 'text-warning'}`}>
+            {down.length
+              ? 'Sistema degradado'
+              : incomplete
+                ? 'Verificação parcial'
+                : partial
+                  ? 'AgentOS operacional'
+                  : 'Todas as dependências operacionais'}
+          </p>
+          <span className="ml-auto font-mono text-caption text-text-secondary tabular-nums">{okCount}/{services.length}</span>
+        </div>
+        <p className="mt-1 text-caption text-text-secondary">
+          {down.length
+            ? `Fora do ar: ${down.map((service) => service.label).join(', ')}.`
+            : incomplete
+              ? `Não verificadas: ${unknown.map((service) => service.label).join(', ')}.`
+              : partial
+                ? 'Verificação básica; reinicie o AgentOS para checar gateway e plugin.'
+                : 'API, gateway e canal do plugin respondendo.'}
+        </p>
+      </div>
+
+      <ul className="mt-3 space-y-1.5">
+        {services.map((service) => (
+          <li key={service.id} className="flex items-center gap-2 text-caption">
+            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${healthDotClass(service.status)}`} aria-hidden="true" />
+            <span className="truncate text-text-secondary">{service.label}</span>
+            <span className={`ml-auto shrink-0 ${healthStateClass(service.status)}`}>{HEALTH_STATE_LABEL[service.status]}</span>
+          </li>
+        ))}
+      </ul>
     </div>
   )
 }
@@ -783,10 +949,16 @@ function DashboardPage() {
 
         <DashboardPanel
           title="Saúde do sistema"
-          subtitle="Recursos do host"
-          action={<Link to="/analytics" className="text-caption text-accent transition hover:text-accent-hover">Detalhes →</Link>}
+          subtitle="Dependências e recursos"
+          action={<Link to="/system-health" className="text-caption text-accent transition hover:text-accent-hover">Ver tudo →</Link>}
         >
-          {isAdmin() ? <SystemHealthPanel /> : <DashboardEmpty>Recursos disponíveis apenas para administradores.</DashboardEmpty>}
+          <DashboardDependencyHealth />
+          {isAdmin() && (
+            <div className="mt-4 border-t border-border/60 pt-4">
+              <p className="mb-3 text-caption font-medium uppercase tracking-wide text-text-tertiary">Recursos do host</p>
+              <SystemHealthPanel />
+            </div>
+          )}
         </DashboardPanel>
       </section>
 
@@ -890,125 +1062,124 @@ function NotFoundPage() {
 }
 
 function HealthPage() {
-  const [healthData, setHealthData] = useState<{ status: string; version: string } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [checkedAt, setCheckedAt] = useState<string | null>(null)
+  const { data, isLoading, error, isFetching, refetch } = useHealthSnapshot()
 
-  const loadHealth = useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const res = await fetch('/health')
-      if (!res.ok) throw new Error(await apiErrorMessage(res))
-      const data = await res.json().catch(() => null)
-      if (!data || typeof data !== 'object' || typeof data.status !== 'string' || typeof data.version !== 'string') {
-        throw new Error('Resposta inválida do servidor')
-      }
-      setHealthData(data)
-      setCheckedAt(new Date().toLocaleTimeString('pt-BR', {
-        timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit',
-      }))
-    } catch (e) {
-      const raw = e instanceof Error ? e.message : ''
-      const friendly = e instanceof TypeError
-        ? 'Falha de rede ao contatar o servidor'
-        : /^Request failed \(\d+\)$/.test(raw)
-          ? raw.replace('Request failed', 'Falha na requisição')
-          : raw === 'Resposta inválida do servidor'
-            ? raw
-            : 'Erro inesperado ao verificar o sistema'
-      setHealthData(null)
-      setError(friendly)
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadHealth()
-  }, [loadHealth])
-
-  const healthy = healthData?.status === 'ok'
-  const statusColor = healthy ? 'text-success' : 'text-error'
-  const statusBg = healthy ? 'bg-success/10' : 'bg-error/10'
-  const statusBorder = healthy ? 'border-success/30' : 'border-error/30'
-  const statusDot = healthy ? 'bg-success' : 'bg-error'
-  const statusLabel = healthData ? (healthy ? 'Operacional' : 'Indisponível') : 'Verificando…'
+  const services = data?.services ?? []
+  const okCount = services.filter((service) => service.status === 'ok').length
+  const down = services.filter((service) => service.status === 'down')
+  const unknown = services.filter((service) => service.status === 'unknown')
+  const healthy = data?.status === 'ok'
+  const incomplete = unknown.length > 0
+  const positive = healthy && !incomplete
 
   return (
     <PageContainer>
       <PageHeader
-        eyebrow="Sistema"
+        eyebrow="Diagnóstico"
         title="Saúde do sistema"
-        subtitle="Status do backend e versão em execução."
+        subtitle="Dependências e interconexões do AgentOS."
         actions={
           <button
-            onClick={() => void loadHealth()}
-            disabled={isLoading}
+            onClick={() => void refetch()}
+            disabled={isFetching}
             className="rounded-lg border border-border bg-surface px-4 py-2 text-sm text-text-secondary transition hover:text-text-primary disabled:opacity-50"
           >
-            {isLoading ? 'Verificando…' : 'Verificar novamente'}
+            {isFetching ? 'Verificando…' : 'Verificar novamente'}
           </button>
         }
       />
 
-      <div className="mt-6 max-w-xl space-y-4">
+      <div className="mt-6 max-w-4xl space-y-4">
         <p className="sr-only" role="status" aria-live="polite">
-          {isLoading ? 'Verificando sistema…' : !error && healthData ? `Sistema ${statusLabel}` : ''}
+          {isLoading && !data
+            ? 'Verificando dependências…'
+            : data
+              ? down.length
+                ? 'Sistema degradado'
+                : incomplete
+                  ? 'Verificação parcial; nem todas as dependências foram verificadas'
+                  : 'Todas as dependências operacionais'
+              : ''}
         </p>
 
-        {isLoading && !healthData && (
-          <div className="brand-card h-48 animate-pulse" role="status" aria-label="Carregando status do sistema" />
+        {isLoading && !data && (
+          <div className="grid gap-3 sm:grid-cols-2" role="status" aria-label="Carregando status do sistema">
+            {Array.from({ length: 4 }).map((_, index) => (
+              <div key={index} className="brand-card h-28 animate-pulse" />
+            ))}
+          </div>
         )}
 
         {error && !isLoading && (
           <div role="alert" className="rounded-xl border border-error/30 bg-error/10 p-4 text-sm text-error">
-            Não foi possível verificar o sistema: {error}
+            {healthErrorMessage(error)}
           </div>
         )}
 
-        {healthData && (
-          <div className={`brand-card border p-6 text-center ${statusBorder} ${statusBg}`}>
-            <div className="mx-auto mb-4 grid h-12 w-12 place-items-center rounded-full border border-border bg-bg-elevated">
-              <span className={`inline-block h-3 w-3 rounded-full ${statusDot}`} aria-hidden="true" />
+        {data && (
+          <>
+            {data.partial && (
+              <div role="status" className="rounded-xl border border-warning/30 bg-warning/10 p-4 text-sm text-warning">
+                Diagnóstico completo indisponível neste processo. Reinicie o AgentOS para verificar gateway, plugin e armazenamento.
+              </div>
+            )}
+            <div className={`brand-card border p-5 ${positive ? 'border-success/30' : 'border-warning/30'}`}>
+              <div className="flex items-center gap-3">
+                <span className={`h-3 w-3 rounded-full ${positive ? 'bg-success' : 'bg-warning'}`} aria-hidden="true" />
+                <div className="min-w-0 flex-1">
+                  <h2 className="text-h3 font-semibold text-text-primary">
+                    {down.length
+                      ? 'Sistema degradado'
+                      : incomplete
+                        ? 'Verificação parcial'
+                        : 'Sistema operacional'}
+                  </h2>
+                  <p className="mt-1 text-body-sm text-text-secondary">
+                    {down.length
+                      ? `Fora do ar: ${down.map((service) => service.label).join(', ')}.`
+                      : incomplete
+                        ? `Não verificadas: ${unknown.map((service) => service.label).join(', ')}.`
+                        : 'Todas as dependências responderam na última verificação.'}
+                  </p>
+                </div>
+                <span className={`shrink-0 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide ${positive ? 'border-success/30 bg-success/10 text-success' : 'border-warning/30 bg-warning/10 text-warning'}`}>
+                  {okCount}/{services.length} OK
+                </span>
+              </div>
             </div>
-            <h2 className="text-h3 font-semibold text-text-primary">Status do sistema</h2>
-            <p className={`mt-1 inline-flex items-center gap-2 text-body font-medium ${statusColor}`}>
-              <span className={`inline-block h-2 w-2 rounded-full ${statusDot}`} aria-hidden="true" />
-              {statusLabel}
-            </p>
-          </div>
-        )}
 
-        {healthData && (
-          <div className="brand-card p-5">
-            <dl className="space-y-3 text-sm">
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-text-tertiary">Status</dt>
-                <dd className={`font-medium ${statusColor}`}>{statusLabel}</dd>
-              </div>
-              <div className="h-px bg-border" />
-              <div className="flex items-center justify-between gap-4">
-                <dt className="text-text-tertiary">Versão</dt>
-                <dd className="font-mono text-text-primary">{healthData.version}</dd>
-              </div>
-              {checkedAt && (
-                <>
-                  <div className="h-px bg-border" />
-                  <div className="flex items-center justify-between gap-4">
-                    <dt className="text-text-tertiary">Última verificação</dt>
-                    <dd className="text-text-secondary">{checkedAt}</dd>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {services.map((service) => (
+                <div key={service.id} className="brand-card p-4">
+                  <div className="flex items-start gap-2">
+                    <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${healthDotClass(service.status)}`} aria-hidden="true" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-h4 font-medium text-text-primary">{service.label}</p>
+                      <p className="mt-1 text-body-sm text-text-secondary">{service.detail}</p>
+                    </div>
+                    <span className={`shrink-0 text-caption font-medium ${healthStateClass(service.status)}`}>
+                      {HEALTH_STATE_LABEL[service.status]}
+                    </span>
                   </div>
-                </>
-              )}
-            </dl>
-          </div>
-        )}
+                  {typeof service.latency_ms === 'number' && service.status !== 'unknown' && (
+                    <p className="mt-2 font-mono text-caption text-text-tertiary">
+                      {service.latency_ms === 0 ? '<1 ms' : `${service.latency_ms} ms`}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
 
-        <Link to="/" className="inline-flex items-center gap-1 text-sm text-accent transition hover:text-accent-hover">
-          ← Voltar para o Dashboard
-        </Link>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-caption text-text-tertiary">
+                Verificado em {formatHealthTime(data.checked_at)} BRT · atualiza a cada 15s
+              </p>
+              <Link to="/" className="inline-flex text-sm text-accent transition hover:text-accent-hover">
+                ← Voltar para o Dashboard
+              </Link>
+            </div>
+          </>
+        )}
       </div>
     </PageContainer>
   )
