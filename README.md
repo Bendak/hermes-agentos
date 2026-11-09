@@ -2,95 +2,83 @@
 
 A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com) — dashboard, session history, kanban board, cron editor, profile editor, and more. Runs as an s6 service inside the Hermes container, or standalone alongside any Hermes installation.
 
-**Version:** 1.0.0
+**Version:** 0.1.0
+
+## Chat transport
+
+AgentOS supports two transports for chat turns:
+
+- **Plugin mode (recommended)** — `AGENTOS_CHANNEL=plugin`: AgentOS connects to the Hermes `agentos-channel` plugin over WebSocket (`ws://127.0.0.1:9130/ws`), enabling per-user identity, streaming drafts, thinking/tool frames, native approval cards and reconnect/resume.
+- **Legacy HTTP mode** — `AGENTOS_CHANNEL=http`: AgentOS calls the Hermes HTTP API (`HERMES_API_URL`).
+
+Both modes are supported at the moment. Environment variables and operational details are in [CHANNEL.md](CHANNEL.md).
 
 ## Features
 
-- **Agent Dashboard** — Live status cards for all your Hermes profiles (model, provider, gateway state, session count, idle/running status). Auto-discovers the default profile and all sub-profiles. Includes hardware monitoring widget (CPU/RAM/Disk)
-- **Session History** — Browse, search, and filter all conversation sessions with FTS5 full-text search
-- **Session Detail** — Read-only chat thread viewer with reasoning blocks, tool call expansion, chronological message order (oldest first), pagination with page navigation, follow-tail auto-scroll, and floating scroll-to-top/bottom buttons
-- **Analytics Dashboard** — Token usage analytics (per-model breakdown, 7-day trend charts, cache hit rates), activity heatmap (day×hour grid in local timezone), and live system resource monitoring (CPU, RAM, disk, uptime, load average)
-- **Kanban Board** — Interactive task board with drag-and-drop between 5 columns (backlog, ready, running, done, blocked), markdown rendering in cards, task detail view, and archived toggle
-- **Task Editor** — Edit title, body, assignee, priority, and status in a modal dialog
-- **Filters & Search** — Filter kanban tasks by assignee, priority, status; search by title
-- **Bulk Operations** — Multi-select tasks for batch status changes
-- **Config Viewer** — Collapsible tree + YAML toggle with secret redaction and search/filter
-- **Config Editor** — Inline editors (text, number, boolean, list) with atomic write and secret field protection
-- **Skills Hub** — Grid view of installed skills with category colors, search, filter, sort, and detail modal
-- **Workflow Editor** — React Flow canvas with custom nodes (trigger/action/condition), full CRUD
-- **Workflow Execution** — Toposort engine with cycle detection, Run Now, run history, and node config
-- **Authentication** — JWT-based auth with login page, protected routes, and multi-user support. Password hashing via `hashlib.pbkdf2_hmac` (bcrypt-free, stdlib only)
-- **User Management** — Admin settings page to list, create, and delete users, and change passwords
-- **Cron Job Editor** — CRUD operations on cron jobs with run now, pause/resume, and inline schedule/prompt editing
-- **Advanced Profile Editor** — 6-tab editor: Model, Agent, Toolsets, Description, Memory (SOUL.md), and Preview (live YAML)
-- **Dark/Light Mode** — Toggle in navbar with localStorage persistence
-- **Keyboard Shortcuts** — ⌘K quick search, `g+{d,s,t,c,k,w}` navigation, `?` help modal
-- **Responsive Design** — Hamburger menu on mobile, adaptive layout
-- **Markdown Everywhere** — react-markdown + remark-gfm + rehype-highlight in chat, cards, comments, and tasks
-- **Visual Identity** — Dark mission-control aesthetic with teal/gold accents, Inter + JetBrains Mono typography
-- **Cross-Platform** — Works in Docker containers, Linux/macOS pip installs, and Windows
+- **App shell** — Collapsible sidebar (state persisted in `localStorage`), contextual top bar, frosted-glass chrome, mobile drawer, and light/dark themes
+- **Agent Dashboard** — Live status cards for Hermes profiles, recent activity, system-resource meters, and a dependency-health summary linking to the full health page
+- **Chat with Hermes** — Streamed replies, thinking/tool timeline groups, markdown, attachments (clipboard paste included), approval cards, voice input, and a per-user chat profile. Uses the **agentos-channel plugin** (recommended) or the legacy HTTP transport; see [CHANNEL.md](CHANNEL.md)
+- **System Health** — `/system-health` shows AgentOS, Hermes API, channel/plugin, auth database, and uploads, with latency, status and a manual re-check
+- **Session History** — Browse, search, and filter conversation sessions with FTS5 full-text search
+- **Session Detail** — Read-only transcript with reasoning blocks, tool-call expansion, pagination and follow-tail navigation
+- **Kanban Board** — Task board with drag-and-drop, markdown cards, task detail, runs, comments, artifacts and logs
+- **Analytics Dashboard** — Token usage (per-model, cache, reasoning, cost), 7-day trends, activity heatmap, and host resources
+- **Skills Hub** — Grid of installed skills with categories, search, sorting, detail modal and per-profile usage
+- **Workflow Editor** — React Flow canvas with trigger/action/condition nodes, CRUD, execution history and node results
+- **Cron Job Editor** — CRUD, run-now, pause/resume, schedules and delivery settings
+- **Profiles** — Profile cards plus a 6-tab editor: Model, Agent, Toolsets, Description, Memory (SOUL.md) and Preview; per-user chat-profile mapping
+- **Memory Monitor** — Honcho workspaces, peers, representation health, queue and recent conclusions, isolated per profile
+- **Config Viewer/Editor** — Tree + YAML views with secret redaction, atomic writes and admin-only editing
+- **Users & Auth** — JWT login, roles, password management, per-user chat profile, token refresh
+- **Markdown Everywhere** — react-markdown + remark-gfm + rehype-highlight in chat, cards, comments and tasks
+- **Responsive** — Desktop sidebar, tablet rail, mobile drawer; verified down to 390 px (320 px is a known cosmetic debt)
+- **Cross-platform** — Runs as an s6 service inside the Hermes container, or standalone alongside a Hermes installation
 
 ## Screenshots
+
+The committed screenshots use the current shell. Personal names, real user rows and
+internal session/job titles are blurred; generic service/test accounts remain visible.
+Do not commit a screenshot with readable personal data or credentials.
 
 ### Login
 
 ![Login](screenshots/00-login.png)
 
-### Dashboard — Agent Health Cards
+### Dashboard — health, activity and resources
 
 ![Dashboard](screenshots/01-dashboard.png)
 
-### Session History
+### Chat — channel-backed conversation
 
-![Sessions](screenshots/02-sessions.png)
+![Chat](screenshots/02-chat.png)
 
-### Kanban Board
+### Sessions — history and search
 
-![Kanban](screenshots/03-kanban.png)
+![Sessions](screenshots/03-sessions.png)
 
-### Config Viewer (with secret redaction)
+### Workflows — canvas editor
 
-![Config](screenshots/04-config.png)
+![Workflows](screenshots/04-workflows.png)
 
-### Skills Hub
+### Cron — scheduled jobs
 
-![Skills Hub](screenshots/05-skills.png)
+![Cron](screenshots/05-cron.png)
 
-### Workflow Editor
+### Profiles — per-agent configuration
 
-![Workflows](screenshots/06-workflows.png)
+![Profiles](screenshots/06-profiles.png)
 
-### Cron Job Editor
+### Analytics — tokens, trends and host resources
 
-![Cron Jobs](screenshots/07-cron.png)
+![Analytics](screenshots/07-analytics.png)
 
-### Profile Editor — Grid
+### System health — dependencies and interconnections
 
-![Profiles](screenshots/08-profiles.png)
+![System Health](screenshots/08-system-health.png)
 
-### User Management
+### Users — accounts and chat-profile mapping
 
-![User Management](screenshots/09-settings.png)
-
-### Profile Editor — Model Tab
-
-![Profile Editor - Model](screenshots/10-profile-editor-model.png)
-
-### Profile Editor — Toolsets Tab
-
-![Profile Editor - Toolsets](screenshots/11-profile-editor-toolsets.png)
-
-### Profile Editor — YAML Preview Tab
-
-![Profile Editor - Preview](screenshots/12-profile-editor-preview.png)
-
-### Analytics — Token Usage, Activity Heatmap & System Resources
-
-![Analytics](screenshots/13-analytics.png)
-
-### Session Detail — Pagination with Follow Tail
-
-![Session Pagination](screenshots/14-session-pagination.png)
+![Users](screenshots/09-users.png)
 
 ## Quick Start (Dev Mode)
 
@@ -98,7 +86,9 @@ A web UI control plane for [Hermes Agent](https://hermes-agent.nousresearch.com)
 cd agentos
 
 # Backend
-pip install fastapi uvicorn[standard] aiosqlite pydantic-settings cachetools httpx pyjwt
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -e .
 python3 -m uvicorn backend.main:app --host 0.0.0.0 --port 9120
 
 # Frontend (another terminal)
@@ -111,14 +101,19 @@ Backend runs on http://localhost:9120, frontend dev server on http://localhost:5
 
 ### First-Run Authentication
 
-On first launch, AgentOS auto-creates an admin user from environment variables:
+AgentOS does **not** ship a default `admin`/`admin` account. On an empty database,
+create the first admin through the first-run endpoint (it only works while no users
+exist):
 
 ```bash
-export AGENTOS_ADMIN_USER=admin
-export AGENTOS_ADMIN_PASS=your-secure-password
+curl -sS -X POST http://localhost:9120/api/auth/register-first \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"your-secure-password"}'
 ```
 
-If not set, defaults to `admin` / `admin` (change immediately). After login, visit `/settings` to manage users.
+The response contains the access/refresh tokens and the new admin user. After that,
+manage accounts at `/settings` (admin) or with the authenticated
+`POST /api/auth/register` endpoint. The login page has no pre-filled credentials.
 
 For production, build the frontend and serve via FastAPI:
 
@@ -160,7 +155,7 @@ CI runs both jobs on every push (`.github/workflows/tests.yml`).
 
 Before starting, verify:
 ```bash
-# Check Python version (3.10+ required)
+# Check Python version (3.11+ required)
 python3 --version
 
 # Check Node.js (18+ required)
@@ -184,7 +179,7 @@ git clone https://github.com/Bendak/hermes-agentos.git agentos 2>/dev/null || cd
 
 # 2. Install Python dependencies
 cd /opt/data/agentos
-pip install fastapi uvicorn[standard] aiosqlite pydantic-settings cachetools httpx
+pip install -e .
 
 # 3. Build frontend
 cd /opt/data/agentos/frontend
@@ -239,7 +234,7 @@ git clone https://github.com/Bendak/hermes-agentos.git agentos
 cd agentos
 
 # 3. Install Python packages
-pip3 install fastapi uvicorn[standard] aiosqlite pydantic-settings cachetools httpx
+pip3 install -e .
 
 # 4. Build frontend
 cd frontend
@@ -287,7 +282,7 @@ git clone https://github.com/Bendak/hermes-agentos.git agentos
 cd agentos
 
 # 3. Install Python packages
-pip install fastapi uvicorn[standard] aiosqlite pydantic-settings cachetools httpx
+pip install -e .
 
 # 4. Build frontend
 cd frontend
@@ -390,6 +385,22 @@ AGENTOS_DATA_DIR=/custom/path    # Explicit override
 HERMES_DATA_DIR=/hermes/path     # Hermes native variable (also detected)
 ```
 
+### Chat channel
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AGENTOS_CHANNEL` | `http` when unset | `plugin` (recommended) or `http` (legacy) |
+| `AGENTOS_CHANNEL_URL` | `ws://127.0.0.1:9130/ws` | Plugin WebSocket endpoint |
+| `AGENTOS_CHANNEL_TOKEN` | — | Shared secret with the `agentos-channel` plugin |
+| `AGENTOS_CHANNEL_MEDIA_ROOT` | `<data>/agentos/uploads` | Allowed root for inbound/outbound attachments |
+| `AGENTOS_CHANNEL_MAX_MEDIA_MB` | `25` | Attachment size cap (plugin side) |
+| `HERMES_API_URL` | `http://localhost:8642` | Hermes HTTP API used by legacy mode |
+
+The AgentOS s6 service does not receive these variables directly; when they are not in
+the process environment they are resolved from `<AGENTOS_DATA_DIR>/.env` by
+`backend.channel_client`. Restart only the AgentOS service after changing them. See
+[CHANNEL.md](CHANNEL.md).
+
 ### Profile Discovery
 
 AgentOS discovers profiles from two locations:
@@ -404,24 +415,22 @@ All profiles are shown on the dashboard with live gateway state, model info, and
 ```
 ┌─────────────────┐
 │   Browser       │
-│  localhost:9120 │
+│  AgentOS :9120  │
 └────────┬────────┘
          │
 ┌────────▼────────┐
 │   AgentOS       │
 │  FastAPI +      │
 │  React (Vite)   │
-│  Port 9120      │
-└────────┬────────┘
-         │
-┌────────▼────────┐
-│   Hermes Agent  │
-│  localhost:8642 │
-│  state.db       │
-│  kanban.db      │
-│  profiles/      │
-│  config.yaml    │
-└─────────────────┘
+└───┬─────────┬───┘
+    │         │
+    │         └──────────────► Hermes HTTP API :8642   (legacy mode)
+    │
+    └────────────────────────► agentos-channel plugin :9130 (recommended)
+                                   │
+                              Hermes gateway
+                              state.db / kanban.db
+                              profiles/ / config.yaml
 ```
 
 AgentOS reads Hermes state directly from:
@@ -433,9 +442,12 @@ AgentOS reads Hermes state directly from:
 
 ## API Endpoints
 
+Selected endpoints (the live OpenAPI schema is at `/docs`):
+
 | Endpoint | Description |
 |---|---|
-| `GET /health` | Health check |
+| `GET /health` | Public liveness check |
+| `GET /api/health/status` | Authenticated dependency snapshot (AgentOS, Hermes, channel, DB, uploads) |
 | `GET /api/agents` | List all profiles with live status |
 | `GET /api/sessions` | Paginated session list with filters (search, profile, date) |
 | `GET /api/sessions/{id}` | Session metadata |
@@ -446,16 +458,26 @@ AgentOS reads Hermes state directly from:
 | `GET /api/config` | Config tree (secrets redacted) |
 | `GET /api/config/raw` | Config as YAML text (secrets redacted) |
 | `PATCH /api/config` | Update config fields (secret fields rejected) |
+| `GET /api/honcho/summary` | Honcho workspaces, peers and representation health |
 | `GET /api/skills` | List all installed skills (metadata only) |
 | `GET /api/skills/{slug}` | Get skill detail (full SKILL.md + file list) |
 | `GET /api/profiles` | List profiles with model, skill counts, external dirs |
 | `POST /api/auth/login` | Login (returns JWT token) |
+| `POST /api/auth/register-first` | Create the first admin (only while no users exist) |
+| `POST /api/auth/refresh` | Refresh an access token |
+| `GET /api/auth/check` | First-run/user-exists check |
 | `GET /api/auth/me` | Current user info |
 | `POST /api/auth/logout` | Logout (invalidate token) |
-| `GET /api/users` | List all users (admin) |
-| `POST /api/users` | Create user (admin) |
-| `DELETE /api/users/{id}` | Delete user (admin) |
-| `PATCH /api/users/{id}/password` | Change user password (admin) |
+| `GET /api/auth/users` | List all users (admin) |
+| `PUT /api/auth/users/{id}/profile` | Set a user's chat profile (admin) |
+| `PUT /api/auth/users/{id}/password` | Change user password (admin) |
+| `DELETE /api/auth/users/{id}` | Delete user (admin) |
+| `GET /api/chat/sessions` | List the current user's chat sessions |
+| `POST /api/chat/sessions` | Create a chat session |
+| `POST /api/chat/sessions/{id}/stream` | Stream a chat turn (SSE) |
+| `POST /api/chat/uploads` | Upload an attachment |
+| `POST /api/chat/approvals` | Resolve an approval card |
+| `POST /api/voice` | Transcribe voice input |
 | `GET /api/workflows` | List all workflows |
 | `GET /api/workflows/{id}` | Get workflow detail (nodes + edges) |
 | `POST /api/workflows` | Create new workflow |
@@ -464,19 +486,19 @@ AgentOS reads Hermes state directly from:
 | `POST /api/workflows/{id}/run` | Execute workflow (toposort engine) |
 | `GET /api/workflows/{id}/runs` | Get workflow run history |
 | `GET /api/runs/{id}` | Get run detail with node results |
-| `GET /api/cron/jobs` | List all cron jobs |
-| `POST /api/cron/jobs` | Create cron job |
-| `PUT /api/cron/jobs/{id}` | Update cron job |
-| `DELETE /api/cron/jobs/{id}` | Delete cron job |
-| `POST /api/cron/jobs/{id}/run` | Run cron job now |
-| `POST /api/cron/jobs/{id}/pause` | Pause cron job |
-| `POST /api/cron/jobs/{id}/resume` | Resume cron job |
+| `GET /api/cron` | List all cron jobs |
+| `POST /api/cron` | Create cron job |
+| `PUT /api/cron/{id}` | Update cron job |
+| `DELETE /api/cron/{id}` | Delete cron job |
+| `POST /api/cron/{id}/run` | Run cron job now |
+| `POST /api/cron/{id}/pause` | Pause cron job |
+| `POST /api/cron/{id}/resume` | Resume cron job |
 | `GET /api/profiles/{name}` | Get profile detail with config + soul |
 | `PUT /api/profiles/{name}/soul` | Write SOUL.md content |
 
 ## Tech Stack
 
-- **Backend** — FastAPI (Python 3.13+), SQLite, uvicorn, aiosqlite
+- **Backend** — FastAPI (Python 3.11+), SQLite, uvicorn, aiosqlite
 - **Frontend** — React 18, Vite 5, Tailwind CSS, TanStack Query, React Router, @dnd-kit (drag-and-drop), React Flow (workflow canvas), react-markdown + remark-gfm + rehype-highlight
 - **Auth** — JWT (stdlib hmac), bcrypt-free password hashing (`hashlib.pbkdf2_hmac`), no C dependencies
 - **Fonts** — Inter (UI), JetBrains Mono (code/data)
@@ -505,8 +527,12 @@ AgentOS reads Hermes state directly from:
 - [x] Phase 15 — User Management (Settings page, create/delete users, change passwords)
 - [x] Phase 16 — Cron Job Editor (CRUD, run now, pause/resume, edit schedule/prompt)
 - [x] Phase 17 — Profile Editor (6 tabs: Model, Agent, Toolsets, Description, Memory, Preview)
+- [x] Phase 18 — Shell Branding 2026 (sidebar shell, contextual top bar, `.brand-card`, responsive rail/drawer)
+- [x] Phase 19 — Chat channel (agentos-channel plugin + legacy HTTP, streaming, tools, approvals, attachments)
+- [x] Phase 20 — Dependency health (dashboard summary + `/system-health` page)
+- [x] Phase 21 — Family profiles (per-user chat profile, scoped sessions, isolated Honcho memory)
 
-See [PLAN.md](PLAN.md) for the full roadmap and [DESIGN.md](DESIGN.md) for the visual identity spec.
+See [PLAN.md](PLAN.md) for the full roadmap, [CHANNEL.md](CHANNEL.md) for chat transport, and [DESIGN.md](DESIGN.md) for the visual identity spec.
 
 ## License
 

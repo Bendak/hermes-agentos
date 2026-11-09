@@ -5,6 +5,11 @@
 **Status:** Approved for incremental implementation
 **Repo:** Public GitHub (no secrets in code)
 
+> **Current state (Nov 2026):** this is the historical implementation plan. The current
+> architecture adds the AgentOS shell/branding, the `agentos-channel` plugin (with legacy
+> HTTP still supported), dependency health, family profiles and Honcho memory. See
+> [README.md](README.md) and [CHANNEL.md](CHANNEL.md) for the authoritative current docs.
+
 ---
 
 ## 1. Final Architecture
