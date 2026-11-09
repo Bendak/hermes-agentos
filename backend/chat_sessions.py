@@ -27,12 +27,10 @@ from typing import Any, Optional
 from backend.auth import DB_PATH
 
 # username -> Hermes profile. Overridable with AGENTOS_CHAT_PROFILES (JSON) so
-# the mapping lives in config, not in code, when the family grows.
+# the mapping lives in config, not in code. Only the operation/admin account
+# has an implicit mapping; every real user is assigned by an admin.
 _DEFAULT_PROFILES = {
-    "user_a": "default",
     "hermes": "default",   # conta de operação/admin do AgentOS
-    "user_b": "private_b",
-    "user_c": "private_a",
 }
 
 # Gateway MAX_TITLE_LENGTH (hermes_state.py): a longer title is rejected

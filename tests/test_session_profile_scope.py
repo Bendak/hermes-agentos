@@ -21,7 +21,7 @@ def _make_root_db(tmp_path):
     rows = []
     # 25 sessões da família (mais recentes) + 5 do usuário (mais antigas)
     for i in range(25):
-        rows.append((f"fam{i:02d}", "cli", "m", f"familia {i}", 10_000 + i, None, 0, 0, None, 0, 0, "private_a"))
+        rows.append((f"fam{i:02d}", "cli", "m", f"private {i}", 10_000 + i, None, 0, 0, None, 0, 0, "private_a"))
     for i in range(5):
         rows.append((f"own{i}", "cli", "m", f"minha {i}", 100 + i, None, 0, 0, None, 0, 0, "user_a"))
     con.executemany("INSERT INTO sessions VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", rows)

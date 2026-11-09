@@ -24,6 +24,7 @@ def env(tmp_path, monkeypatch):
     }))
     monkeypatch.setattr(honcho, "CONFIG_PATH", str(cfg))
     monkeypatch.setattr(honcho, "AGENTOS_DB", str(tmp_path / "agentos.db"))
+    monkeypatch.setenv("HONCHO_HUMAN_PEERS", "user_a")
     honcho._cache = None
     return tmp_path
 

@@ -401,6 +401,24 @@ the process environment they are resolved from `<AGENTOS_DATA_DIR>/.env` by
 `backend.channel_client`. Restart only the AgentOS service after changing them. See
 [CHANNEL.md](CHANNEL.md).
 
+### Deployment-specific config (never committed)
+
+Real profile names, usernames and peer ids are deployment data, not source. Keep them
+in the untracked `<AGENTOS_DATA_DIR>/.env`:
+
+| Variable | Purpose |
+|---|---|
+| `HIDDEN_PROFILES` | Comma-separated profiles hidden from non-admin pickers (e.g. private chat profiles) |
+| `HONCHO_HUMAN_PEERS` | Comma-separated Honcho peer ids shown in the memory monitor |
+
+The public repository ships **no default family names, private domains, internal IPs,
+server hostnames or real profile mappings**. The `Secrets Check` workflow rejects
+tracked `.env`/key files and private RFC1918 addresses; add a `PII_PATTERNS` repository
+secret to extend it with deployment-specific names.
+
+`AGENTOS_CHAT_PROFILES` remains a legacy process-env map; for normal use assign each
+user's chat profile in `/settings` (stored in the local DB, not in git).
+
 ### Profile Discovery
 
 AgentOS discovers profiles from two locations:

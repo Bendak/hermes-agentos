@@ -25,6 +25,8 @@ def family_profiles(tmp_path, monkeypatch):
     import backend.agents as agents
     import backend.profile_discovery as discovery
     import backend.profiles as profiles
+    from backend.config import settings
+    monkeypatch.setattr(settings, "HIDDEN_PROFILES", "private_a")
     monkeypatch.setattr(profiles, "PROFILES_DIR", str(root))
     monkeypatch.setattr(discovery, "PROFILES_DIR", str(root))
     monkeypatch.setattr(agents, "PROFILES_DIR", str(root))
@@ -35,8 +37,8 @@ def test_selectable_list_hides_family_profiles(client, admin_headers, family_pro
     all_profiles = client.get("/api/profiles", headers=admin_headers).json()
     ids = {p["id"] for p in all_profiles}
     assert "private_a" in ids  # admin grid still sees it
-    user_c = next(p for p in all_profiles if p["id"] == "private_a")
-    assert user_c["selectable"] is False
+    hidden = next(p for p in all_profiles if p["id"] == "private_a")
+    assert hidden["selectable"] is False
 
     pickable = client.get("/api/profiles?selectable=1", headers=admin_headers).json()
     pids = {p["id"] for p in pickable}
@@ -88,13 +90,24 @@ def test_viewer_cannot_read_hidden_profile_content(client, admin_headers, viewer
     assert client.get("/api/profiles/coder", headers=viewer_headers).status_code == 200
 
 
-def test_empty_hidden_env_is_fail_closed(client, admin_headers, family_profiles, monkeypatch):
+def test_hidden_profile_reads_local_config(client, admin_headers, family_profiles, monkeypatch):
+    from backend import config as config_mod
     from backend.config import settings
     monkeypatch.setattr(settings, "HIDDEN_PROFILES", "   ")
+    monkeypatch.setattr(config_mod, "_dotenv_value", lambda name: "private_a")
     r = client.post("/api/tasks", json={"title": "t3", "assignee": "private_a"}, headers=admin_headers)
     assert r.status_code == 400, r.text
     ids = {p["id"] for p in client.get("/api/profiles?selectable=1", headers=admin_headers).json()}
     assert "private_a" not in ids
+
+
+def test_empty_hidden_config_has_no_implicit_list(client, admin_headers, family_profiles, monkeypatch):
+    from backend import config as config_mod
+    from backend.config import settings
+    monkeypatch.setattr(settings, "HIDDEN_PROFILES", "")
+    monkeypatch.setattr(config_mod, "_dotenv_value", lambda name: "")
+    ids = {p["id"] for p in client.get("/api/profiles?selectable=1", headers=admin_headers).json()}
+    assert "private_a" in ids  # deployment must configure its own hidden list
 
 
 def test_non_string_assignee_is_rejected(client, admin_headers, family_profiles):

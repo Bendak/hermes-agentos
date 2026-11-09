@@ -6,7 +6,8 @@ Usuário comum nunca escolhe o profile; só o admin, via API.
 from backend import auth, chat_sessions
 
 
-def test_user_column_overrides_legacy_map_and_can_be_cleared(client):
+def test_user_column_overrides_legacy_map_and_can_be_cleared(client, monkeypatch):
+    monkeypatch.setenv("AGENTOS_CHAT_PROFILES", '{"user_b": "private_b"}')
     created = auth.create_user("zz_map_probe", "pw-123456", "viewer")
     uid = created["id"]
     try:

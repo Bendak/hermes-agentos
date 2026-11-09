@@ -33,7 +33,31 @@ _HTTP_TIMEOUT = 5.0
 _CACHE_TTL = 60.0
 _SNAPSHOT_INTERVAL = 3600
 _MAX_WORKSPACES = 5
-_HUMAN_PEERS = ("user_a", "user_b")
+
+
+def _human_peers() -> tuple[str, ...]:
+    """Human peer ids are deployment config, not source code.
+
+    Resolution: process env ``HONCHO_HUMAN_PEERS`` (comma-separated), then the
+    untracked ``$AGENTOS_DATA_DIR/.env``. An unset/empty value means the
+    dashboard shows no human peer cards; nothing personal is baked into git.
+    """
+    raw = os.environ.get("HONCHO_HUMAN_PEERS", "").strip()
+    if not raw:
+        base = os.environ.get("AGENTOS_DATA_DIR") or os.path.dirname(CONFIG_PATH)
+        try:
+            with open(os.path.join(base, ".env"), "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line.startswith("export "):
+                        line = line[7:].lstrip()
+                    if line.startswith("HONCHO_HUMAN_PEERS="):
+                        raw = line.split("=", 1)[1].strip().strip('"').strip("'")
+                        break
+        except OSError:
+            pass
+    return tuple(p.strip().lower() for p in raw.split(",") if p.strip())
+
 
 _OBS_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2})", re.MULTILINE)
 
@@ -397,7 +421,7 @@ async def collect() -> dict:
                 if ws_id == order[0]:
                     for p in peers:
                         pid = p.get("id") if isinstance(p, dict) else None
-                        if pid not in _HUMAN_PEERS:
+                        if pid not in _human_peers():
                             continue
                         pentry: dict = {"id": pid}
                         try:

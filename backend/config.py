@@ -31,6 +31,28 @@ def _default_data_dir() -> str:
     return os.path.join(home, ".hermes")
 
 
+def _dotenv_value(name: str) -> str:
+    """Read a setting from AGENTOS_DATA_DIR/.env when the process env lacks it."""
+    bases = [os.environ.get("AGENTOS_DATA_DIR"), _default_data_dir(), "/opt/data"]
+    seen: set[str] = set()
+    for base in bases:
+        if not base or base in seen:
+            continue
+        seen.add(base)
+        path = os.path.join(base, ".env")
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line.startswith("export "):
+                        line = line[7:].lstrip()
+                    if line.startswith(name + "="):
+                        return line.split("=", 1)[1].strip().strip('"').strip("'")
+        except OSError:
+            pass
+    return ""
+
+
 class Settings(BaseSettings):
     AGENTOS_DATA_DIR: str = _default_data_dir()
     AGENTOS_DB_PATH: str = ""
@@ -38,9 +60,10 @@ class Settings(BaseSettings):
     HERMES_API_KEY: str | None = None
     AGENTOS_PORT: int = 9120
     AGENTOS_HOST: str = "0.0.0.0"
-    # Profiles that exist but must not be picked as a kanban assignee or a chat
-    # profile in the UI (they answer their own user only).
-    HIDDEN_PROFILES: str = "private_b,private_a"
+    # Comma-separated profiles that must not be picked as a kanban assignee or
+    # a chat profile in the UI (they answer their own user only). Deployment
+    # specific: keep the real names in the untracked local .env, never here.
+    HIDDEN_PROFILES: str = ""
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -51,16 +74,14 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
-_DEFAULT_HIDDEN = "private_b,private_a"
-
-
 def hidden_profiles() -> set[str]:
     """Profiles that must not be picked/read by non-admins.
 
-    Empty/whitespace config falls back to the default list: a blank env must
-    never silently disable the guard (fail-closed).
+    The list is deployment configuration: process env wins, then the untracked
+    ``$AGENTOS_DATA_DIR/.env``. There is no hardcoded family/profile list in the
+    public repo.
     """
-    raw = (settings.HIDDEN_PROFILES or "").strip() or _DEFAULT_HIDDEN
+    raw = (settings.HIDDEN_PROFILES or "").strip() or _dotenv_value("HIDDEN_PROFILES")
     return {p.strip().lower() for p in raw.split(",") if p.strip()}
 
 
