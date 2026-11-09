@@ -405,7 +405,7 @@ export default function ChatPage() {
   const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([])
   const [selectedProfile, setSelectedProfile] = useState<string>('default')
 
-  const bottomRef = useRef<HTMLDivElement>(null)
+  const messagesScrollRef = useRef<HTMLDivElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const chunksRef = useRef<Blob[]>([])
@@ -419,7 +419,9 @@ export default function ChatPage() {
   const active = useMemo(() => sessions.find((s) => s.id === activeId) || null, [sessions, activeId])
 
   const scrollDown = useCallback(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = messagesScrollRef.current
+    if (!el) return
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
   }, [])
 
   useEffect(() => {
@@ -928,6 +930,57 @@ export default function ChatPage() {
     void uploadFiles(files, { preserveError: skippedType })
   }
 
+  async function pasteFromClipboard() {
+    if (!active || sending) return
+    const clip = navigator.clipboard as Clipboard & { read?: () => Promise<ClipboardItem[]> }
+    if (!clip?.read) {
+      setError('Este navegador não permite ler a área de transferência. Use o botão de anexo.')
+      return
+    }
+    try {
+      const items = await clip.read()
+      const files: File[] = []
+      let text = ''
+      let skippedType = false
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type === 'text/plain') {
+            text += await (await item.getType(type)).text()
+            continue
+          }
+          if (!type.startsWith('image/') && type !== 'application/pdf') continue
+          const blob = await item.getType(type)
+          const extByMime: Record<string, string> = {
+            'image/png': 'png',
+            'image/jpeg': 'jpg',
+            'image/webp': 'webp',
+            'image/gif': 'gif',
+            'image/bmp': 'bmp',
+            'image/svg+xml': 'svg',
+            'application/pdf': 'pdf',
+          }
+          const ext = extByMime[type]
+          if (!ext || !UPLOAD_EXTS.has(ext)) {
+            skippedType = true
+            setError(`Tipo de anexo não suportado: ${type}`)
+            continue
+          }
+          files.push(new File(
+            [blob],
+            `clipboard-${new Date().toISOString().replace(/[:.]/g, '-')}-${files.length + 1}.${ext}`,
+            { type, lastModified: Date.now() },
+          ))
+        }
+      }
+      if (text) setInput((prev) => (prev ? `${prev} ${text}` : text))
+      if (files.length) await uploadFiles(files, { preserveError: skippedType })
+      else if (!text && !skippedType) setError('A área de transferência não contém imagem ou arquivo compatível.')
+      else if (!skippedType) setError(null)
+    } catch {
+      setError('Não foi possível ler a área de transferência. Use o botão de anexo para escolher o arquivo.')
+    }
+  }
+
   async function answerApproval(card: ApprovalCard, option: ApprovalOption) {
     const id = activeIdRef.current
     if (!id) return
@@ -1122,7 +1175,7 @@ export default function ChatPage() {
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto px-4 py-4">
+          <div ref={messagesScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
             <div className="mx-auto flex max-w-3xl flex-col gap-3">
               {!active && !loadingSessions && (
                 <div className="py-16 text-center">
@@ -1213,7 +1266,6 @@ export default function ChatPage() {
                   ) : null}
                 </div>
               )}
-              <div ref={bottomRef} />
             </div>
           </div>
 
@@ -1245,6 +1297,14 @@ export default function ChatPage() {
               <button onClick={() => fileInputRef.current?.click()} disabled={sending || !active}
                 className="h-[42px] shrink-0 rounded-xl border border-border px-3 text-sm text-text-secondary hover:text-text-primary disabled:opacity-40"
                 title="Attach files" aria-label="Attach files">📎</button>
+              <button onClick={() => void pasteFromClipboard()} disabled={sending || !active}
+                className="h-[42px] w-[42px] shrink-0 grid place-items-center rounded-xl border border-border text-text-secondary hover:text-text-primary disabled:opacity-40"
+                title="Colar da área de transferência" aria-label="Colar da área de transferência">
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+                  <rect x="8" y="3" width="8" height="4" rx="1" />
+                  <path d="M9 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3" />
+                </svg>
+              </button>
               <textarea
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
