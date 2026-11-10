@@ -11,6 +11,13 @@ export default function LoginPage() {
   const [checkingFirstRun, setCheckingFirstRun] = useState(true)
   const { login, isAuthenticated } = useAuth()
   const navigate = useNavigate()
+  const theme = typeof window === 'undefined'
+    ? 'dark'
+    : (localStorage.getItem('agentos-theme') as 'dark' | 'light') || 'dark'
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('light', theme === 'light')
+  }, [theme])
 
   useEffect(() => {
     if (isAuthenticated) {
@@ -79,8 +86,13 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="rounded-xl border border-border bg-surface/40 p-8 shadow-lg">
           <div className="text-center mb-8">
-            <div className="text-4xl mb-3">🤖</div>
-            <h1 className="text-2xl font-bold text-text-primary">AgentOS</h1>
+            <h1 className="sr-only">AgentOS</h1>
+            <img
+              src={theme === 'light' ? '/logo-light.svg' : '/logo.svg'}
+              alt=""
+              className="mx-auto mb-3 h-12 w-auto"
+              aria-hidden="true"
+            />
             <p className="text-sm text-text-tertiary mt-1">
               {isFirstRun ? 'Create your admin account' : 'Sign in to continue'}
             </p>
