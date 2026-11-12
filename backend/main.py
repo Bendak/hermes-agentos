@@ -44,6 +44,11 @@ from backend.chat import router as chat_router  # noqa: E402
 
 app.include_router(chat_router)
 
+# Text-to-speech for chat replies (Edge by default, Kokoro optional)
+from backend.tts import router as tts_router  # noqa: E402
+
+app.include_router(tts_router)
+
 # Chat sessions table: create once at import/boot, not on the hot path.
 from backend.chat_sessions import init_db as _chat_sessions_init  # noqa: E402
 

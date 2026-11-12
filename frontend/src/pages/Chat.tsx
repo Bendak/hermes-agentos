@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NavBar, MarkdownRenderer } from '../App'
 import { useAuth } from '../auth/AuthContext'
 import { apiErrorMessage } from '../lib/api'
+import { useSpeech } from '../lib/speech'
 
 interface ChatSession {
   id: string
@@ -60,6 +61,150 @@ interface ChatMsg {
   error?: { code?: string; message?: string } | null
   attachments?: ChatAttachment[]
   turn_id?: string | null
+}
+
+interface UsageTotals {
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  reasoning_tokens: number
+  api_calls: number
+}
+
+interface UsageInfo {
+  available: boolean
+  model?: string | null
+  totals?: UsageTotals
+  cost?: { usd: number; status: string } | null
+  context?: { tokens: number; window: number | null } | null
+  auxiliary?: { task: string; model: string; input_tokens: number; output_tokens: number; cache_read_tokens: number; api_calls: number }[]
+}
+
+const AUTO_SPEAK_KEY = 'agentos-chat-autospeak'
+
+const TASK_LABELS: Record<string, string> = {
+  title_generation: 'Geração de título',
+  background_review: 'Revisão em background',
+}
+
+/** 1234 -> "1,2k", 3802906 -> "3,8M" (pt-BR decimal comma). */
+function fmtTok(n: number): string {
+  if (!Number.isFinite(n)) return '0'
+  const abs = Math.abs(n)
+  const one = (v: number) => v.toLocaleString('pt-BR', { maximumFractionDigits: v < 100 ? 1 : 0 })
+  if (abs >= 1_000_000) return one(n / 1_000_000) + 'M'
+  if (abs >= 1_000) return one(n / 1_000) + 'k'
+  return String(n)
+}
+
+function SpeakerIcon({ muted = false }: { muted?: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
+      <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+      {muted ? <path d="m16 9 5 6m0-6-5 6" /> : <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" />}
+    </svg>
+  )
+}
+
+function StopIcon() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="currentColor" aria-hidden="true">
+      <rect x="6" y="6" width="12" height="12" rx="2" />
+    </svg>
+  )
+}
+
+function UsageBar({ usage }: { usage: UsageInfo }) {
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpen(false)
+        buttonRef.current?.focus()
+      }
+    }
+    const onPointer = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    document.addEventListener('pointerdown', onPointer)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('pointerdown', onPointer)
+    }
+  }, [open])
+  if (!usage.available || !usage.totals) return null
+  const t = usage.totals
+  const ctx = usage.context
+  const pct = ctx && ctx.window ? Math.min(100, (ctx.tokens / ctx.window) * 100) : null
+  const pctLabel = pct === null ? '' : pct < 1 ? '<1%' : Math.round(pct) + '%'
+  return (
+    <div className="relative" ref={rootRef}>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-controls="chat-usage-panel"
+        className="flex max-w-full items-center gap-2 rounded px-1 py-0.5 text-[11px] text-text-tertiary hover:text-text-secondary focus:outline-none focus-visible:ring-1 focus-visible:ring-accent"
+        title="Uso desta conversa"
+      >
+        {ctx && (
+          <span className="flex items-center gap-1.5">
+            {pct !== null && (
+              <span className="relative h-1.5 w-12 overflow-hidden rounded-full bg-border" aria-hidden="true">
+                <span
+                  className={'absolute inset-y-0 left-0 rounded-full ' + (pct >= 80 ? 'bg-red-400' : pct >= 50 ? 'bg-amber-400' : 'bg-accent')}
+                  style={{ width: Math.max(pct, 2) + '%' }}
+                />
+              </span>
+            )}
+            <span className="whitespace-nowrap">Contexto {fmtTok(ctx.tokens)}{ctx.window ? ' / ' + fmtTok(ctx.window) : ''}{pctLabel ? ' · ' + pctLabel : ''}</span>
+          </span>
+        )}
+        <span className="hidden whitespace-nowrap sm:inline">↑{fmtTok(t.input_tokens)} ↓{fmtTok(t.output_tokens)}</span>
+        <span className="hidden whitespace-nowrap md:inline">· cache {fmtTok(t.cache_read_tokens)}</span>
+        <span className={'whitespace-nowrap ' + (ctx ? 'hidden sm:inline' : '')}>· {t.api_calls} {t.api_calls === 1 ? 'chamada' : 'chamadas'}</span>
+      </button>
+      {open && (
+        <div id="chat-usage-panel" role="region" aria-label="Uso desta conversa" className="absolute left-0 top-full z-30 mt-1 w-72 rounded-lg border border-border bg-bg-elevated p-3 text-[11px] text-text-secondary shadow-lg">
+          {usage.model && <p className="mb-2 truncate text-text-primary" title={usage.model}>{usage.model}</p>}
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-1">
+            {ctx && (<><dt>Contexto atual</dt><dd className="text-right">{ctx.tokens.toLocaleString('pt-BR')}{ctx.window ? ' / ' + ctx.window.toLocaleString('pt-BR') : ''}</dd></>)}
+            <dt>Entrada (acumulado)</dt><dd className="text-right">{t.input_tokens.toLocaleString('pt-BR')}</dd>
+            <dt>Saída</dt><dd className="text-right">{t.output_tokens.toLocaleString('pt-BR')}</dd>
+            <dt>Cache lido</dt><dd className="text-right">{t.cache_read_tokens.toLocaleString('pt-BR')}</dd>
+            {t.cache_write_tokens > 0 && (<><dt>Cache gravado</dt><dd className="text-right">{t.cache_write_tokens.toLocaleString('pt-BR')}</dd></>)}
+            {t.reasoning_tokens > 0 && (<><dt>Raciocínio</dt><dd className="text-right">{t.reasoning_tokens.toLocaleString('pt-BR')}</dd></>)}
+            <dt>Chamadas de API</dt><dd className="text-right">{t.api_calls}</dd>
+            <dt>Custo</dt>
+            <dd className="text-right">
+              {usage.cost
+                ? usage.cost.status === 'included'
+                  ? 'incluído no plano'
+                  : 'US$ ' + usage.cost.usd.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 }) + (usage.cost.status === 'estimated' ? ' (estimado)' : '')
+                : 'sem preço p/ o modelo'}
+            </dd>
+          </dl>
+          {usage.auxiliary && usage.auxiliary.length > 0 && (
+            <div className="mt-2 border-t border-border pt-2">
+              <p className="mb-1 text-text-tertiary">Tarefas auxiliares (fora do total)</p>
+              {usage.auxiliary.map((a) => (
+                <p key={a.task + a.model} className="flex justify-between gap-2">
+                  <span className="truncate" title={a.model}>{TASK_LABELS[a.task] || a.task}</span>
+                  <span className="shrink-0">↑{fmtTok(a.input_tokens)} ↓{fmtTok(a.output_tokens)} · {a.api_calls}×</span>
+                </p>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }
 
 interface LiveTool {
@@ -394,6 +539,8 @@ export default function ChatPage() {
   const [error, setError] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
   const [renamingId, setRenamingId] = useState<string | null>(null)
+  const renamingRef = useRef<string | null>(null)
+  renamingRef.current = renamingId
   const [renameValue, setRenameValue] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(false)
 
@@ -404,6 +551,16 @@ export default function ChatPage() {
   const [approvalCards, setApprovalCards] = useState<ApprovalCard[]>([])
   const [profiles, setProfiles] = useState<{ id: string; name: string }[]>([])
   const [selectedProfile, setSelectedProfile] = useState<string>('default')
+  const [usage, setUsage] = useState<UsageInfo | null>(null)
+  const [autoSpeak, setAutoSpeak] = useState<boolean>(() => {
+    try { return localStorage.getItem(AUTO_SPEAK_KEY) === '1' } catch { return false }
+  })
+  const autoSpeakRef = useRef(autoSpeak)
+  const speech = useSpeech(() => authHeaders(), (msg) => setError(msg))
+  const titleRefreshRef = useRef<number | null>(null)
+  useEffect(() => () => {
+    if (titleRefreshRef.current) window.clearTimeout(titleRefreshRef.current)
+  }, [])
 
   const messagesScrollRef = useRef<HTMLDivElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
@@ -434,8 +591,8 @@ export default function ChatPage() {
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
-  const loadSessions = useCallback(async () => {
-    setLoadingSessions(true)
+  const loadSessions = useCallback(async (silent = false) => {
+    if (!silent) setLoadingSessions(true)
     try {
       const res = await fetch('/api/chat/sessions', { headers: authHeaders() })
       if (!res.ok) throw new Error(await apiErrorMessage(res))
@@ -444,14 +601,14 @@ export default function ChatPage() {
       setSessions(rows)
       return rows
     } catch (err) {
-      setError((err as Error).message)
+      if (!silent) setError((err as Error).message)
       return []
     } finally {
-      setLoadingSessions(false)
+      if (!silent) setLoadingSessions(false)
     }
   }, [])
 
-  const loadMessages = useCallback(async (id: string, clearError = true) => {
+  const loadMessages = useCallback(async (id: string, clearError = true): Promise<ChatMsg[]> => {
     setLoadingMessages(true)
     if (clearError) setError(null)
     try {
@@ -462,13 +619,37 @@ export default function ChatPage() {
       setMessages(data)
       const lastUser = [...data].reverse().find((m) => m.role === 'user' && m.turn_id)
       turnIdRef.current = lastUser?.turn_id || null
+      return data
     } catch (err) {
       setError((err as Error).message)
       setMessages([])
+      return []
     } finally {
       setLoadingMessages(false)
     }
   }, [])
+
+  // Usage is an admin view (tokens/context are noise for family accounts).
+  const isAdmin = user?.role === 'admin'
+  const loadUsage = useCallback(async (id: string) => {
+    if (!isAdmin) return
+    try {
+      const res = await fetch('/api/chat/sessions/' + id + '/usage', { headers: authHeaders() })
+      if (!res.ok) return
+      const body: UsageInfo = await res.json()
+      if (activeIdRef.current === id) setUsage(body)
+    } catch {
+      /* the usage line is optional */
+    }
+  }, [isAdmin])
+
+  function toggleAutoSpeak() {
+    const next = !autoSpeakRef.current
+    autoSpeakRef.current = next
+    setAutoSpeak(next)
+    try { localStorage.setItem(AUTO_SPEAK_KEY, next ? '1' : '0') } catch { /* private mode */ }
+    if (!next) speech.stop()
+  }
 
   useEffect(() => {
     if (user?.role !== 'admin') return
@@ -516,14 +697,17 @@ export default function ChatPage() {
         activeIdRef.current = rows[0].id
         if (user?.role === 'admin') setSelectedProfile(rows[0].profile || 'default')
         void loadMessages(rows[0].id)
+        void loadUsage(rows[0].id)
       }
     })
-  }, [loadSessions, loadMessages])
+  }, [loadSessions, loadMessages, loadUsage])
 
   function selectSession(id: string) {
     setSidebarOpen(false)
     if (id === activeIdRef.current) return
     abortRef.current?.abort()
+    speech.stop()
+    setUsage(null)
     setActiveId(id)
     activeIdRef.current = id
     const target = sessions.find((x) => x.id === id)
@@ -535,6 +719,7 @@ export default function ChatPage() {
     setLiveAttachments([])
     setApprovalCards([])
     void loadMessages(id)
+    void loadUsage(id)
   }
 
   async function resetTurn() {
@@ -566,6 +751,8 @@ export default function ChatPage() {
     })
     if (!res.ok) throw new Error(await apiErrorMessage(res))
     const row: ChatSession = await res.json()
+    speech.stop()
+    setUsage(null)
     setSessions((prev) => [row, ...prev])
     setActiveId(row.id)
     activeIdRef.current = row.id
@@ -694,13 +881,32 @@ export default function ChatPage() {
         controller.signal,
         attached,
       )
-      await loadMessages(id)
+      const fresh = await loadMessages(id)
       setStreamText('')
       setThinking('')
       setLiveTools([])
       setLiveAttachments([])
       setApprovalCards([])
+      void loadUsage(id)
+      if (autoSpeakRef.current && activeIdRef.current === id) {
+        const rendered = buildItems(fresh)
+        const lastUserIdx = rendered.map((it) => it.role).lastIndexOf('user')
+        for (let k = rendered.length - 1; k > lastUserIdx; k--) {
+          if (rendered[k].role === 'agent' && rendered[k].content) {
+            void speech.speak(id + ':' + k, rendered[k].content)
+            break
+          }
+        }
+      }
       await loadSessions()
+      // Hermes names the session in the background after the reply; pick the
+      // generated title up shortly after instead of waiting for the next turn.
+      if (titleRefreshRef.current) window.clearTimeout(titleRefreshRef.current)
+      titleRefreshRef.current = window.setTimeout(() => {
+        titleRefreshRef.current = null
+        if (renamingRef.current) return // don't reshuffle the list under an open rename
+        void loadSessions(true)
+      }, 8000)
     } catch (err) {
       if ((err as Error).name !== 'AbortError') {
         const message = (err as Error).message
@@ -1143,7 +1349,7 @@ export default function ChatPage() {
             </button>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-text-primary">{active?.title || 'Chat'}</p>
-              <div className="flex items-center gap-2 text-[11px] text-text-tertiary">
+              <div className="flex flex-wrap items-center gap-x-2 text-[11px] text-text-tertiary">
                 {user?.role === 'admin' ? (
                   <select
                     value={active?.profile || selectedProfile}
@@ -1165,8 +1371,22 @@ export default function ChatPage() {
                 ) : active?.profile ? (
                   <span className="truncate">· {active.profile}</span>
                 ) : null}
+                {isAdmin && usage && <UsageBar usage={usage} />}
               </div>
             </div>
+            <button
+              type="button"
+              onClick={toggleAutoSpeak}
+              aria-pressed={autoSpeak}
+              title={autoSpeak ? 'Leitura automática ligada' : 'Ler respostas automaticamente'}
+              className={'flex shrink-0 items-center gap-1.5 rounded-lg border px-2 py-1 text-[11px] ' +
+                (autoSpeak
+                  ? 'border-accent/50 bg-accent-subtle text-accent'
+                  : 'border-border text-text-tertiary hover:text-text-primary')}
+            >
+              <SpeakerIcon muted={!autoSpeak} />
+              <span className="hidden sm:inline">Ler respostas</span>
+            </button>
           </header>
 
           {error && (
@@ -1229,6 +1449,23 @@ export default function ChatPage() {
                         ))}
                       </div>
                     )}
+                    {item.content && activeId && (() => {
+                      const key = activeId + ':' + i
+                      const mine = speech.activeKey === key
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => (mine ? speech.stop() : void speech.speak(key, item.content))}
+                          aria-label={mine ? 'Parar leitura' : 'Ouvir resposta'}
+                          title={mine ? 'Parar leitura' : 'Ouvir resposta'}
+                          className={'-mt-1 flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] ' +
+                            (mine ? 'text-accent' : 'text-text-tertiary hover:text-text-primary')}
+                        >
+                          {mine ? <StopIcon /> : <SpeakerIcon />}
+                          <span>{mine ? (speech.status === 'loading' ? 'Gerando áudio…' : 'Parar') : 'Ouvir'}</span>
+                        </button>
+                      )
+                    })()}
                   </div>
                 )
               })}

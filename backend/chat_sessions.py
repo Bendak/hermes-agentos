@@ -82,6 +82,17 @@ def init_db() -> None:
             return
         with _connect() as conn:
             conn.executescript(_SCHEMA)
+            cols = {r["name"] for r in conn.execute("PRAGMA table_info(chat_sessions)")}
+            if "title_source" not in cols:
+                # NULL = placeholder from the first message; 'user' = renamed in
+                # AgentOS; 'gateway' = mirrored from the Hermes session title;
+                # 'pending' = AgentOS rename not yet delivered to the gateway.
+                conn.execute("ALTER TABLE chat_sessions ADD COLUMN title_source TEXT")
+            if "title_base" not in cols:
+                # gateway title seen when a rename went 'pending': if Hermes
+                # holds a different user title at delivery time, it was renamed
+                # there afterwards and that newer name wins.
+                conn.execute("ALTER TABLE chat_sessions ADD COLUMN title_base TEXT")
         _initialized = True
 
 
@@ -233,16 +244,71 @@ def touch(session_id: str, title: Optional[str] = None) -> None:
         conn.execute("UPDATE chat_sessions SET updated_at = ? WHERE id = ?", (now, session_id))
 
 
-def rename(session_id: str, user_id: int, title: str) -> Optional[dict]:
+def rename(session_id: str, user_id: int, title: str, source: str = "user",
+           base: Optional[str] = None) -> Optional[dict]:
     clean = _clean_title(title)
     if not clean:
         return None
     with _connect() as conn:
         conn.execute(
-            "UPDATE chat_sessions SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?",
-            (clean, int(time.time()), session_id, user_id),
+            "UPDATE chat_sessions SET title = ?, title_source = ?, title_base = ?, updated_at = ?"
+            " WHERE id = ? AND user_id = ?",
+            (clean, source, base if source == "pending" else None, int(time.time()),
+             session_id, user_id),
         )
     return get_owned(session_id, user_id)
+
+
+def set_title_source(session_id: str, source: Optional[str], *, if_title: Optional[str] = None,
+                     if_source: Optional[str] = None) -> bool:
+    """Change only the title provenance (no reorder, no title change).
+
+    ``if_title``/``if_source`` make it a compare-and-swap: a rename that landed
+    meanwhile is not re-labelled with the outcome of an older push.
+    """
+    sql = "UPDATE chat_sessions SET title_source = ? WHERE id = ?"
+    params: list = [source, session_id]
+    if if_title is not None:
+        sql += " AND title IS ?"
+        params.append(if_title)
+    if if_source is not None:
+        sql += " AND title_source IS ?"
+        params.append(if_source)
+    with _connect() as conn:
+        return conn.execute(sql, params).rowcount > 0
+
+
+def sync_gateway_title(session_id: str, title: str, *, over_user: bool = False,
+                       expect_title: Optional[str] = None,
+                       expect_source: Optional[str] = None,
+                       check_expected: bool = False,
+                       allow_pending: bool = False) -> bool:
+    """Mirror the Hermes session title locally.
+
+    An AgentOS rename (``title_source='user'``) is only replaced when the
+    gateway title is itself a user rename (``over_user``) — e.g. renamed in
+    the Hermes desktop app. An automatic (LLM) gateway title never clobbers it,
+    and a rename not yet delivered to the gateway (``pending``) is never
+    replaced. ``check_expected`` makes it a compare-and-swap against the row
+    the caller decided on, so a rename that landed meanwhile wins.
+
+    ``updated_at`` is left alone on purpose: a title arriving from the gateway
+    is not activity and must not reorder the sidebar.
+    """
+    clean = _clean_title(title)
+    if not clean:
+        return False
+    sql = "UPDATE chat_sessions SET title = ?, title_source = ?, title_base = NULL WHERE id = ?"
+    params: list = [clean, "user" if over_user else "gateway", session_id]
+    if not allow_pending:
+        sql += " AND COALESCE(title_source, '') != 'pending'"
+    if not over_user:
+        sql += " AND COALESCE(title_source, '') != 'user'"
+    if check_expected:
+        sql += " AND title IS ? AND title_source IS ?"
+        params += [expect_title, expect_source]
+    with _connect() as conn:
+        return conn.execute(sql, params).rowcount > 0
 
 
 def set_archived(session_id: str, user_id: int, archived: bool) -> Optional[dict]:

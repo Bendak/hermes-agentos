@@ -17,7 +17,7 @@ Both modes are supported at the moment. Environment variables and operational de
 
 - **App shell** — Collapsible sidebar (state persisted in `localStorage`), contextual top bar, frosted-glass chrome, mobile drawer, and light/dark themes
 - **Agent Dashboard** — Live status cards for Hermes profiles, recent activity, system-resource meters, and a dependency-health summary linking to the full health page
-- **Chat with Hermes** — Streamed replies, thinking/tool timeline groups, markdown, attachments (clipboard paste included), approval cards, voice input, and a per-user chat profile. Uses the **agentos-channel plugin** (recommended) or the legacy HTTP transport; see [CHANNEL.md](CHANNEL.md)
+- **Chat with Hermes** — Streamed replies, thinking/tool timeline groups, markdown, attachments (clipboard paste included), approval cards, voice input, read-aloud replies (Edge TTS by default, optional local Kokoro), a per-session usage line for admins (context size vs. model window, tokens, cache, API calls; cost only when the model has pricing), session titles taken from the Hermes session (the gateway's automatic name replaces the first-message placeholder; renames are applied through the gateway API; if it is unreachable the new name shows locally and is delivered later), and a per-user chat profile. Uses the **agentos-channel plugin** (recommended) or the legacy HTTP transport; see [CHANNEL.md](CHANNEL.md)
 - **System Health** — `/system-health` shows AgentOS, Hermes API, channel/plugin, auth database, and uploads, with latency, status and a manual re-check
 - **Session History** — Browse, search, and filter conversation sessions with FTS5 full-text search
 - **Session Detail** — Read-only transcript with reasoning blocks, tool-call expansion, pagination and follow-tail navigation
@@ -401,6 +401,23 @@ the process environment they are resolved from `<AGENTOS_DATA_DIR>/.env` by
 `backend.channel_client`. Restart only the AgentOS service after changing them. See
 [CHANNEL.md](CHANNEL.md).
 
+### Chat voice and usage
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `AGENTOS_TTS_PROVIDER` | `edge` | `edge` (network, no host CPU) or `kokoro` (local; falls back to Edge on failure) |
+| `AGENTOS_TTS_VOICE` | `pt-BR-AntonioNeural` | Edge voice |
+| `AGENTOS_KOKORO_PYTHON` | — | Python of a separate venv with `kokoro` + `soundfile` (required for `kokoro`) |
+| `AGENTOS_KOKORO_VOICE` / `AGENTOS_KOKORO_LANG` | `pf_dora` / `p` | Kokoro voice and language code |
+| `AGENTOS_KOKORO_HF_CACHE` | `<data>/home/.cache/huggingface/hub` | Where the Kokoro weights are cached |
+| `AGENTOS_CONTEXT_WINDOW` | — | Fixed context window for the usage bar (overrides lookup) |
+| `AGENTOS_HERMES_PYTHON` / `AGENTOS_HERMES_SRC` | `/opt/hermes/.venv/bin/python` / `/opt/hermes` | Used to ask Hermes' model metadata for the context window |
+
+Kokoro runs out of process, one synthesis at a time, at `nice 19` / `ionice idle` when those tools exist on the host; the
+reply text reaches the worker on stdin. Usage is read from the profile's `state.db`
+in read-only mode; the context size is the prompt size the provider reported on the
+last call, so the bar appears after the first reply.
+
 ### Deployment-specific config (never committed)
 
 Real profile names, usernames and peer ids are deployment data, not source. Keep them
@@ -490,12 +507,15 @@ Selected endpoints (the live OpenAPI schema is at `/docs`):
 | `PUT /api/auth/users/{id}/profile` | Set a user's chat profile (admin) |
 | `PUT /api/auth/users/{id}/password` | Change user password (admin) |
 | `DELETE /api/auth/users/{id}` | Delete user (admin) |
-| `GET /api/chat/sessions` | List the current user's chat sessions |
+| `GET /api/chat/sessions` | List the current user's chat sessions (titles mirrored from the Hermes session) |
+| `PATCH /api/chat/sessions/{id}` | Rename/archive; the rename is applied through the gateway (`409` if Hermes refuses the title, e.g. already used by another session of that profile) |
 | `POST /api/chat/sessions` | Create a chat session |
 | `POST /api/chat/sessions/{id}/stream` | Stream a chat turn (SSE) |
+| `GET /api/chat/sessions/{id}/usage` | Tokens, cache, API calls and context size of the session |
 | `POST /api/chat/uploads` | Upload an attachment |
 | `POST /api/chat/approvals` | Resolve an approval card |
 | `POST /api/voice` | Transcribe voice input |
+| `POST /api/tts` | Read a reply aloud (markdown cleaned server-side) |
 | `GET /api/workflows` | List all workflows |
 | `GET /api/workflows/{id}` | Get workflow detail (nodes + edges) |
 | `POST /api/workflows` | Create new workflow |
@@ -549,6 +569,7 @@ Selected endpoints (the live OpenAPI schema is at `/docs`):
 - [x] Phase 19 — Chat channel (agentos-channel plugin + legacy HTTP, streaming, tools, approvals, attachments)
 - [x] Phase 20 — Dependency health (dashboard summary + `/system-health` page)
 - [x] Phase 21 — Family profiles (per-user chat profile, scoped sessions, isolated Honcho memory)
+- [x] Phase 22 — Chat voice and usage (read-aloud replies, auto-read toggle, session usage and context bar)
 
 See [PLAN.md](PLAN.md) for the full roadmap, [CHANNEL.md](CHANNEL.md) for chat transport, and [DESIGN.md](DESIGN.md) for the visual identity spec.
 

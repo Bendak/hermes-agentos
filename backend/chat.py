@@ -14,6 +14,7 @@ import os
 import secrets
 import time
 import re
+import weakref
 from typing import List, Optional
 
 import httpx
@@ -23,7 +24,7 @@ from starlette.background import BackgroundTask
 
 import logging
 
-from backend import chat_sessions, chat_transcript
+from backend import chat_sessions, chat_titles, chat_transcript, chat_usage
 from backend.channel_turn import ChannelTurnRecorder
 from backend.auth import require_auth
 from backend.config import settings
@@ -483,6 +484,157 @@ async def _patch_remote_session(row: dict, *, archived: bool | None = None,
         logger.warning("gateway PATCH %s indisponível: %s", row["hermes_id"], type(exc).__name__)
 
 
+async def _gateway_set_title(profile: str, gateway_session_id: str, title: str) -> tuple[str, str]:
+    """Rename through the gateway API (user provenance). Never writes state.db.
+
+    Returns ``("ok", "")``, ``("conflict", reason)`` when the gateway rejects
+    the title (e.g. already used by another session of that profile), or
+    ``("unavailable", reason)`` for anything transient.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=5.0)) as client:
+            r = await client.patch(
+                f"{_gateway_base(profile)}/api/sessions/{gateway_session_id}",
+                headers=_gateway_headers(profile),
+                json={"title": title},
+            )
+    except (httpx.HTTPError, HTTPException) as exc:
+        return "unavailable", type(exc).__name__
+    if r.status_code == 200:
+        return "ok", ""
+    if r.status_code == 400:
+        reason = ""
+        try:
+            data = r.json()
+            err = data.get("error") if isinstance(data, dict) else None
+            reason = (err.get("message") if isinstance(err, dict) else None) or str(data.get("detail") or "")
+        except ValueError:
+            pass
+        return "conflict", reason or "título recusado pelo Hermes"
+    return "unavailable", f"HTTP {r.status_code}"
+
+
+_title_locks: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]]" = (
+    weakref.WeakKeyDictionary())
+_title_push_after: dict[str, float] = {}
+_TITLE_PUSH_BACKOFF = 60.0  # seconds between retries of a pending rename
+_background_tasks: set = set()
+
+
+def _title_lock(session_id: str) -> asyncio.Lock:
+    """One gateway title write per chat at a time (rename vs. background push).
+
+    Locks are kept per event loop: an asyncio.Lock is bound to the loop that
+    first waits on it, so sharing one across loops (embedded/test setups) hangs.
+    """
+    per_loop = _title_locks.setdefault(asyncio.get_running_loop(), {})
+    lock = per_loop.get(session_id)
+    if lock is None:
+        lock = per_loop[session_id] = asyncio.Lock()
+    return lock
+
+
+def _rename_target(row: dict, thread) -> str | None:
+    """Gateway session to rename: the thread's newest session.
+
+    Legacy HTTP mode creates the gateway session with id == hermes_id, so it
+    is a valid target even when state.db could not be read.
+    """
+    if thread is not None:
+        return thread.head_id
+    return None if channel_mode() else row["hermes_id"]
+
+
+def _schedule_title_push(row: dict, head_id: str) -> None:
+    """Deliver an AgentOS rename the gateway missed (fresh chat, gateway down)."""
+    loop = asyncio.get_running_loop()
+    if _title_lock(row["id"]).locked() or loop.time() < _title_push_after.get(row["id"], 0.0):
+        return
+    _title_push_after[row["id"]] = loop.time() + _TITLE_PUSH_BACKOFF
+
+    async def _push() -> None:
+        try:
+            await _push_locked()
+        except Exception:  # never leave an unretrieved task exception behind
+            logger.exception("entrega de rename pendente falhou")
+
+    async def _push_locked() -> None:
+        async with _title_lock(row["id"]):
+            # re-read under the lock: a rename that landed after the list was
+            # built has already been delivered (or is the newer pending one)
+            current = chat_sessions.get(row["id"])
+            if not current or current.get("title_source") != "pending" or not current.get("title"):
+                _title_push_after.pop(row["id"], None)
+                return
+            title = current["title"]
+            # Renamed in Hermes after this rename went pending? Then the
+            # gateway's newer user title wins instead of being overwritten.
+            # Only decidable when the base is known; an unknown base (NULL)
+            # delivers the pending rename. Value comparison cannot see an
+            # A->B->A rename chain in Hermes (no title timestamps upstream).
+            thread = (await chat_titles.gateway_threads([current])).get(row["id"])
+            base = current.get("title_base")
+            if (base is not None and thread is not None and thread.source == "user" and thread.title
+                    and thread.title != base and thread.title != title):
+                chat_sessions.sync_gateway_title(
+                    row["id"], thread.title, over_user=True, allow_pending=True,
+                    check_expected=True, expect_title=title, expect_source="pending")
+                _title_push_after.pop(row["id"], None)
+                return
+            target = thread.head_id if thread is not None else head_id
+            status, reason = await _gateway_set_title(current["profile"], target, title)
+            if status in ("ok", "conflict"):
+                # conflict: keep the AgentOS name locally, stop retrying it
+                chat_sessions.set_title_source(row["id"], "user", if_title=title, if_source="pending")
+                _title_push_after.pop(row["id"], None)
+                if status == "conflict":
+                    logger.info("rename pendente recusado pelo gateway: %s", reason)
+
+    task = loop.create_task(_push())
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
+async def _overlay_gateway_titles(rows: list[dict]) -> list[dict]:
+    """Show the Hermes session title; the first-message title is only a placeholder.
+
+    Precedence: an AgentOS rename (``user``) beats an automatic gateway title;
+    a rename made in Hermes itself (gateway ``user``) beats a local one;
+    a rename the gateway has not received yet (``pending``) is pushed to it
+    (with backoff) and shown meanwhile.
+    """
+    try:
+        threads = await chat_titles.gateway_threads(rows)
+    except Exception as exc:  # the list must never fail because of titles
+        logger.warning("overlay de títulos falhou: %s", type(exc).__name__)
+        return rows
+    for row in rows:
+        thread = threads.get(row["id"])
+        local_source = row.get("title_source")
+        if local_source == "pending":
+            target = _rename_target(row, thread)
+            if target is not None:
+                _schedule_title_push(row, target)
+            continue
+        if thread is None or not thread.title:
+            continue
+        gateway_user = thread.source == "user"
+        if local_source == "user" and not gateway_user:
+            continue
+        if row.get("title") != thread.title or local_source not in ("gateway", "user"):
+            # compare-and-swap against the row this decision was made on: a
+            # rename that landed during the state.db read keeps its title
+            if not chat_sessions.sync_gateway_title(
+                    row["id"], thread.title, over_user=gateway_user, check_expected=True,
+                    expect_title=row.get("title"), expect_source=local_source):
+                fresh = chat_sessions.get(row["id"])
+                if fresh:
+                    row["title"], row["title_source"] = fresh.get("title"), fresh.get("title_source")
+                continue
+        row["title"] = thread.title
+    return rows
+
+
 def _owned_or_404(session_id: str, user: dict) -> dict:
     row = chat_sessions.get_owned(session_id, user["user_id"])
     if row is None:
@@ -502,10 +654,11 @@ async def list_chat_sessions(
         # Suporte: admin vê todas, com o dono explícito (auditável no log).
         if user.get("role") != "admin":
             raise HTTPException(status_code=403, detail="Admin access required")
-        rows = chat_sessions.list_all(include_archived=include_archived)
+        rows = await _overlay_gateway_titles(chat_sessions.list_all(include_archived=include_archived))
         data = [{**chat_sessions.public(r), "user_id": r["user_id"]} for r in rows]
         return {"data": data}
-    rows = chat_sessions.list_for_user(user["user_id"], include_archived=include_archived)
+    rows = await _overlay_gateway_titles(
+        chat_sessions.list_for_user(user["user_id"], include_archived=include_archived))
     return {"data": [chat_sessions.public(r) for r in rows]}
 
 
@@ -554,10 +707,31 @@ async def patch_chat_session(session_id: str, body: dict, user: dict = Depends(r
     if "title" in body:
         if not isinstance(body["title"], str):
             raise HTTPException(status_code=400, detail="title must be a string")
-        updated_row = chat_sessions.rename(session_id, user["user_id"], body["title"])
-        if updated_row is None:
+        clean = chat_sessions._clean_title(body["title"])
+        if not clean:
             raise HTTPException(status_code=400, detail="Título vazio")
-        await _patch_remote_session(row, title=updated_row["title"])
+        # The gateway owns the session name: rename there first (user
+        # provenance, so its auto-titler never overwrites it). A refused title
+        # keeps the old name (409); a transient failure is shown locally and
+        # delivered later ('pending').
+        async with _title_lock(session_id):
+            thread = (await chat_titles.gateway_threads([row])).get(row["id"])
+            target = _rename_target(row, thread)
+            source = "pending"
+            if target is not None:
+                status, reason = await _gateway_set_title(row["profile"], target, clean)
+                if status == "conflict":
+                    raise HTTPException(status_code=409, detail=f"O Hermes recusou o título: {reason}")
+                if status == "ok":
+                    source = "user"
+                else:
+                    logger.warning("rename no gateway adiado: %s", reason)
+            # base: the gateway title seen now ('' = resolved but untitled);
+            # None = unknown (state.db unreadable), so a later push cannot
+            # infer "renamed in Hermes afterwards" and simply delivers.
+            chat_sessions.rename(session_id, user["user_id"], clean, source=source,
+                                 base=(thread.title or "") if thread is not None else None)
+            _title_push_after.pop(session_id, None)
     if "archived" in body:
         if not isinstance(body["archived"], bool):
             raise HTTPException(status_code=400, detail="archived must be a boolean")
@@ -602,6 +776,13 @@ async def chat_session_reset_channel(
         client.forget_thread(row["hermes_id"])
         chat_sessions.rotate_hermes_id(session_id, user["user_id"])
     return {"status": "reset" if released else "idle"}
+
+
+@router.get("/api/chat/sessions/{session_id}/usage")
+async def chat_session_usage(session_id: str, user: dict = Depends(require_auth)):
+    """Tokens, cache, calls and context size of this thread (read-only state.db)."""
+    row = _owned_or_404(session_id, user)
+    return await chat_usage.session_usage(row["hermes_id"], row["profile"])
 
 
 @router.get("/api/chat/sessions/{session_id}/messages")
