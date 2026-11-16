@@ -270,6 +270,14 @@ const CLIP_MIME_EXT: Record<string, string> = {
 
 const clipStamp = () => new Date().toISOString().replace(/[:.]/g, '-')
 
+/** Android hides keyboard-history images from browsers (IME commit, not the
+ *  system clipboard), so the copy below has to say that instead of asking the
+ *  user to paste something the OS will never hand over. */
+const IS_ANDROID = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
+const ANDROID_PASTE_HINT =
+  'O Android não entrega imagens do histórico do teclado (Gboard/Samsung) para o navegador — é limitação do sistema, não do AgentOS. '
+  + 'Para mandar um print, use “Escolher da galeria”. Se copiou a imagem pela Galeria (menu de três pontos → Copiar para a área de transferência), pode colar na caixa abaixo.'
+
 function blobToUploadFile(blob: Blob, mime: string, prefix: string, index: number): File | null {
   const type = (mime || blob.type || '').toLowerCase()
   const ext = CLIP_MIME_EXT[type]
@@ -686,12 +694,19 @@ export default function ChatPage() {
       }
       if (e.key !== 'Tab' || !pasteDialogRef.current) return
       // keep focus inside the dialog
-      const nodes = pasteDialogRef.current.querySelectorAll<HTMLElement>(
+      const dialog = pasteDialogRef.current
+      const nodes = dialog.querySelectorAll<HTMLElement>(
         'button, textarea, input, [href], [tabindex]:not([tabindex="-1"])',
       )
       if (nodes.length === 0) return
       const first = nodes[0]
       const last = nodes[nodes.length - 1]
+      // focus started outside (Android opens without autofocus): pull it in
+      if (!dialog.contains(document.activeElement)) {
+        e.preventDefault()
+        first.focus()
+        return
+      }
       if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
       else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
     }
@@ -1280,7 +1295,9 @@ export default function ChatPage() {
     setError(null)
     const clip = navigator.clipboard as Clipboard & { read?: () => Promise<ClipboardItem[]> }
     if (!clip?.read) {
-      openPasteHelper('Este navegador não deixa o app ler a área de transferência diretamente. Toque e segure na caixa abaixo e escolha “Colar”.')
+      openPasteHelper(IS_ANDROID
+        ? ANDROID_PASTE_HINT
+        : 'Este navegador não deixa o app ler a área de transferência diretamente. Toque e segure na caixa abaixo e escolha “Colar”.')
       return
     }
     try {
@@ -1324,14 +1341,26 @@ export default function ChatPage() {
         setInput((prev) => (prev ? `${prev} ${text.trim()}` : text.trim()))
         return
       }
-      openPasteHelper(unsupported
-        ? `O tipo ${unsupported} não é aceito como anexo. Se for uma imagem, copie de novo e use a caixa abaixo.`
-        : 'A área de transferência não expôs a imagem para o app (no Android isso é comum com capturas de tela). Toque e segure na caixa abaixo e escolha “Colar”.')
+      if (IS_ANDROID) {
+        openPasteHelper(unsupported
+          ? `O tipo ${unsupported} não é aceito como anexo. Use “Escolher da galeria” para enviar uma imagem da galeria.`
+          : ANDROID_PASTE_HINT)
+      } else {
+        openPasteHelper(unsupported
+          ? `O tipo ${unsupported} não é aceito como anexo. Se for uma imagem, copie de novo e use a caixa abaixo.`
+          : 'A área de transferência está vazia para o navegador. Toque e segure na caixa abaixo e escolha “Colar”.')
+      }
     } catch (err) {
       const denied = (err as Error)?.name === 'NotAllowedError'
-      openPasteHelper(denied
-        ? 'A permissão da área de transferência foi negada. Toque e segure na caixa abaixo e escolha “Colar”.'
-        : 'Não consegui ler a área de transferência. Toque e segure na caixa abaixo e escolha “Colar”.')
+      if (IS_ANDROID) {
+        openPasteHelper(denied
+          ? 'A permissão da área de transferência foi negada. Isso não afeta o envio pela galeria: use “Escolher da galeria”.'
+          : 'Não consegui ler a área de transferência. Use “Escolher da galeria” para enviar o print.')
+      } else {
+        openPasteHelper(denied
+          ? 'A permissão da área de transferência foi negada. Toque e segure na caixa abaixo e escolha “Colar”.'
+          : 'Não consegui ler a área de transferência. Toque e segure na caixa abaixo e escolha “Colar”.')
+      }
     }
   }
 
@@ -1785,21 +1814,29 @@ export default function ChatPage() {
                 onClick={(e) => e.stopPropagation()}>
                 <div className="flex items-start gap-2">
                   <p className="min-w-0 flex-1 text-sm font-medium text-text-primary">Colar imagem ou arquivo</p>
-                  <button type="button" onClick={closePasteHelper} aria-label="Fechar"
+                  <button type="button" onClick={closePasteHelper} aria-label="Fechar diálogo"
                     className="shrink-0 rounded px-1 text-text-tertiary hover:text-text-primary">×</button>
                 </div>
                 <p className="mt-1 text-xs leading-relaxed text-text-tertiary">{pasteHelper}</p>
+                <button
+                  type="button"
+                  onClick={() => { closePasteHelper(); fileInputRef.current?.click() }}
+                  className="mt-3 w-full rounded-lg bg-accent px-3 py-2 text-sm font-medium text-white"
+                >
+                  Escolher da galeria
+                </button>
                 <textarea
-                  autoFocus
+                  autoFocus={!IS_ANDROID}
                   onPaste={handleHelperPaste}
                   onChange={() => { /* only paste is used here */ }}
-                  aria-label="Cole aqui com toque longo e Colar"
-                  placeholder="Toque e segure aqui e escolha Colar"
-                  className="mt-3 h-24 w-full resize-none rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+                  aria-label={IS_ANDROID ? 'Colar texto' : 'Cole aqui com toque longo e Colar'}
+                  placeholder={IS_ANDROID ? 'Opcional: colar texto' : 'Toque e segure aqui e escolha Colar'}
+                  className="mt-2 h-16 w-full resize-none rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
                 />
-                <p className="mt-2 text-[11px] text-text-tertiary">
-                  Dica: no Android, copiar uma captura de tela pela galeria costuma exigir este caminho — a leitura direta da área de transferência não expõe a imagem.
-                </p>
+                <div className="mt-2 flex justify-end">
+                  <button type="button" onClick={closePasteHelper}
+                    className="rounded-lg border border-border px-3 py-2 text-sm text-text-secondary">Fechar</button>
+                </div>
               </div>
             </div>
           )}
