@@ -100,9 +100,13 @@ a, button, input, select, textarea, [role="button"] {
   transition: background-color 150ms ease-out, border-color 150ms ease-out, color 150ms ease-out, box-shadow 150ms ease-out;
 }
 
-/* Ensure body handles scrolling correctly with sticky nav */
-html, body {
-  min-height: 100vh;
+/* Inside the app shell the document never scrolls (a page-level scroll shifts
+   the whole shell and leaves a dead band). Scoped to a body class so routes
+   without a shell (login) keep their normal page scroll on short viewports. */
+body.app-shell-locked {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
 }
 
 /* Table row hover transition per design system spec */
@@ -367,8 +371,13 @@ input[type="number"]:not(.search-input) {
 /* ── App shell (sidebar + contextual top bar) ─────── */
 .agent-shell {
   display: flex;
-  height: 100vh;
-  height: 100dvh;
+  /* --app-height is measured from visualViewport (Android Chrome's 100dvh
+     goes stale around the keyboard / permission bubbles and leaves a gap). */
+  position: fixed;
+  top: var(--app-top, 0px);
+  left: 0;
+  right: 0;
+  height: var(--app-height, 100dvh);
   padding: 12px;
   gap: 12px;
   overflow: hidden;

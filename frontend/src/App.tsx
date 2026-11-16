@@ -1,4 +1,5 @@
 import { isAdmin } from "./lib/admin"
+import { useVisualViewport } from "./lib/useVisualViewport"
 import { apiErrorMessage } from "./lib/api"
 import { ToastProvider, useToast } from "./lib/toast"
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
@@ -5898,6 +5899,7 @@ export default function App() {
 }
 
 function AppInner() {
+  useVisualViewport()
   const [searchOpen, setSearchOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const keySeqRef = useRef<string[]>([])

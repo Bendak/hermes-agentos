@@ -352,6 +352,13 @@ export default function AppShell({ onOpenSearch }: { onOpenSearch?: () => void }
 
   const isChat = location.pathname === '/chat' || location.pathname.startsWith('/chat/')
 
+  // The shell owns the viewport; lock the document while it is mounted so the
+  // browser cannot scroll the whole app (dead band under the composer).
+  useEffect(() => {
+    document.body.classList.add('app-shell-locked')
+    return () => document.body.classList.remove('app-shell-locked')
+  }, [])
+
   return (
     <AppShellContext.Provider value={true}>
       <div className={`agent-shell ${collapsed ? 'is-collapsed' : ''}`}>

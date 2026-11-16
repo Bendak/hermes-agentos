@@ -238,6 +238,141 @@ const UPLOAD_EXTS = new Set([
   'mp3', 'wav', 'ogg', 'm4a', 'webm', 'mp4', 'mov',
 ])
 
+/** MIME -> extension for files that arrive without a name (clipboard, drag). */
+const CLIP_MIME_EXT: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+  'image/bmp': 'bmp',
+  'image/svg+xml': 'svg',
+  'image/heic': 'heic',
+  'image/heif': 'heif',
+  'application/pdf': 'pdf',
+  'text/plain': 'txt',
+  'text/markdown': 'md',
+  'text/csv': 'csv',
+  'application/json': 'json',
+  'application/msword': 'doc',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+  'application/rtf': 'rtf',
+  'application/vnd.oasis.opendocument.text': 'odt',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+  'audio/ogg': 'ogg',
+  'audio/mp4': 'm4a',
+  'video/webm': 'webm',
+  'video/mp4': 'mp4',
+  'video/quicktime': 'mov',
+}
+
+const clipStamp = () => new Date().toISOString().replace(/[:.]/g, '-')
+
+function blobToUploadFile(blob: Blob, mime: string, prefix: string, index: number): File | null {
+  const type = (mime || blob.type || '').toLowerCase()
+  const ext = CLIP_MIME_EXT[type]
+  if (!ext || !UPLOAD_EXTS.has(ext)) return null
+  return new File([blob], `${prefix}-${clipStamp()}-${index}.${ext}`, { type, lastModified: Date.now() })
+}
+
+/**
+ * `data:image/png[;param=value][;base64],...` -> Blob, without fetch.
+ * Handles media-type parameters (`;charset=utf-8`) and percent-encoded
+ * payloads byte-by-byte (decodeURIComponent throws on binary like %89PNG).
+ */
+function dataUrlToBlob(src: string): Blob | null {
+  const comma = src.indexOf(',')
+  if (!/^data:/i.test(src) || comma < 0) return null
+  const meta = src.slice(5, comma)
+  const payload = src.slice(comma + 1)
+  const mime = meta.split(';')[0].trim().toLowerCase()
+  if (!mime.startsWith('image/')) return null
+  try {
+    if (/;base64/i.test(meta)) {
+      const bin = atob(payload.replace(/\s/g, ''))
+      const bytes = new Uint8Array(bin.length)
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+      return new Blob([bytes], { type: mime })
+    }
+    const out: number[] = []
+    const encoder = new TextEncoder()
+    let literal = ''
+    const flush = () => {
+      if (!literal) return
+      const bytes = encoder.encode(literal)
+      for (let i = 0; i < bytes.length; i++) out.push(bytes[i])
+      literal = ''
+    }
+    for (let i = 0; i < payload.length; i++) {
+      const ch = payload[i]
+      if (ch === '%' && /^[0-9a-f]{2}$/i.test(payload.slice(i + 1, i + 3))) {
+        flush()
+        out.push(parseInt(payload.slice(i + 1, i + 3), 16))
+        i += 2
+      } else {
+        literal += ch
+      }
+    }
+    flush()
+    return new Blob([new Uint8Array(out)], { type: mime })
+  } catch {
+    return null
+  }
+}
+
+/** Android often puts a copied image in the clipboard as <img src="data:...">. */
+function imagesFromHtml(html: string, prefix: string): File[] {
+  if (!html || !/data:image\//i.test(html)) return []
+  const out: File[] = []
+  try {
+    const doc = new DOMParser().parseFromString(html, 'text/html')
+    for (const img of Array.from(doc.querySelectorAll('img'))) {
+      const src = img.getAttribute('src') || ''
+      if (!/^data:image\//i.test(src)) continue
+      const blob = dataUrlToBlob(src)
+      if (!blob) continue
+      const file = blobToUploadFile(blob, blob.type, prefix, out.length + 1)
+      if (file) out.push(file)
+    }
+  } catch {
+    /* malformed html: keep whatever came from the typed entries */
+  }
+  return out
+}
+
+/** Image + file entries of a paste/read payload (typed files, then data-URI HTML). */
+function filesFromClipboardData(
+  data: DataTransfer | null,
+  prefix: string,
+): { files: File[]; text: string; unsupported: string } {
+  const files: File[] = []
+  let text = ''
+  let unsupported = ''
+  if (!data) return { files, text, unsupported }
+  for (const item of Array.from(data.items || [])) {
+    if (item.kind !== 'file') continue
+    const file = item.getAsFile()
+    if (!file) continue
+    const nameExt = (file.name.match(/\.([a-z0-9]{1,8})$/i)?.[1] || '').toLowerCase()
+    if (nameExt && UPLOAD_EXTS.has(nameExt)) {
+      files.push(file)
+      continue
+    }
+    const renamed = blobToUploadFile(file, file.type, prefix, files.length + 1)
+    if (renamed) files.push(renamed)
+    else unsupported = file.type || 'desconhecido'
+  }
+  // Some Android keyboards/flows expose the image only through the HTML flavor.
+  if (files.length === 0) {
+    files.push(...imagesFromHtml(data.getData('text/html'), prefix))
+  }
+  text = data.getData('text/plain') || ''
+  return { files, text, unsupported }
+}
+
+
 interface RenderItem {
   role: 'user' | 'agent'
   content: string
@@ -537,6 +672,32 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [search, setSearch] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [pasteHelper, setPasteHelper] = useState<string | null>(null)
+  const helperBusyRef = useRef(false)
+  const pasteOpenerRef = useRef<HTMLElement | null>(null)
+  const pasteDialogRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!pasteHelper) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation()
+        closePasteHelper()
+        return
+      }
+      if (e.key !== 'Tab' || !pasteDialogRef.current) return
+      // keep focus inside the dialog
+      const nodes = pasteDialogRef.current.querySelectorAll<HTMLElement>(
+        'button, textarea, input, [href], [tabindex]:not([tabindex="-1"])',
+      )
+      if (nodes.length === 0) return
+      const first = nodes[0]
+      const last = nodes[nodes.length - 1]
+      if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus() }
+      else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus() }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [pasteHelper])
   const [recording, setRecording] = useState(false)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const renamingRef = useRef<string | null>(null)
@@ -1068,61 +1229,19 @@ export default function ChatPage() {
     }
   }
 
-  /** Clipboard images arrive as File objects without a useful upload name. */
+    /** Clipboard images arrive as File objects without a useful upload name. */
   function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
-    const files: File[] = []
-    let skippedType = false
     const el = e.currentTarget
     const selectionStart = el.selectionStart
     const selectionEnd = el.selectionEnd
-    for (const item of Array.from(e.clipboardData?.items || [])) {
-      if (item.kind !== 'file') continue
-      const file = item.getAsFile()
-      if (!file) continue
-      const nameExt = (file.name.match(/\.([a-z0-9]{1,8})$/i)?.[1] || '').toLowerCase()
-      if (nameExt && UPLOAD_EXTS.has(nameExt)) {
-        files.push(file)
-        continue
-      }
-      const extByMime: Record<string, string> = {
-        'image/png': 'png',
-        'image/jpeg': 'jpg',
-        'image/webp': 'webp',
-        'image/gif': 'gif',
-        'image/bmp': 'bmp',
-        'image/svg+xml': 'svg',
-        'application/pdf': 'pdf',
-        'text/plain': 'txt',
-        'text/markdown': 'md',
-        'text/csv': 'csv',
-        'application/json': 'json',
-        'application/msword': 'doc',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-        'application/rtf': 'rtf',
-        'application/vnd.oasis.opendocument.text': 'odt',
-        'audio/mpeg': 'mp3',
-        'audio/wav': 'wav',
-        'audio/ogg': 'ogg',
-        'audio/mp4': 'm4a',
-        'video/webm': 'webm',
-        'video/mp4': 'mp4',
-        'video/quicktime': 'mov',
-      }
-      const ext = extByMime[file.type]
-      if (!ext) {
-        skippedType = true
-        setError(`Tipo de anexo não suportado: ${file.type || 'desconhecido'}`)
-        continue
-      }
-      files.push(new File(
-        [file],
-        `pasted-${new Date().toISOString().replace(/[:.]/g, '-')}-${files.length + 1}.${ext}`,
-        { type: file.type, lastModified: Date.now() },
-      ))
+    const { files, text, unsupported } = filesFromClipboardData(e.clipboardData, 'pasted')
+    if (files.length === 0) {
+      // nothing attachable: still tell the user when a file was refused
+      if (unsupported) setError(`Tipo de anexo não suportado: ${unsupported}`)
+      return  // let the browser paste text normally
     }
-    if (files.length === 0) return
     e.preventDefault()
-    const text = e.clipboardData?.getData('text/plain') || ''
+    if (unsupported) setError(`Tipo de anexo não suportado: ${unsupported}`)
     if (text) {
       const base = el.value
       const next = base.slice(0, selectionStart) + text + base.slice(selectionEnd)
@@ -1133,58 +1252,111 @@ export default function ChatPage() {
         el.setSelectionRange(caret, caret)
       })
     }
-    void uploadFiles(files, { preserveError: skippedType })
+    void uploadFiles(files, { preserveError: !!unsupported })
+  }
+
+  /**
+   * Reads the clipboard. Android is the reason this is defensive: Chrome (and
+   * Samsung's clipboard) often exposes a copied image only as HTML with a
+   * data: URI, or as a content:// reference the web cannot read — so when
+   * nothing usable comes back we open the manual paste box instead of a dead
+   * error message.
+   */
+  function openPasteHelper(message: string) {
+    // keep the original opener when re-messaging an already open dialog
+    if (!pasteHelper) pasteOpenerRef.current = (document.activeElement as HTMLElement) || null
+    setPasteHelper(message)
+  }
+
+  function closePasteHelper() {
+    setPasteHelper(null)
+    const opener = pasteOpenerRef.current
+    pasteOpenerRef.current = null
+    if (opener && document.contains(opener)) opener.focus()
   }
 
   async function pasteFromClipboard() {
     if (!active || sending) return
+    setError(null)
     const clip = navigator.clipboard as Clipboard & { read?: () => Promise<ClipboardItem[]> }
     if (!clip?.read) {
-      setError('Este navegador não permite ler a área de transferência. Use o botão de anexo.')
+      openPasteHelper('Este navegador não deixa o app ler a área de transferência diretamente. Toque e segure na caixa abaixo e escolha “Colar”.')
       return
     }
     try {
       const items = await clip.read()
       const files: File[] = []
+      const htmlPayloads: string[] = []
       let text = ''
-      let skippedType = false
+      let unsupported = ''
       for (const item of items) {
         for (const type of item.types) {
-          if (type === 'text/plain') {
-            text += await (await item.getType(type)).text()
-            continue
+          try {
+            if (type === 'text/plain') {
+              text += await (await item.getType(type)).text()
+              continue
+            }
+            if (type === 'text/html') {
+              // deferred: flavors arrive in an implementation-defined order, so
+              // a typed image later in the list must win over this fallback
+              htmlPayloads.push(await (await item.getType(type)).text())
+              continue
+            }
+            if (!type.startsWith('image/') && type !== 'application/pdf') continue
+            const blob = await item.getType(type)
+            const file = blobToUploadFile(blob, type, 'clipboard', files.length + 1)
+            if (file) files.push(file)
+            else unsupported = type
+          } catch {
+            /* one unreadable entry must not kill the others */
           }
-          if (!type.startsWith('image/') && type !== 'application/pdf') continue
-          const blob = await item.getType(type)
-          const extByMime: Record<string, string> = {
-            'image/png': 'png',
-            'image/jpeg': 'jpg',
-            'image/webp': 'webp',
-            'image/gif': 'gif',
-            'image/bmp': 'bmp',
-            'image/svg+xml': 'svg',
-            'application/pdf': 'pdf',
-          }
-          const ext = extByMime[type]
-          if (!ext || !UPLOAD_EXTS.has(ext)) {
-            skippedType = true
-            setError(`Tipo de anexo não suportado: ${type}`)
-            continue
-          }
-          files.push(new File(
-            [blob],
-            `clipboard-${new Date().toISOString().replace(/[:.]/g, '-')}-${files.length + 1}.${ext}`,
-            { type, lastModified: Date.now() },
-          ))
         }
       }
-      if (text) setInput((prev) => (prev ? `${prev} ${text}` : text))
-      if (files.length) await uploadFiles(files, { preserveError: skippedType })
-      else if (!text && !skippedType) setError('A área de transferência não contém imagem ou arquivo compatível.')
-      else if (!skippedType) setError(null)
-    } catch {
-      setError('Não foi possível ler a área de transferência. Use o botão de anexo para escolher o arquivo.')
+      if (files.length === 0) {
+        for (const html of htmlPayloads) files.push(...imagesFromHtml(html, 'clipboard'))
+      }
+      if (files.length) {
+        if (text.trim()) setInput((prev) => (prev ? `${prev} ${text.trim()}` : text.trim()))
+        await uploadFiles(files, { preserveError: !!unsupported })
+        return
+      }
+      if (text.trim()) {
+        setInput((prev) => (prev ? `${prev} ${text.trim()}` : text.trim()))
+        return
+      }
+      openPasteHelper(unsupported
+        ? `O tipo ${unsupported} não é aceito como anexo. Se for uma imagem, copie de novo e use a caixa abaixo.`
+        : 'A área de transferência não expôs a imagem para o app (no Android isso é comum com capturas de tela). Toque e segure na caixa abaixo e escolha “Colar”.')
+    } catch (err) {
+      const denied = (err as Error)?.name === 'NotAllowedError'
+      openPasteHelper(denied
+        ? 'A permissão da área de transferência foi negada. Toque e segure na caixa abaixo e escolha “Colar”.'
+        : 'Não consegui ler a área de transferência. Toque e segure na caixa abaixo e escolha “Colar”.')
     }
+  }
+
+  /** Manual fallback: the paste event carries the real files on Android. */
+  function handleHelperPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    if (helperBusyRef.current) { e.preventDefault(); return }
+    helperBusyRef.current = true
+    const { files, text, unsupported } = filesFromClipboardData(e.clipboardData, 'colado')
+    if (files.length === 0) {
+      helperBusyRef.current = false
+      if (text.trim()) {
+        setInput((prev) => (prev ? `${prev} ${text.trim()}` : text.trim()))
+        closePasteHelper()
+      } else if (unsupported) {
+        openPasteHelper(`O tipo ${unsupported} não é aceito como anexo.`)
+      }
+      e.preventDefault()
+      return
+    }
+    e.preventDefault()
+    closePasteHelper()
+    if (text.trim()) setInput((prev) => (prev ? `${prev} ${text.trim()}` : text.trim()))
+    void uploadFiles(files, { preserveError: !!unsupported }).finally(() => {
+      helperBusyRef.current = false
+    })
   }
 
   async function answerApproval(card: ApprovalCard, option: ApprovalOption) {
@@ -1390,8 +1562,14 @@ export default function ChatPage() {
           </header>
 
           {error && (
-            <div className="mx-4 mt-3 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
-              {error}
+            <div className="mx-4 mt-3 flex items-start gap-2 rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+              <span className="min-w-0 flex-1">{error}</span>
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                aria-label="Fechar aviso"
+                className="shrink-0 rounded px-1 text-red-300/70 hover:text-red-200"
+              >×</button>
             </div>
           )}
 
@@ -1600,6 +1778,31 @@ export default function ChatPage() {
               )}
             </div>
           </div>
+          {pasteHelper && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" role="dialog" aria-modal="true" aria-label="Colar da área de transferência"
+              onClick={closePasteHelper}>
+              <div ref={pasteDialogRef} className="w-full max-w-md rounded-xl border border-border bg-bg-elevated p-4 shadow-2xl"
+                onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-start gap-2">
+                  <p className="min-w-0 flex-1 text-sm font-medium text-text-primary">Colar imagem ou arquivo</p>
+                  <button type="button" onClick={closePasteHelper} aria-label="Fechar"
+                    className="shrink-0 rounded px-1 text-text-tertiary hover:text-text-primary">×</button>
+                </div>
+                <p className="mt-1 text-xs leading-relaxed text-text-tertiary">{pasteHelper}</p>
+                <textarea
+                  autoFocus
+                  onPaste={handleHelperPaste}
+                  onChange={() => { /* only paste is used here */ }}
+                  aria-label="Cole aqui com toque longo e Colar"
+                  placeholder="Toque e segure aqui e escolha Colar"
+                  className="mt-3 h-24 w-full resize-none rounded-lg border border-border bg-bg-base px-3 py-2 text-sm text-text-primary placeholder:text-text-tertiary focus:outline-none focus:ring-1 focus:ring-accent"
+                />
+                <p className="mt-2 text-[11px] text-text-tertiary">
+                  Dica: no Android, copiar uma captura de tela pela galeria costuma exigir este caminho — a leitura direta da área de transferência não expõe a imagem.
+                </p>
+              </div>
+            </div>
+          )}
         </main>
       </div>
     </div>
