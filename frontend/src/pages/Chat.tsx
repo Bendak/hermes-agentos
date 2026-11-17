@@ -422,10 +422,11 @@ function buildItems(messages: ChatMsg[]): RenderItem[] {
       name: toolCallName(tc),
       args: toolCallArgs(tc),
     }))
+    const projected = splitProjectedReasoning(m.content || '')
     items.push({
       role: 'agent',
-      content: m.content || '',
-      reasoning: m.reasoning_content || '',
+      content: projected.body,
+      reasoning: m.reasoning_content || projected.reasoning,
       tools,
       attachments: m.attachments || [],
       error: m.error?.message,
@@ -433,6 +434,22 @@ function buildItems(messages: ChatMsg[]): RenderItem[] {
     })
   }
   return items.filter((i) => i.role === 'user' || i.content || i.reasoning || i.tools.length > 0)
+}
+
+/**
+ * The gateway projects reasoning into the message text for platforms without a
+ * structured reasoning event (display.platforms.<p>.show_reasoning, style
+ * "code"): "💭 **Raciocínio:**" + fenced block + the answer. History keeps that
+ * shape, so split it here and let the UI render it collapsed instead of as
+ * message body.
+ */
+const PROJECTED_REASONING = /^\s*(?:💭|🧠)\s*\*\*(?:Raciocínio|Raciocinio|Reasoning|Pensamento)\s*:?\*\*\s*\n+```[^\n]*\n([\s\S]*?)\n```\s*\n*/
+
+function splitProjectedReasoning(content: string): { reasoning: string; body: string } {
+  const text = content || ''
+  const match = PROJECTED_REASONING.exec(text)
+  if (!match) return { reasoning: '', body: text }
+  return { reasoning: match[1].trim(), body: text.slice(match[0].length) }
 }
 
 function fmtTs(ts?: string | number): string {
@@ -528,10 +545,11 @@ function ThinkingBlock({ text }: { text: string }) {
       <button
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        aria-label={expanded ? 'Hide reasoning' : 'Show reasoning'}
-        className="text-caption text-text-tertiary italic transition hover:text-text-secondary"
+        aria-label={expanded ? 'Ocultar raciocínio' : 'Mostrar raciocínio'}
+        className="inline-flex items-center gap-1 rounded text-caption text-text-tertiary transition hover:text-text-secondary"
       >
-        {expanded ? 'Hide thinking…' : 'Thinking…'}
+        <span aria-hidden className="text-[10px]">{expanded ? '▾' : '▸'}</span>
+        <span>Raciocínio</span>
       </button>
       {expanded && (
         <div className="mt-1 max-h-80 w-full min-w-0 overflow-y-auto rounded-lg border border-border bg-bg-base/40 p-2 text-caption italic text-text-tertiary whitespace-pre-wrap">
